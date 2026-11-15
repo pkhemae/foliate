@@ -1,7 +1,8 @@
 # Foliate
 
 Boilerplate for Folia plugins. The code is the source of truth; this file only holds what the code
-cannot tell you.
+cannot tell you. The developer guide is the GitHub wiki (a separate git repository,
+`foliate.wiki.git`): update the page a change affects.
 
 ## Development workflow
 
