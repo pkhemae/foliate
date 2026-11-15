@@ -22,6 +22,8 @@ working code instead of a list of rules.
 | Sidebar | A per-player scoreboard drawn with FastBoard, since Bukkit scoreboards do not work on Folia. |
 | Storage | A SQL database (SQLite out of the box, MySQL or MariaDB by configuration) with schema migrations. |
 | Player data | A worked example of loading, caching and saving per-player data without blocking a tick or losing a write. |
+| Metrics | bStats, off until you set your own bStats id, and switchable in `config.yml`. |
+| Update check | Asks GitHub once at startup for a newer release and logs it. Switchable in `config.yml`. |
 | Examples | `/example`: four commands showing how to reach another player, a block, world state and a file. |
 | Tests | Unit tests, plus a smoke test that boots a real Folia server in CI. |
 
@@ -113,6 +115,8 @@ dev.foliate
 ├── sidebar/             the FastBoard sidebar
 ├── profile/             the per-player data example
 ├── example/             /example, the commands that demonstrate the threading rules
+├── metrics/             bStats
+├── update/              the update check
 └── selftest/            what the smoke test runs
 ```
 
@@ -129,6 +133,8 @@ check. The rest, by kind:
 - **Project**: `rootProject.name` in `settings.gradle.kts`; `group` and `description` in
   `gradle.properties`; `pluginName`, the authors, the website and the permission nodes in
   `build.gradle.kts`; the copyright line in `LICENSE`.
+- **Yours to set**: the repository in `GitHubReleases.REPOSITORY`, which the update check reads
+  releases from, and `MetricsModule.PLUGIN_ID`, your id on bStats.
 - **Code**: the `dev.foliate` package and the `FoliatePlugin` class (rename them with your IDE,
   which also updates the tests); the command name and its description in `FoliateCommand` and
   `FoliatePlugin`; the nodes in `Permissions`; the placeholder identifier in `FoliateExpansion`.
@@ -150,6 +156,8 @@ A feature is its package, the tests of that package, and what refers to it:
 | Feature | Also remove |
 | --- | --- |
 | `example` | its two lines in `FoliatePlugin`; `COMMAND_EXAMPLE` in `Permissions` and its node in `build.gradle.kts`; the `example` keys in `lang/*.yml`; `"example time"` in `SelfTest` |
+| `metrics` | its line in `FoliatePlugin`; the `metrics` setting of `PluginConfig`; the `bstats` dependency |
+| `update` | its line in `FoliatePlugin`; the `updateCheck` setting of `PluginConfig`; `updates` in `expectedModules` |
 | `sidebar` | its line in `FoliatePlugin`; the `sidebar` section of `PluginConfig`; the `fastboard` dependency; `sidebar` in `expectedModules` (`build.gradle.kts`) |
 | `profile` | its line in `FoliatePlugin`; `profiles` in `expectedModules`. Keep or replace the `V1` migration script: the database tests use its table |
 | `core/storage` (with `profile`) | the `Database` lines in `FoliatePlugin` and in `SelfTest`; the `storage` section of `PluginConfig`; the `hikaricp` and `sqlite-jdbc` dependencies; `storage` in `expectedModules` |
@@ -195,6 +203,18 @@ null when zMenu is not installed: check it, as `FoliateCommand` does.
 **Test a module that uses timers.** Use `ManualSchedulers` from the test sources: nothing runs
 until the test calls `tick(n)`. MockBukkit cannot cancel scheduled tasks.
 
+## Outbound connections
+
+Hangar and Modrinth require a plugin to say what it connects to. This one makes two kinds of
+outbound connection, both of which an administrator can turn off in `config.yml`:
+
+- **Update check** (`update-check`): one request to the GitHub API at startup, to read the latest
+  release of the repository named in `GitHubReleases.REPOSITORY`. Nothing about the server is sent.
+- **Metrics** (`metrics`): anonymous statistics to bStats.org. Inactive until you register your
+  plugin on bStats and put its id in `MetricsModule.PLUGIN_ID`.
+
+Tell your users about both on your download page.
+
 ## What has not been verified
 
 The smoke test passes on a real Folia 26.2 server, with and without the optional plugins, and on
@@ -206,8 +226,10 @@ server console. Nothing so far has connected a player, so the following rests on
 - messages shown in a player's own language, and `<papi:...>` evaluated for a player;
 - a real player logging out in the middle of a chain (the smoke test removes a marker entity).
 
-Also not exercised: MySQL and MariaDB (only SQLite), and a real configuration migration (the
-mechanism is tested, but there is no migration step yet). A test with a connected client is tracked
+Also not exercised: MySQL and MariaDB (only SQLite), a real configuration migration (the
+mechanism is tested, but there is no migration step yet), bStats actually reporting (it has no id
+here), and the update check finding a newer release (the repository has none yet; the comparison
+is unit-tested). A test with a connected client is tracked
 in [#29](https://github.com/pkhemae/foliate/issues/29).
 
 ## Targeting another Minecraft version

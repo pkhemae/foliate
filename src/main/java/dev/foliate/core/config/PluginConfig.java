@@ -30,6 +30,18 @@ public final class PluginConfig {
     })
     private String defaultLocale = "en";
 
+    @Comment({
+        "Sends anonymous usage statistics (server version, player count, plugin version) to bStats.org.",
+        "This is an outbound connection. It can also be turned off for every plugin in plugins/bStats/config.yml."
+    })
+    private boolean metrics = true;
+
+    @Comment({
+        "Asks GitHub once at startup whether a newer release exists, and says so in the console.",
+        "This is an outbound connection. Nothing about the server is sent."
+    })
+    private boolean updateCheck = true;
+
     @Comment("Scoreboard shown on the right of each player's screen.")
     private Sidebar sidebar = new Sidebar();
 
@@ -49,6 +61,14 @@ public final class PluginConfig {
 
     public String defaultLocale() {
         return defaultLocale;
+    }
+
+    public boolean metrics() {
+        return metrics;
+    }
+
+    public boolean updateCheck() {
+        return updateCheck;
     }
 
     public Sidebar sidebar() {

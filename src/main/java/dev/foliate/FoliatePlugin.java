@@ -13,9 +13,12 @@ import dev.foliate.core.storage.Database;
 import dev.foliate.example.ExampleCommand;
 import dev.foliate.hook.placeholderapi.PlaceholderApiHook;
 import dev.foliate.hook.zmenu.ZMenuHook;
+import dev.foliate.metrics.MetricsModule;
 import dev.foliate.profile.ProfileModule;
 import dev.foliate.selftest.SelfTest;
 import dev.foliate.sidebar.SidebarModule;
+import dev.foliate.update.GitHubReleases;
+import dev.foliate.update.UpdateCheckModule;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.time.Clock;
 import java.util.function.Supplier;
@@ -62,6 +65,9 @@ public class FoliatePlugin extends JavaPlugin {
         modules.register(config);
         modules.register(messages);
         hook(modules, PlaceholderApiHook.PLUGIN_NAME, () -> new PlaceholderApiHook(getPluginMeta(), placeholders, messages));
+        modules.register(new MetricsModule(this, config));
+        modules.register(new UpdateCheckModule(
+                config, schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), new GitHubReleases()));
         Database database = new Database(getDataPath(), config, getSLF4JLogger());
         modules.register(database);
         modules.register(new ProfileModule(

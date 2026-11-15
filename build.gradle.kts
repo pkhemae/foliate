@@ -40,7 +40,7 @@ val selfTest: Boolean = providers.gradleProperty("selfTest").map(String::toBoole
 // The modules the self-test must find enabled. Without this, a hook that silently failed to load
 // (its plugin could not download its libraries, say) would still give a green run.
 val expectedModules: String =
-    (listOf("config", "messages", "storage", "profiles", "sidebar") +
+    (listOf("config", "messages", "storage", "profiles", "sidebar", "updates") +
         if (withHooks) listOf("placeholderapi", "zmenu") else emptyList()).joinToString(",")
 
 java {
@@ -69,6 +69,7 @@ dependencies {
     implementation(libs.configlib.yaml)
     implementation(libs.snakeyaml.engine)
     implementation(libs.fastboard)
+    implementation(libs.bstats)
     implementation(libs.hikaricp) {
         // The server provides SLF4J; bundling it would relocate it away from the server's logging.
         exclude(group = "org.slf4j")
