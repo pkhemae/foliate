@@ -5,7 +5,7 @@ Thank you for helping. This page is the short version; the [wiki](https://github
 ## Before you start
 
 - For anything beyond a small fix, open an issue first so the approach can be agreed on.
-- Read [Folia threading](https://github.com/pkhemae/foliate/wiki/Folia-threading). Most mistakes in a Folia plugin are threading mistakes, and neither Paper nor the unit tests can show them.
+- Read [Scheduling](https://github.com/pkhemae/foliate/wiki/Scheduling), and Folia's [overview](https://docs.papermc.io/folia/reference/overview/) if Folia is new to you. Threading mistakes are the usual ones, and neither Paper nor the unit tests show them.
 
 ## Workflow
 

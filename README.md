@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.svg" alt="Foliate logo" width="128" height="128">
+
 # Foliate
 
 **A starting point for Minecraft plugins on Folia, built the way Folia requires.**
@@ -13,14 +15,14 @@
 
 </div>
 
-[Folia](https://github.com/PaperMC/Folia) ticks regions of the world in parallel. There is no main
-thread any more, which breaks most of what plugin developers take for granted. Foliate gives you
-the parts every plugin needs, already written the way Folia requires, so you start from working
-code instead of a list of rules. The same jar runs on Paper.
+Foliate is a template for plugins that run on [Folia](https://github.com/PaperMC/Folia). It gives
+you the parts every plugin needs, already written for Folia's threading model, so you start from
+working code. New to Folia? Read its [overview](https://docs.papermc.io/folia/reference/overview/)
+first. The same jar runs on Paper.
 
 ## Features
 
-| | |
+| Area | What you get |
 | --- | --- |
 | **Scheduling** | One facade over Folia's region, entity, global and async schedulers |
 | **Modules** | Features with an enable, reload and disable lifecycle, isolated from each other |
@@ -64,12 +66,12 @@ The [wiki](https://github.com/pkhemae/foliate/wiki) has one page per topic.
 | Start here | Guides |
 | --- | --- |
 | [Getting started](https://github.com/pkhemae/foliate/wiki/Getting-started) | [Modules](https://github.com/pkhemae/foliate/wiki/Modules) · [Configuration](https://github.com/pkhemae/foliate/wiki/Configuration) · [Messages](https://github.com/pkhemae/foliate/wiki/Messages) · [Commands](https://github.com/pkhemae/foliate/wiki/Commands) |
-| [Folia threading](https://github.com/pkhemae/foliate/wiki/Folia-threading) | [Placeholders](https://github.com/pkhemae/foliate/wiki/Placeholders) · [Menus](https://github.com/pkhemae/foliate/wiki/Menus) · [Scoreboard sidebar](https://github.com/pkhemae/foliate/wiki/Scoreboard-sidebar) · [Storage and player data](https://github.com/pkhemae/foliate/wiki/Storage-and-player-data) |
+| [Scheduling](https://github.com/pkhemae/foliate/wiki/Scheduling) | [Placeholders](https://github.com/pkhemae/foliate/wiki/Placeholders) · [Menus](https://github.com/pkhemae/foliate/wiki/Menus) · [Scoreboard sidebar](https://github.com/pkhemae/foliate/wiki/Scoreboard-sidebar) · [Storage and player data](https://github.com/pkhemae/foliate/wiki/Storage-and-player-data) |
 | [Making it yours](https://github.com/pkhemae/foliate/wiki/Making-it-yours) | [Optional integrations](https://github.com/pkhemae/foliate/wiki/Optional-integrations) · [Testing](https://github.com/pkhemae/foliate/wiki/Testing) · [Releasing](https://github.com/pkhemae/foliate/wiki/Releasing) |
 
 ## Requirements
 
-| | |
+| Requirement | Version |
 | --- | --- |
 | Server | Folia or Paper 26.2 |
 | Java | 25, downloaded by Gradle if missing |
