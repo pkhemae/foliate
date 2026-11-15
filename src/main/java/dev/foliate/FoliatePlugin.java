@@ -10,7 +10,6 @@ import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
 import dev.foliate.core.scheduler.FoliaSchedulers;
 import dev.foliate.core.storage.Database;
-import dev.foliate.example.ExampleCommand;
 import dev.foliate.hook.placeholderapi.PlaceholderApiHook;
 import dev.foliate.hook.zmenu.ZMenuHook;
 import dev.foliate.metrics.MetricsModule;
@@ -88,11 +87,8 @@ public class FoliatePlugin extends JavaPlugin {
 
         FoliateCommand command = new FoliateCommand(
                 modules, messages, schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), Platform.describe(), menus);
-        ExampleCommand example = new ExampleCommand(schedulers, messages, getDataPath(), getSLF4JLogger());
-        getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
-            event.registrar().register(command.build(), "Shows information about Foliate and reloads it.");
-            event.registrar().register(example.build(), "Demonstrates the threading rules of Folia.");
-        });
+        getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> event.registrar()
+                .register(command.build(), "Shows information about Foliate and reloads it."));
 
         if (SelfTest.requested()) {
             new SelfTest(this, schedulers, modules, database).start();
