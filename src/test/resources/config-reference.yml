@@ -1,0 +1,53 @@
+# Foliate configuration.
+
+# The plugin rewrites this file when it adds new settings: your values are kept,
+# but comments you add and settings it does not know are removed.
+# Write true or false for on/off settings.
+
+# Internal version of this file, used to migrate it when the plugin updates.
+# Do not edit.
+config-version: 1
+# Logs extra details that help when reporting a problem.
+debug: false
+# Language of the console, and of players whose game language has no file in the lang folder.
+# Must be the name of a file in that folder, without the extension.
+default-locale: en
+# Sends anonymous usage statistics to bStats.org: a random server id, player count, online mode,
+# server, plugin and Java versions, operating system and number of processor cores.
+# This is an outbound connection. It can also be turned off for every plugin in plugins/bStats/config.yml.
+# A change here applies after a server restart.
+metrics: true
+# Asks GitHub once at startup whether a newer release exists, and says so in the console.
+# This is an outbound connection, made at startup: nothing about the server is sent beyond its address.
+# A change here applies after a server restart.
+update-check: true
+# Scoreboard shown on the right of each player's screen.
+sidebar:
+  enabled: true
+  # Ticks between two refreshes (20 ticks = 1 second).
+  refresh-ticks: 20
+  # Title and lines use the MiniMessage format.
+  # Available tags: <player>, <online>, and <papi:placeholder> when PlaceholderAPI is installed,
+  # for example <papi:foliate_joins>.
+  title: <aqua><bold>Foliate
+  lines:
+  - ''
+  - '<gray>Player: <white><player>'
+  - '<gray>Online: <white><online>'
+  - ''
+# Where player data is kept.
+# Changes in this section only apply after a server restart.
+storage:
+  # Set to false to run without a database. Features that need one are then turned off.
+  enabled: true
+  # SQLITE keeps everything in a file in this folder and needs no setup.
+  # MYSQL connects to a MySQL or MariaDB server, using the settings below.
+  type: SQLITE
+  mysql:
+    host: localhost
+    port: 3306
+    database: foliate
+    username: foliate
+    password: ''
+    # Maximum number of connections kept open.
+    pool-size: 4

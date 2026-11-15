@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleSkippedException;
@@ -47,12 +48,12 @@ class ProfileModuleTest {
     @BeforeEach
     void setUp() throws Exception {
         server = MockBukkit.mock();
-        ConfigService config = new ConfigService(directory, NOPLogger.NOP_LOGGER);
+        ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
         messages = new MessageService(
-                directory, getClass().getClassLoader()::getResourceAsStream, config, NOPLogger.NOP_LOGGER);
+                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
-        database = new Database(directory, config, NOPLogger.NOP_LOGGER);
+        database = new Database(directory, () -> config.get().storage(), NOPLogger.NOP_LOGGER);
         database.enable();
         profiles = new ProfileModule(
                 MockBukkit.createMockPlugin(), database, messages, placeholders, NOPLogger.NOP_LOGGER, clock);
@@ -203,9 +204,9 @@ class ProfileModuleTest {
     @Test
     void moduleIsSkippedWithoutADatabase() throws Exception {
         Path other = Files.createDirectory(directory.resolve("other"));
-        ConfigService otherConfig = new ConfigService(other, NOPLogger.NOP_LOGGER);
+        ConfigService<PluginConfig> otherConfig = PluginConfig.service(other, NOPLogger.NOP_LOGGER);
         otherConfig.enable();
-        Database stopped = new Database(other, otherConfig, NOPLogger.NOP_LOGGER);
+        Database stopped = new Database(other, () -> otherConfig.get().storage(), NOPLogger.NOP_LOGGER);
         ProfileModule module = new ProfileModule(
                 MockBukkit.createMockPlugin(), stopped, messages, placeholders, NOPLogger.NOP_LOGGER, clock);
 

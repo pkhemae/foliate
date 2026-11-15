@@ -1,6 +1,5 @@
 package dev.foliate.core.message;
 
-import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.yaml.Yaml;
 import dev.foliate.core.yaml.YamlException;
@@ -17,6 +16,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import net.kyori.adventure.audience.Audience;
@@ -63,7 +63,7 @@ public final class MessageService implements Module {
 
     private final Path directory;
     private final Function<String, @Nullable InputStream> resources;
-    private final ConfigService config;
+    private final Supplier<String> defaultLocale;
     private final Logger logger;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final List<TagResolver> sharedResolvers = new CopyOnWriteArrayList<>();
@@ -73,15 +73,16 @@ public final class MessageService implements Module {
     /**
      * @param dataDirectory the plugin data folder; messages are read from its {@code lang} folder
      * @param resources opens a file bundled in the jar, or returns null when it does not exist
+     * @param defaultLocale the current {@code default-locale} setting, read at each load
      */
     public MessageService(
             Path dataDirectory,
             Function<String, @Nullable InputStream> resources,
-            ConfigService config,
+            Supplier<String> defaultLocale,
             Logger logger) {
         this.directory = dataDirectory.resolve("lang");
         this.resources = resources;
-        this.config = config;
+        this.defaultLocale = defaultLocale;
         this.logger = logger;
     }
 
@@ -269,7 +270,7 @@ public final class MessageService implements Module {
                 }
             }
 
-            String configured = config.get().defaultLocale();
+            String configured = defaultLocale.get();
             Locale defaultLocale = LOCALE_NAME.matcher(configured).matches()
                     ? Translator.parseLocale(configured.replace('-', '_'))
                     : null;

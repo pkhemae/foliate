@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.menu.MenuException;
 import dev.foliate.core.message.MessageService;
@@ -46,10 +47,10 @@ class ZMenuHookTest {
     void setUp() throws Exception {
         server = MockBukkit.mock();
         Plugin plugin = MockBukkit.createMockPlugin();
-        ConfigService config = new ConfigService(directory, NOPLogger.NOP_LOGGER);
+        ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
         MessageService messages = new MessageService(
-                directory, getClass().getClassLoader()::getResourceAsStream, config, NOPLogger.NOP_LOGGER);
+                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         hook = new ZMenuHook(plugin, new FoliaSchedulers(plugin), messages, this::fakeZMenu);
     }

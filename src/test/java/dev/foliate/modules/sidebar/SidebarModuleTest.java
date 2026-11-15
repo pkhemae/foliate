@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigException;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
@@ -36,7 +37,7 @@ class SidebarModuleTest {
 
     private ServerMock server;
     private Plugin plugin;
-    private ConfigService config;
+    private ConfigService<PluginConfig> config;
     private MessageService messages;
     private SidebarModule sidebar;
     private final ManualSchedulers schedulers = new ManualSchedulers();
@@ -46,10 +47,10 @@ class SidebarModuleTest {
     void setUp() throws Exception {
         server = MockBukkit.mock();
         plugin = MockBukkit.createMockPlugin();
-        config = new ConfigService(directory, NOPLogger.NOP_LOGGER);
+        config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
         messages = new MessageService(
-                directory, getClass().getClassLoader()::getResourceAsStream, config, NOPLogger.NOP_LOGGER);
+                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         sidebar = newModule(() -> {});
         sidebar.enable();
@@ -211,7 +212,7 @@ class SidebarModuleTest {
     }
 
     private SidebarModule newModule(SidebarModule.SupportCheck supportCheck) {
-        return new SidebarModule(plugin, schedulers, config, messages, player -> {
+        return new SidebarModule(plugin, schedulers, () -> config.get().sidebar(), messages, player -> {
             FakeBoard board = new FakeBoard();
             boards.add(board);
             return board;

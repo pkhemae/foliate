@@ -11,6 +11,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import dev.foliate.FoliatePlugin;
+import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
@@ -61,9 +62,9 @@ class RootCommandTest {
         // MockBukkit cannot build Paper's native argument types.
         plugin = MockBukkit.load(FoliatePlugin.class);
 
-        ConfigService config = new ConfigService(directory, NOPLogger.NOP_LOGGER);
+        ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         MessageService messages = new MessageService(
-                directory, getClass().getClassLoader()::getResourceAsStream, config, NOPLogger.NOP_LOGGER);
+                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         ModuleManager modules = new ModuleManager(NOPLogger.NOP_LOGGER);
         modules.register(config);
         modules.register(messages);

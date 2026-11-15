@@ -2,8 +2,6 @@ package dev.foliate.core.storage;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import dev.foliate.core.config.ConfigService;
-import dev.foliate.core.config.PluginConfig;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
 import java.io.IOException;
@@ -17,6 +15,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -34,14 +33,17 @@ public final class Database implements Module {
     private static final long CONNECTION_TIMEOUT_MILLIS = 10_000;
 
     private final Path dataDirectory;
-    private final ConfigService config;
+    private final Supplier<StorageSettings> settings;
     private final Logger logger;
     private volatile @Nullable HikariDataSource dataSource;
     private volatile @Nullable ExecutorService executor;
 
-    public Database(Path dataDirectory, ConfigService config, Logger logger) {
+    /**
+     * @param settings the current storage settings; read when the database starts
+     */
+    public Database(Path dataDirectory, Supplier<StorageSettings> settings, Logger logger) {
         this.dataDirectory = dataDirectory;
-        this.config = config;
+        this.settings = settings;
         this.logger = logger;
     }
 
@@ -52,7 +54,7 @@ public final class Database implements Module {
 
     @Override
     public void enable() throws ModuleSkippedException, SQLException, IOException {
-        PluginConfig.Storage settings = config.get().storage();
+        StorageSettings settings = this.settings.get();
         if (!settings.enabled()) {
             throw new ModuleSkippedException("storage is turned off in config.yml");
         }
@@ -60,13 +62,13 @@ public final class Database implements Module {
         HikariConfig pool = new HikariConfig();
         pool.setPoolName("Foliate");
         int threads;
-        if (settings.type() == PluginConfig.Storage.Type.SQLITE) {
+        if (settings.type() == StorageSettings.Type.SQLITE) {
             Files.createDirectories(dataDirectory);
             pool.setJdbcUrl("jdbc:sqlite:" + dataDirectory.resolve("data.db").toAbsolutePath());
             // SQLite allows a single writer: one connection avoids "database is locked" errors.
             threads = 1;
         } else {
-            PluginConfig.Mysql mysql = settings.mysql();
+            StorageSettings.Mysql mysql = settings.mysql();
             pool.setJdbcUrl("jdbc:mysql://" + mysql.host() + ":" + mysql.port() + "/" + mysql.database());
             pool.setUsername(mysql.username());
             pool.setPassword(mysql.password());

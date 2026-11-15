@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.module.ModuleSkippedException;
 import dev.foliate.core.scheduler.ManualSchedulers;
@@ -24,13 +25,13 @@ class UpdateCheckModuleTest {
     @TempDir
     Path directory;
 
-    private ConfigService config;
+    private ConfigService<PluginConfig> config;
     private final ManualSchedulers schedulers = new ManualSchedulers();
     private final List<String> logged = new ArrayList<>();
 
     @BeforeEach
     void setUp() throws Exception {
-        config = new ConfigService(directory, NOPLogger.NOP_LOGGER);
+        config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
     }
 
@@ -94,7 +95,7 @@ class UpdateCheckModuleTest {
     }
 
     private UpdateCheckModule module(String current, ReleaseSource releases) {
-        return new UpdateCheckModule(config, schedulers, recordingLogger(), current, releases);
+        return new UpdateCheckModule(() -> config.get().updateCheck(), schedulers, recordingLogger(), current, releases);
     }
 
     private static ReleaseSource.Release release(String version) {

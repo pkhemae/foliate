@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.module.ModuleSkippedException;
 import java.nio.file.Files;
@@ -27,14 +28,14 @@ class DatabaseTest {
     @TempDir
     Path directory;
 
-    private ConfigService config;
+    private ConfigService<PluginConfig> config;
     private Database database;
 
     @BeforeEach
     void setUp() throws Exception {
-        config = new ConfigService(directory, NOPLogger.NOP_LOGGER);
+        config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
-        database = new Database(directory, config, NOPLogger.NOP_LOGGER);
+        database = new Database(directory, () -> config.get().storage(), NOPLogger.NOP_LOGGER);
     }
 
     @AfterEach
@@ -56,7 +57,7 @@ class DatabaseTest {
         database.enable();
         database.disable();
 
-        database = new Database(directory, config, NOPLogger.NOP_LOGGER);
+        database = new Database(directory, () -> config.get().storage(), NOPLogger.NOP_LOGGER);
         database.enable();
 
         assertEquals(1, countRows("foliate_schema_history"));
