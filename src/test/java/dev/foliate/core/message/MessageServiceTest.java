@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -52,14 +53,14 @@ class MessageServiceTest {
     @TempDir
     Path directory;
 
-    private ConfigService config;
+    private ConfigService<PluginConfig> config;
     private MessageService messages;
 
     @BeforeEach
     void setUp() throws Exception {
-        config = new ConfigService(directory, NOPLogger.NOP_LOGGER);
+        config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
-        messages = new MessageService(directory, MessageServiceTest::bundled, config, NOPLogger.NOP_LOGGER);
+        messages = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
     }
 
@@ -237,7 +238,7 @@ class MessageServiceTest {
     @Test
     void brokenExtraLanguageIsSkippedAtStartupButRefusedOnReload() throws Exception {
         Files.writeString(directory.resolve("lang/de.yml"), "greeting: [unclosed\n");
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, config, NOPLogger.NOP_LOGGER);
+        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
         fresh.enable();
 

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.foliate.FoliatePlugin;
+import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.module.ModuleSkippedException;
 import java.nio.file.Files;
@@ -22,13 +23,13 @@ class MetricsModuleTest {
     Path directory;
 
     private FoliatePlugin plugin;
-    private ConfigService config;
+    private ConfigService<PluginConfig> config;
 
     @BeforeEach
     void setUp() throws Exception {
         MockBukkit.mock();
         plugin = MockBukkit.load(FoliatePlugin.class);
-        config = new ConfigService(directory, NOPLogger.NOP_LOGGER);
+        config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
     }
 
@@ -40,7 +41,7 @@ class MetricsModuleTest {
     @Test
     void pluginWithoutABStatsIdDoesNotReport() {
         ModuleSkippedException skipped =
-                assertThrows(ModuleSkippedException.class, new MetricsModule(plugin, config, 0)::enable);
+                assertThrows(ModuleSkippedException.class, new MetricsModule(plugin, () -> config.get().metrics(), 0)::enable);
 
         assertTrue(skipped.getMessage().contains("no bStats id"));
     }
@@ -51,7 +52,7 @@ class MetricsModuleTest {
         config.reload();
 
         ModuleSkippedException skipped =
-                assertThrows(ModuleSkippedException.class, new MetricsModule(plugin, config, 12345)::enable);
+                assertThrows(ModuleSkippedException.class, new MetricsModule(plugin, () -> config.get().metrics(), 12345)::enable);
 
         assertTrue(skipped.getMessage().contains("turned off"));
     }

@@ -1,8 +1,8 @@
 package dev.foliate.modules.metrics;
 
-import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
+import java.util.function.BooleanSupplier;
 import org.bstats.bukkit.Metrics;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jspecify.annotations.Nullable;
@@ -18,16 +18,17 @@ import org.jspecify.annotations.Nullable;
 public final class MetricsModule implements Module {
 
     private final JavaPlugin plugin;
-    private final ConfigService config;
+    private final BooleanSupplier enabled;
     private final int pluginId;
     private @Nullable Metrics metrics;
 
     /**
+     * @param enabled whether the {@code metrics} setting is on, read when the module starts
      * @param pluginId the id bStats assigned to this plugin, or 0 while it has none
      */
-    public MetricsModule(JavaPlugin plugin, ConfigService config, int pluginId) {
+    public MetricsModule(JavaPlugin plugin, BooleanSupplier enabled, int pluginId) {
         this.plugin = plugin;
-        this.config = config;
+        this.enabled = enabled;
         this.pluginId = pluginId;
     }
 
@@ -41,7 +42,7 @@ public final class MetricsModule implements Module {
         if (pluginId == 0) {
             throw new ModuleSkippedException("the plugin has no bStats id yet");
         }
-        if (!config.get().metrics()) {
+        if (!enabled.getAsBoolean()) {
             throw new ModuleSkippedException("metrics are turned off in config.yml");
         }
         metrics = new Metrics(plugin, pluginId);

@@ -16,15 +16,20 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
- * Loads {@code config.yml} and hands out the current {@link PluginConfig}.
+ * Loads {@code config.yml} into a settings class and hands out the current instance. It knows
+ * nothing about what the settings are: the class, its defaults and its migrations are given by the
+ * caller.
  *
  * <p>Safe to read from any thread. A reload builds and validates a new configuration first and
  * only then publishes it, so readers see either the old one or the new one, never a mix, and an
@@ -32,35 +37,43 @@ import org.slf4j.Logger;
  *
  * <p>Read {@link #get()} each time a value is needed rather than keeping the result in a field:
  * that is what makes a reload take effect.
+ *
+ * @param <T> the settings class
  */
-public final class ConfigService implements Module {
+public final class ConfigService<T extends ConfigRoot> implements Module {
 
     private static final String FILE_NAME = "config.yml";
 
-    private static final YamlConfigurationProperties PROPERTIES = YamlConfigurationProperties.newBuilder()
-            .setNameFormatter(NameFormatters.LOWER_KEBAB_CASE)
-            .header("""
-                    Foliate configuration.
-
-                    The plugin rewrites this file when it adds new settings: your values are kept,
-                    but comments you add and settings it does not know are removed.
-                    Write true or false for on/off settings.""")
-            .build();
-
     private final Path file;
     private final Logger logger;
+    private final Supplier<T> defaults;
     private final ConfigMigrator migrator;
-    private final YamlConfigurationStore<PluginConfig> store = new YamlConfigurationStore<>(PluginConfig.class, PROPERTIES);
-    private volatile @Nullable PluginConfig current;
+    private final YamlConfigurationStore<T> store;
+    private volatile @Nullable T current;
 
-    public ConfigService(Path dataDirectory, Logger logger) {
-        this(dataDirectory, logger, new ConfigMigrator());
-    }
-
-    ConfigService(Path dataDirectory, Logger logger, ConfigMigrator migrator) {
+    /**
+     * @param type the settings class, annotated for ConfigLib
+     * @param defaults the settings of a fresh install
+     * @param migrations the steps that upgrade a file written by an older version, see
+     *     {@link ConfigMigrator}
+     * @param header the comment at the top of the file
+     */
+    public ConfigService(
+            Path dataDirectory,
+            Logger logger,
+            Class<T> type,
+            Supplier<T> defaults,
+            List<Consumer<Map<String, Object>>> migrations,
+            String header) {
         this.file = dataDirectory.resolve(FILE_NAME);
         this.logger = logger;
-        this.migrator = migrator;
+        this.defaults = defaults;
+        this.migrator = new ConfigMigrator(migrations);
+        YamlConfigurationProperties properties = YamlConfigurationProperties.newBuilder()
+                .setNameFormatter(NameFormatters.LOWER_KEBAB_CASE)
+                .header(header)
+                .build();
+        this.store = new YamlConfigurationStore<>(type, properties);
     }
 
     @Override
@@ -84,8 +97,8 @@ public final class ConfigService implements Module {
     }
 
     /** The configuration as of the last successful load. */
-    public PluginConfig get() {
-        PluginConfig config = current;
+    public T get() {
+        T config = current;
         if (config == null) {
             throw new IllegalStateException("The configuration has not been loaded yet");
         }
@@ -96,7 +109,7 @@ public final class ConfigService implements Module {
      * Reads, migrates, maps and validates the file, in that order, and only then touches the disk:
      * whatever goes wrong before, the administrator's file is as they left it.
      */
-    private PluginConfig load() throws ConfigException {
+    private T load() throws ConfigException {
         try {
             Files.createDirectories(file.getParent());
             String onDisk = Files.exists(file) ? Files.readString(file) : null;
@@ -111,9 +124,17 @@ public final class ConfigService implements Module {
             }
 
             // An empty file is treated like a missing one: both get the defaults.
-            PluginConfig config = content.isEmpty()
-                    ? PluginConfig.defaults()
+            T config = content.isEmpty()
+                    ? defaults.get()
                     : store.read(new ByteArrayInputStream(Yaml.dump(content).getBytes(StandardCharsets.UTF_8)));
+            if (config.configVersion() != migrator.targetVersion()) {
+                // A programming error, not the administrator's: a step was added without the
+                // settings class starting at the new version. A fresh install would then be written
+                // at the old version and migrated, needlessly, the next time it is loaded.
+                throw new IllegalStateException(config.getClass().getSimpleName() + " starts at config-version "
+                        + config.configVersion() + " but the migration steps lead to version "
+                        + migrator.targetVersion() + ": " + FILE_NAME + " would be written at the wrong version");
+            }
             config.validate();
 
             String rendered = render(config);
@@ -133,7 +154,7 @@ public final class ConfigService implements Module {
         }
     }
 
-    private String render(PluginConfig config) {
+    private String render(T config) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         store.write(config, out);
         return out.toString(StandardCharsets.UTF_8);

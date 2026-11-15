@@ -1,11 +1,11 @@
 package dev.foliate.modules.update;
 
-import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
 import dev.foliate.core.scheduler.Schedulers;
 import java.io.IOException;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 
 /**
@@ -18,15 +18,15 @@ import org.slf4j.Logger;
  */
 public final class UpdateCheckModule implements Module {
 
-    private final ConfigService config;
+    private final BooleanSupplier enabled;
     private final Schedulers schedulers;
     private final Logger logger;
     private final String currentVersion;
     private final ReleaseSource releases;
 
     public UpdateCheckModule(
-            ConfigService config, Schedulers schedulers, Logger logger, String currentVersion, ReleaseSource releases) {
-        this.config = config;
+            BooleanSupplier enabled, Schedulers schedulers, Logger logger, String currentVersion, ReleaseSource releases) {
+        this.enabled = enabled;
         this.schedulers = schedulers;
         this.logger = logger;
         this.currentVersion = currentVersion;
@@ -40,7 +40,7 @@ public final class UpdateCheckModule implements Module {
 
     @Override
     public void enable() throws ModuleSkippedException {
-        if (!config.get().updateCheck()) {
+        if (!enabled.getAsBoolean()) {
             throw new ModuleSkippedException("the update check is turned off in config.yml");
         }
         // A network call: never on the thread that starts the server.

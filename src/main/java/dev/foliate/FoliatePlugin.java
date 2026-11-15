@@ -65,22 +65,24 @@ public class FoliatePlugin extends JavaPlugin {
         this.modules = modules;
 
         // Register modules here, dependencies first.
-        ConfigService config = new ConfigService(getDataPath(), getSLF4JLogger());
-        MessageService messages = new MessageService(getDataPath(), this::getResource, config, getSLF4JLogger());
+        ConfigService<PluginConfig> config = PluginConfig.service(getDataPath(), getSLF4JLogger());
+        MessageService messages = new MessageService(
+                getDataPath(), this::getResource, () -> config.get().defaultLocale(), getSLF4JLogger());
         PlaceholderRegistry placeholders = new PlaceholderRegistry();
         placeholders.register("version", player -> getPluginMeta().getVersion());
 
         modules.register(config);
         modules.register(messages);
         hook(modules, PlaceholderApiHook.PLUGIN_NAME, () -> new PlaceholderApiHook(getPluginMeta(), placeholders, messages));
-        modules.register(new MetricsModule(this, config, BSTATS_PLUGIN_ID));
+        modules.register(new MetricsModule(this, () -> config.get().metrics(), BSTATS_PLUGIN_ID));
         modules.register(new UpdateCheckModule(
-                config, schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), new GitHubReleases()));
-        Database database = new Database(getDataPath(), config, getSLF4JLogger());
+                () -> config.get().updateCheck(), schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), new GitHubReleases()));
+        Database database = new Database(
+                getDataPath(), () -> config.get().storage(), List.of(ProfileModule.MIGRATION), getSLF4JLogger());
         modules.register(database);
         modules.register(new ProfileModule(
                 this, database, messages, placeholders, getSLF4JLogger(), Clock.systemUTC()));
-        modules.register(new SidebarModule(this, schedulers, config, messages));
+        modules.register(new SidebarModule(this, schedulers, () -> config.get().sidebar(), messages));
         Menus menus = hook(modules, ZMenuHook.PLUGIN_NAME, () -> new ZMenuHook(this, schedulers, messages));
 
         if (!modules.enableAll()) {

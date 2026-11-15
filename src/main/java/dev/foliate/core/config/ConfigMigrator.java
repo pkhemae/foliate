@@ -9,29 +9,26 @@ import java.util.function.Consumer;
 
 /**
  * Brings a configuration written by an older version of the plugin up to date before it is mapped
- * to {@link PluginConfig}.
+ * to the settings class.
  *
  * <p>Only needed when a key is renamed, moved or changes meaning: a new key with a default value
- * needs no migration. To add one, append a step to {@link #STEPS}; the step at index {@code i}
- * upgrades a file from version {@code i + 1}. Steps work on the raw content, as nested maps.
+ * needs no migration. The steps are given to {@link ConfigService}; the step at index {@code i}
+ * upgrades a file from version {@code i + 1}. Steps work on the raw content, as nested maps, and
+ * can use {@link #rename}.
  */
-final class ConfigMigrator {
+public final class ConfigMigrator {
 
     static final String VERSION_KEY = "config-version";
 
-    /** Example: {@code yaml -> rename(yaml, "old-name", "section.new-name")}. */
-    private static final List<Consumer<Map<String, Object>>> STEPS = List.of();
-
-    static final int CURRENT_VERSION = STEPS.size() + 1;
-
     private final List<Consumer<Map<String, Object>>> steps;
 
-    ConfigMigrator() {
-        this(STEPS);
+    ConfigMigrator(List<Consumer<Map<String, Object>>> steps) {
+        this.steps = List.copyOf(steps);
     }
 
-    ConfigMigrator(List<Consumer<Map<String, Object>>> steps) {
-        this.steps = steps;
+    /** The version of the current format: the number of steps plus one. */
+    int targetVersion() {
+        return steps.size() + 1;
     }
 
     /**
@@ -65,8 +62,11 @@ final class ConfigMigrator {
         return Optional.of(migrated);
     }
 
-    /** Moves a value to a new dotted path, keeping what the administrator had set. */
-    static void rename(Map<String, Object> yaml, String from, String to) {
+    /**
+     * Moves a value to a new dotted path, keeping what the administrator had set. Meant for a
+     * migration step: {@code yaml -> rename(yaml, "old-name", "section.new-name")}.
+     */
+    public static void rename(Map<String, Object> yaml, String from, String to) {
         Object value = remove(yaml, from);
         if (value != null) {
             put(yaml, to, value);

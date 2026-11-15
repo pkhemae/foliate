@@ -1,7 +1,5 @@
 package dev.foliate.modules.sidebar;
 
-import dev.foliate.core.config.ConfigService;
-import dev.foliate.core.config.PluginConfig;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.scheduler.EntityRetiredException;
@@ -12,6 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
@@ -35,26 +34,26 @@ public final class SidebarModule implements Module, Listener {
 
     private final Plugin plugin;
     private final Schedulers schedulers;
-    private final ConfigService config;
+    private final Supplier<SidebarSettings> settings;
     private final MessageService messages;
     private final Function<Player, SidebarBoard> boardFactory;
     private final SupportCheck supportCheck;
     private final Map<UUID, Entry> entries = new ConcurrentHashMap<>();
 
-    public SidebarModule(Plugin plugin, Schedulers schedulers, ConfigService config, MessageService messages) {
-        this(plugin, schedulers, config, messages, FastBoardSidebar::new, FastBoardSidebar::ensureSupported);
+    public SidebarModule(Plugin plugin, Schedulers schedulers, Supplier<SidebarSettings> settings, MessageService messages) {
+        this(plugin, schedulers, settings, messages, FastBoardSidebar::new, FastBoardSidebar::ensureSupported);
     }
 
     SidebarModule(
             Plugin plugin,
             Schedulers schedulers,
-            ConfigService config,
+            Supplier<SidebarSettings> settings,
             MessageService messages,
             Function<Player, SidebarBoard> boardFactory,
             SupportCheck supportCheck) {
         this.plugin = plugin;
         this.schedulers = schedulers;
-        this.config = config;
+        this.settings = settings;
         this.messages = messages;
         this.boardFactory = boardFactory;
         this.supportCheck = supportCheck;
@@ -112,7 +111,7 @@ public final class SidebarModule implements Module, Listener {
     }
 
     private void show(Player player) {
-        PluginConfig.Sidebar settings = config.get().sidebar();
+        SidebarSettings settings = this.settings.get();
         if (!settings.enabled() || !player.isOnline()) {
             return;
         }
@@ -134,7 +133,7 @@ public final class SidebarModule implements Module, Listener {
 
     private void draw(Player player, SidebarBoard board) {
         // Read on every refresh so a reload shows up without rebuilding the board.
-        PluginConfig.Sidebar settings = config.get().sidebar();
+        SidebarSettings settings = this.settings.get();
         TagResolver[] values = {
             Placeholder.unparsed("player", player.getName()),
             Placeholder.unparsed("online", String.valueOf(plugin.getServer().getOnlinePlayers().size())),
