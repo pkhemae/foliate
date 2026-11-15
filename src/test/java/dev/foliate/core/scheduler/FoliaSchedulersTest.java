@@ -24,18 +24,19 @@ import org.mockbukkit.mockbukkit.entity.PlayerMock;
 
 /**
  * Covers the facade's own logic. MockBukkit runs every scheduler on one simulated thread, so these
- * tests say nothing about region safety: that is what the Folia smoke test is for. Cancellation is
- * not covered here either, MockBukkit does not implement {@code ScheduledTask#cancel}.
+ * tests say nothing about region safety: that is what the Folia smoke test is for. Cancellation and
+ * entity timers are not covered here either: MockBukkit implements neither
+ * {@code ScheduledTask#cancel} nor {@code ScheduledTask#isCancelled}.
  */
-class SchedulersTest {
+class FoliaSchedulersTest {
 
     private ServerMock server;
-    private Schedulers schedulers;
+    private FoliaSchedulers schedulers;
 
     @BeforeEach
     void setUp() {
         server = MockBukkit.mock();
-        schedulers = new Schedulers(MockBukkit.createMockPlugin());
+        schedulers = new FoliaSchedulers(MockBukkit.createMockPlugin());
     }
 
     @AfterEach

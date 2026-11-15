@@ -186,6 +186,16 @@ public final class MessageService implements Module {
                 .toList();
     }
 
+    /**
+     * Renders MiniMessage text that does not come from a language file, such as a line written in
+     * {@code config.yml}, with the same shared tags as regular messages.
+     */
+    public Component parse(Pointered viewer, String miniMessageText, TagResolver... arguments) {
+        Catalog current = catalog;
+        Locale locale = viewer.getOrDefault(Identity.LOCALE, current.defaultLocale());
+        return deserialize(current, locale, viewer, miniMessageText, arguments);
+    }
+
     private @Nullable List<String> find(Catalog current, Locale locale, String key) {
         List<String> lines = current.find(locale, key);
         if (lines == null && reportedMissingKeys.add(key)) {

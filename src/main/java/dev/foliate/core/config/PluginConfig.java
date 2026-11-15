@@ -2,6 +2,7 @@ package dev.foliate.core.config;
 
 import de.exlll.configlib.Comment;
 import de.exlll.configlib.Configuration;
+import java.util.List;
 
 /**
  * The content of {@code config.yml}. Adding a setting means adding a field here: the file is
@@ -29,6 +30,9 @@ public final class PluginConfig {
     })
     private String defaultLocale = "en";
 
+    @Comment("Scoreboard shown on the right of each player's screen.")
+    private Sidebar sidebar = new Sidebar();
+
     private PluginConfig() {}
 
     /** The configuration a fresh install starts with. */
@@ -44,6 +48,10 @@ public final class PluginConfig {
         return defaultLocale;
     }
 
+    public Sidebar sidebar() {
+        return sidebar;
+    }
+
     /**
      * Checks what the types alone cannot express. Runs before a loaded configuration is published
      * or written back, and its message is shown to the administrator: name the setting as it
@@ -54,6 +62,55 @@ public final class PluginConfig {
     void validate() throws ConfigException {
         if (defaultLocale.isBlank()) {
             throw new ConfigException("default-locale must not be empty");
+        }
+        sidebar.validate();
+    }
+
+    /** The {@code sidebar} section. */
+    @Configuration
+    public static final class Sidebar {
+
+        /** The client cannot display more lines than this. */
+        private static final int MAX_LINES = 15;
+
+        private boolean enabled = true;
+
+        @Comment("Ticks between two refreshes (20 ticks = 1 second).")
+        private int refreshTicks = 20;
+
+        @Comment({
+            "Title and lines use the MiniMessage format.",
+            "Available tags: <player>, <online>, and <papi:placeholder> when PlaceholderAPI is installed."
+        })
+        private String title = "<aqua><bold>Foliate";
+
+        private List<String> lines = List.of("", "<gray>Player: <white><player>", "<gray>Online: <white><online>", "");
+
+        private Sidebar() {}
+
+        public boolean enabled() {
+            return enabled;
+        }
+
+        public int refreshTicks() {
+            return refreshTicks;
+        }
+
+        public String title() {
+            return title;
+        }
+
+        public List<String> lines() {
+            return List.copyOf(lines);
+        }
+
+        private void validate() throws ConfigException {
+            if (refreshTicks < 1) {
+                throw new ConfigException("sidebar.refresh-ticks must be at least 1");
+            }
+            if (lines.size() > MAX_LINES) {
+                throw new ConfigException("sidebar.lines cannot have more than " + MAX_LINES + " lines");
+            }
         }
     }
 }
