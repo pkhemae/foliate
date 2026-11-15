@@ -36,4 +36,4 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
   `YamlConfiguration` (YAML 1.1 would change the type of values such as `no`).
 - Code that schedules depends on the `Schedulers` interface. Anything using timers or cancellation
   is tested with `ManualSchedulers`: MockBukkit cannot cancel tasks.
-- Every package has a `package-info.java` annotated with `@NullMarked`.
+- Every package that holds classes has a `package-info.java` annotated with `@NullMarked`.
