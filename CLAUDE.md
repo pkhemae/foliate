@@ -1,23 +1,18 @@
 # Foliate
 
-Boilerplate for Folia plugins: Minecraft 26.2, Java 25, Gradle. The code is the source of truth;
-this file only holds what the code cannot tell you.
-
-## Commands
-
-- `./gradlew build` compiles, runs the tests and builds the plugin jar into `build/libs/`.
-- `./gradlew runFolia` starts a local Folia server with the plugin in `run/` (accept the Minecraft
-  EULA in `run/eula.txt` first). Verify behaviour there: Paper and MockBukkit run everything on one
-  thread and cannot detect region violations.
+Boilerplate for Folia plugins. The code is the source of truth; this file only holds what the code
+cannot tell you.
 
 ## Development workflow
 
 1. Work starts from a GitHub issue.
 2. Branch off `main`: `feat/<issue>-<slug>`, `fix/...`, `chore/...`, `docs/...`. Never commit to `main`.
 3. Small Conventional Commits, in English.
-4. Push and open a PR containing `Closes #<issue>`. CI must be green.
-5. Review the PR with fresh eyes, post the findings on the PR, fix them.
-6. Squash-merge and delete the branch.
+4. Verify behaviour with `./gradlew runFolia`, not only `./gradlew build`: Paper and MockBukkit run
+   everything on one thread and cannot detect region violations.
+5. Push and open a PR containing `Closes #<issue>`. CI must be green.
+6. Review the PR with fresh eyes, post the findings on the PR, fix them.
+7. Squash-merge and delete the branch.
 
 ## Architecture conventions
 
@@ -32,5 +27,6 @@ this file only holds what the code cannot tell you.
   are only loaded when the plugin is installed.
 - Prefer the native Paper API (Adventure/MiniMessage, Brigadier, Data Components) over a library.
   Bundled libraries are shaded and relocated.
-- Versions live in `gradle/libs.versions.toml`. The Minecraft target is changed there only.
+- Dependency versions live in `gradle/libs.versions.toml`. The Minecraft target is changed there
+  only.
 - Every package has a `package-info.java` annotated with `@NullMarked`.

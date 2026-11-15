@@ -40,7 +40,6 @@ bukkitPluginYaml {
 tasks {
     withType<JavaCompile>().configureEach {
         options.encoding = "UTF-8"
-        options.release = 25
         options.compilerArgs.addAll(listOf("-Xlint:all", "-Xlint:-processing", "-Werror"))
     }
 
@@ -55,6 +54,10 @@ tasks {
 
     shadowJar {
         archiveClassifier = ""
+        // Every bundled library is moved under our own package, so it cannot clash with the
+        // copy another plugin ships.
+        enableAutoRelocation = true
+        relocationPrefix = "dev.foliate.libs"
     }
 
     assemble {
