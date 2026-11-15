@@ -19,6 +19,7 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
@@ -47,6 +48,8 @@ class FoliateCommandTest {
     private ServerMock server;
     private FoliatePlugin plugin;
     private CommandDispatcher<CommandSourceStack> dispatcher;
+    private CommandDispatcher<CommandSourceStack> withoutMenus;
+    private final List<String> opened = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -80,9 +83,14 @@ class FoliateCommandTest {
         assertTrue(modules.enableAll());
 
         FoliateCommand command =
-                new FoliateCommand(modules, messages, new Schedulers(plugin), NOPLogger.NOP_LOGGER, "1.2.3", "Test 26.2");
+                new FoliateCommand(modules, messages, new Schedulers(plugin), NOPLogger.NOP_LOGGER, "1.2.3", "Test 26.2",
+                (player, menu) -> opened.add(player.getName() + " " + menu));
         dispatcher = new CommandDispatcher<>();
         dispatcher.getRoot().addChild(command.build());
+        withoutMenus = new CommandDispatcher<>();
+        withoutMenus.getRoot().addChild(new FoliateCommand(
+                        modules, messages, new Schedulers(plugin), NOPLogger.NOP_LOGGER, "1.2.3", "Test 26.2", null)
+                .build());
     }
 
     @AfterEach
@@ -162,10 +170,52 @@ class FoliateCommandTest {
     }
 
     @Test
-    void playerWithoutPermissionCannotSeeTheCommand() {
+    void menuOpensForThePlayerRunningTheCommand() throws Exception {
+        // No operator status needed: the menu permission is granted to everyone by default.
+        PlayerMock player = server.addPlayer("Alex");
+
+        dispatcher.execute("foliate menu", new Source(player));
+
+        assertEquals(List.of("Alex example"), opened);
+    }
+
+    @Test
+    void menuOpensForTheExecutorWhenItDiffersFromTheSender() throws Exception {
+        PlayerMock target = server.addPlayer("Target");
+
+        // What "/execute as Target run foliate menu" typed in the console looks like.
+        dispatcher.execute("foliate menu", new Source(server.getConsoleSender(), target));
+
+        assertEquals(List.of("Target example"), opened);
+    }
+
+    @Test
+    void consoleCannotOpenAMenuForItself() {
+        assertThrows(
+                CommandSyntaxException.class,
+                () -> dispatcher.execute("foliate menu", new Source(server.getConsoleSender())));
+    }
+
+    @Test
+    void menuSubcommandDoesNotExistWithoutAMenuPlugin() {
+        PlayerMock player = operator();
+
+        assertThrows(CommandSyntaxException.class, () -> withoutMenus.execute("foliate menu", new Source(player)));
+    }
+
+    @Test
+    void playerWithOnlyTheMenuPermissionCannotUseAdministrationSubcommands() {
         PlayerMock player = server.addPlayer();
 
         assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("foliate info", new Source(player)));
+        assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("foliate reload", new Source(player)));
+    }
+
+    @Test
+    void playerWithoutAnyPermissionCannotSeeTheCommand() {
+        PlayerMock player = server.addPlayer();
+
+        assertThrows(CommandSyntaxException.class, () -> withoutMenus.execute("foliate info", new Source(player)));
     }
 
     @Test
@@ -217,7 +267,11 @@ class FoliateCommandTest {
         return PlainTextComponentSerializer.plainText().serialize(component);
     }
 
-    private record Source(CommandSender sender) implements CommandSourceStack {
+    private record Source(CommandSender sender, Entity executor) implements CommandSourceStack {
+
+        Source(CommandSender sender) {
+            this(sender, sender instanceof Entity entity ? entity : null);
+        }
 
         @Override
         public Location getLocation() {
@@ -231,7 +285,7 @@ class FoliateCommandTest {
 
         @Override
         public Entity getExecutor() {
-            return sender instanceof Entity entity ? entity : null;
+            return executor;
         }
 
         @Override

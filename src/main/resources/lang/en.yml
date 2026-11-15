@@ -15,3 +15,7 @@ command:
     failure: "<prefix><red>Could not reload <white><module></white>: <error>"
     unexpected: "<prefix><red>Could not reload <white><module></white> because of an unexpected error. See the console."
     error: "<prefix><red>The reload failed unexpectedly. See the console."
+
+menu:
+  unknown: "<prefix><red>The menu <white><menu></white> does not exist."
+  unavailable: "<prefix><red>Menus are not available right now."

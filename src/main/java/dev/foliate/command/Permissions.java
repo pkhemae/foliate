@@ -8,6 +8,7 @@ package dev.foliate.command;
 public final class Permissions {
 
     public static final String COMMAND_INFO = "foliate.command.info";
+    public static final String COMMAND_MENU = "foliate.command.menu";
     public static final String COMMAND_RELOAD = "foliate.command.reload";
 
     private Permissions() {}

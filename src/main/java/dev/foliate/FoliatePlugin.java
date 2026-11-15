@@ -3,12 +3,14 @@ package dev.foliate;
 import dev.foliate.command.FoliateCommand;
 import dev.foliate.core.Platform;
 import dev.foliate.core.config.ConfigService;
+import dev.foliate.core.menu.Menus;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
 import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.hook.placeholderapi.PlaceholderApiHook;
+import dev.foliate.hook.zmenu.ZMenuHook;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.util.function.Supplier;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -41,6 +43,7 @@ public class FoliatePlugin extends JavaPlugin {
         modules.register(config);
         modules.register(messages);
         hook(modules, PlaceholderApiHook.PLUGIN_NAME, () -> new PlaceholderApiHook(getPluginMeta(), placeholders, messages));
+        Menus menus = hook(modules, ZMenuHook.PLUGIN_NAME, () -> new ZMenuHook(this, schedulers, messages));
 
         if (!modules.enableAll()) {
             getServer().getPluginManager().disablePlugin(this);
@@ -48,7 +51,7 @@ public class FoliatePlugin extends JavaPlugin {
         }
 
         FoliateCommand command = new FoliateCommand(
-                modules, messages, schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), Platform.describe());
+                modules, messages, schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), Platform.describe(), menus);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> event.registrar()
                 .register(command.build(), "Shows information about Foliate and reloads it."));
     }

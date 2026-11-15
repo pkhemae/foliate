@@ -15,3 +15,7 @@ command:
     failure: "<prefix><red>Impossible de recharger <white><module></white> : <error>"
     unexpected: "<prefix><red>Impossible de recharger <white><module></white> à cause d'une erreur inattendue. Consultez la console."
     error: "<prefix><red>Le rechargement a échoué de manière inattendue. Consultez la console."
+
+menu:
+  unknown: "<prefix><red>Le menu <white><menu></white> n'existe pas."
+  unavailable: "<prefix><red>Les menus ne sont pas disponibles pour le moment."

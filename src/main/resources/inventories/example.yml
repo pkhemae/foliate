@@ -1,0 +1,27 @@
+# Example menu rendered by zMenu. Format: https://docs.groupez.dev/zmenu/
+# Opened with /foliate menu.
+name: "&8Foliate"
+size: 27
+
+items:
+  about:
+    slot: 13
+    item:
+      material: OAK_SAPLING
+      name: "&aFoliate"
+      lore:
+        - "&7A boilerplate for Folia plugins."
+        - ""
+        - "&eClick to say hello"
+    actions:
+      - type: message
+        messages:
+          - "&aHello, %player%!"
+
+  close:
+    slot: 22
+    item:
+      material: BARRIER
+      name: "&cClose"
+    actions:
+      - type: close
