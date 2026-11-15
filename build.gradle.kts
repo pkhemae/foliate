@@ -19,6 +19,9 @@ repositories {
 dependencies {
     compileOnly(libs.folia.api)
 
+    // Bundled in the jar and relocated by shadowJar.
+    implementation(libs.configlib.yaml)
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.mockbukkit)
