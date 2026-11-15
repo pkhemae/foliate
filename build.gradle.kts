@@ -11,6 +11,12 @@ plugins {
 
 val minecraftVersion: String = libs.versions.minecraft.get()
 
+// The plugin's name and base package, used below for plugin.yml, the relocation prefix and the
+// smoke-test log check. When renaming the plugin, change them here (and `group` in
+// gradle.properties, which the base package follows).
+val pluginName = "Foliate"
+val basePackage: String = project.group.toString()
+
 // The test servers get the plugins we integrate with, so hooks are exercised by default.
 // Pass -Phooks=false to start without them and check the plugin runs on its own.
 val withHooks: Boolean = providers.gradleProperty("hooks").map(String::toBoolean).getOrElse(true)
@@ -81,8 +87,8 @@ dependencies {
 
 // Generates plugin.yml at build time, so the plugin metadata lives in one place.
 bukkitPluginYaml {
-    name = "Foliate"
-    main = "dev.foliate.FoliatePlugin"
+    name = pluginName
+    main = "$basePackage.FoliatePlugin"
     apiVersion = minecraftVersion
     foliaSupported = true
     description = project.description
@@ -127,7 +133,7 @@ tasks {
         // Every bundled library is moved under our own package, so it cannot clash with the
         // copy another plugin ships.
         enableAutoRelocation = true
-        relocationPrefix = "dev.foliate.libs"
+        relocationPrefix = "$basePackage.libs"
     }
 
     assemble {
@@ -162,9 +168,9 @@ tasks.withType<RunServer>().configureEach {
             // server reporting a failed event handler or a failed enable/disable, or a stack
             // trace passing through our code.
             val errors = lines.filter {
-                ("/ERROR]" in it || "/FATAL]" in it) && "Foliate" in it ||
-                    "dev.foliate" in it && ("Exception" in it || "Error" in it) ||
-                    it.trimStart().startsWith("at ") && "dev.foliate" in it
+                ("/ERROR]" in it || "/FATAL]" in it) && pluginName in it ||
+                    basePackage in it && ("Exception" in it || "Error" in it) ||
+                    it.trimStart().startsWith("at ") && basePackage in it
             }
             if (lines.none { "FOLIATE SELF-TEST PASSED" in it } || errors.isNotEmpty()) {
                 throw GradleException(
