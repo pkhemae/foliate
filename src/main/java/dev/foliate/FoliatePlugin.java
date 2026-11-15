@@ -13,6 +13,7 @@ import dev.foliate.core.storage.Database;
 import dev.foliate.hook.placeholderapi.PlaceholderApiHook;
 import dev.foliate.hook.zmenu.ZMenuHook;
 import dev.foliate.profile.ProfileModule;
+import dev.foliate.selftest.SelfTest;
 import dev.foliate.sidebar.SidebarModule;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.time.Clock;
@@ -33,6 +34,19 @@ public class FoliatePlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        try {
+            start();
+        } catch (RuntimeException | Error e) {
+            // The server would log this and carry on without the plugin, leaving the smoke test
+            // waiting for a verdict that cannot come.
+            if (SelfTest.requested()) {
+                SelfTest.abort(this, "the plugin failed to start: " + e);
+            }
+            throw e;
+        }
+    }
+
+    private void start() {
         FoliaSchedulers schedulers = new FoliaSchedulers(this);
         ModuleManager modules = new ModuleManager(getSLF4JLogger());
         this.schedulers = schedulers;
@@ -55,6 +69,9 @@ public class FoliatePlugin extends JavaPlugin {
         Menus menus = hook(modules, ZMenuHook.PLUGIN_NAME, () -> new ZMenuHook(this, schedulers, messages));
 
         if (!modules.enableAll()) {
+            if (SelfTest.requested()) {
+                SelfTest.abort(this, "a required module failed to enable");
+            }
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
@@ -63,6 +80,10 @@ public class FoliatePlugin extends JavaPlugin {
                 modules, messages, schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), Platform.describe(), menus);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> event.registrar()
                 .register(command.build(), "Shows information about Foliate and reloads it."));
+
+        if (SelfTest.requested()) {
+            new SelfTest(this, schedulers, modules, database).start();
+        }
     }
 
     /**
