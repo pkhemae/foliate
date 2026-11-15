@@ -98,6 +98,10 @@ bukkitPluginYaml {
 
     // Keep in sync with dev.foliate.command.Permissions.
     permissions {
+        register("foliate.command.example") {
+            description = "Allows /example, the commands that demonstrate the threading rules."
+            default = Permission.Default.OP
+        }
         register("foliate.command.info") {
             description = "Allows /foliate info."
             default = Permission.Default.OP

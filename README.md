@@ -22,6 +22,7 @@ working code instead of a list of rules.
 | Sidebar | A per-player scoreboard drawn with FastBoard, since Bukkit scoreboards do not work on Folia. |
 | Storage | A SQL database (SQLite out of the box, MySQL or MariaDB by configuration) with schema migrations. |
 | Player data | A worked example of loading, caching and saving per-player data without blocking a tick or losing a write. |
+| Examples | `/example`: four commands showing how to reach another player, a block, world state and a file. |
 | Tests | Unit tests, plus a smoke test that boots a real Folia server in CI. |
 
 ## Getting started
@@ -87,6 +88,8 @@ concurrent collections (the profile cache). Never a plain `HashMap`.
 ones, and a future still waiting on such a task never completes. Whatever is left, such as saving
 data, has to run synchronously in `disable()`, and must not touch the world.
 
+`ExampleCommand` applies the first rule to four real cases, with the reasoning in its comments.
+
 Paper and unit tests run everything on one thread, so they cannot catch a violation of these rules.
 Only a Folia server can, which is why the smoke test exists.
 
@@ -109,6 +112,7 @@ dev.foliate
 ├── hook/                optional integrations: placeholderapi, zmenu
 ├── sidebar/             the FastBoard sidebar
 ├── profile/             the per-player data example
+├── example/             /example, the commands that demonstrate the threading rules
 └── selftest/            what the smoke test runs
 ```
 
@@ -145,6 +149,7 @@ A feature is its package, the tests of that package, and what refers to it:
 
 | Feature | Also remove |
 | --- | --- |
+| `example` | its two lines in `FoliatePlugin`; `COMMAND_EXAMPLE` in `Permissions` and its node in `build.gradle.kts`; the `example` keys in `lang/*.yml`; `"example time"` in `SelfTest` |
 | `sidebar` | its line in `FoliatePlugin`; the `sidebar` section of `PluginConfig`; the `fastboard` dependency; `sidebar` in `expectedModules` (`build.gradle.kts`) |
 | `profile` | its line in `FoliatePlugin`; `profiles` in `expectedModules`. Keep or replace the `V1` migration script: the database tests use its table |
 | `core/storage` (with `profile`) | the `Database` lines in `FoliatePlugin` and in `SelfTest`; the `storage` section of `PluginConfig`; the `hikaricp` and `sqlite-jdbc` dependencies; `storage` in `expectedModules` |

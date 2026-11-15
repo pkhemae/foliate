@@ -14,7 +14,6 @@ import io.papermc.paper.command.brigadier.Commands;
 import java.util.function.Predicate;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -129,17 +128,11 @@ public final class FoliateCommand {
     }
 
     /**
-     * Runs a reply where its recipient expects it: the sender's own region for an entity, the
-     * global region for the console and other non-entity senders. Some senders reject messages
-     * coming from another thread.
+     * Runs a reply where its recipient expects it, see {@link Schedulers#sender}.
      */
     private void reply(CommandSender sender, Runnable reply) {
         try {
-            if (sender instanceof Entity entity) {
-                schedulers.entity(entity).executeOrRun(reply);
-            } else {
-                schedulers.global().executeOrRun(reply);
-            }
+            schedulers.sender(sender).executeOrRun(reply);
         } catch (EntityRetiredException gone) {
             // The sender left before the reload finished: nobody to tell.
         }

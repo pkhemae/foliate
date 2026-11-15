@@ -2,6 +2,7 @@ package dev.foliate.core.scheduler;
 
 import java.util.concurrent.CompletableFuture;
 import org.bukkit.Location;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
 
 /**
@@ -34,6 +35,15 @@ public interface Schedulers {
     TaskContext region(Location location);
 
     TaskContext entity(Entity entity);
+
+    /**
+     * The context a command sender expects to hear back on: its own region for a player or any
+     * other entity, the global region for the console and the like. Some senders reject messages
+     * that come from another thread.
+     */
+    default TaskContext sender(CommandSender sender) {
+        return sender instanceof Entity entity ? entity(entity) : global();
+    }
 
     /**
      * Teleports an entity from any thread, on Folia and on Paper alike. {@code Entity#teleport} is

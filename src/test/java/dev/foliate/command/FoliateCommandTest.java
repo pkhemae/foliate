@@ -54,8 +54,9 @@ class FoliateCommandTest {
     @BeforeEach
     void setUp() {
         server = MockBukkit.mock();
-        // The real plugin is loaded for its plugin.yml (which declares the permissions) and to
-        // check that it registers the command.
+        // The real plugin is loaded for its plugin.yml, which declares the permissions. That it
+        // registers its commands with the server is checked by the self-test on a real server:
+        // MockBukkit cannot build Paper's native argument types.
         plugin = MockBukkit.load(FoliatePlugin.class);
 
         ConfigService config = new ConfigService(directory, NOPLogger.NOP_LOGGER);
@@ -96,11 +97,6 @@ class FoliateCommandTest {
     @AfterEach
     void tearDown() {
         MockBukkit.unmock();
-    }
-
-    @Test
-    void pluginRegistersTheCommandWithTheServer() {
-        assertTrue(server.dispatchCommand(server.getConsoleSender(), "foliate info"));
     }
 
     @Test

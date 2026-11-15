@@ -22,3 +22,15 @@ menu:
 
 profile:
   load-failed: "<red>Vos données n'ont pas pu être chargées. Réessayez dans un instant."
+
+example:
+  feed:
+    done: "<prefix><green><white><player></white> a été nourri."
+    gone: "<prefix><red><white><player></white> n'est plus en ligne."
+  block:
+    found: "<prefix><gray>Bloc en <white><x> <y> <z></white> : <white><type>"
+    unloaded: "<prefix><red>Rien n'est chargé en <white><x> <y> <z></white>."
+  time: "<prefix><gray>Heure du monde : <white><time></white> ticks"
+  note:
+    saved: "<prefix><green>Note enregistrée."
+  failed: "<prefix><red>Une erreur est survenue. Consultez la console."
