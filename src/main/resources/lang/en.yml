@@ -22,3 +22,13 @@ menu:
 
 profile:
   load-failed: "<red>Your data could not be loaded. Please try again in a moment."
+
+example:
+  feed:
+    done: "<prefix><green>Fed <white><player></white>."
+    gone: "<prefix><red><white><player></white> is no longer online."
+  block: "<prefix><gray>Block at <white><x> <y> <z></white>: <white><type>"
+  time: "<prefix><gray>World time: <white><time></white> ticks"
+  note:
+    saved: "<prefix><green>Note saved."
+    failed: "<prefix><red>The note could not be saved. See the console."

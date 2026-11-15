@@ -34,7 +34,7 @@ import org.slf4j.Logger;
  *
  * <p>Unit tests run everything on one thread, so they cannot catch what breaks on Folia: work on
  * the wrong region, a timer that survives its cancellation, a scheduler call that only fails on a
- * real server. This checks exactly those, once, against the real thing. It does not connect a
+ * real server, a command that was never registered. This checks exactly those, once, against the real thing. It does not connect a
  * player: anything that needs one is out of its reach.
  */
 public final class SelfTest {
@@ -113,6 +113,7 @@ public final class SelfTest {
                 .thenCompose(marker -> entityTimerStopsWhenCancelled(marker)
                         .thenCompose(ignored -> teleportFromAnotherThread(marker, spawn))
                         .thenCompose(ignored -> removedEntityIsReported(marker)))
+                .thenCompose(ignored -> schedulers.global().run(this::commandsAreRegistered))
                 .thenCompose(ignored -> databaseAnswers())
                 .thenCompose(ignored -> schedulers.async().run(this::everyModuleReloads))
                 .thenRun(this::expectedModulesAreEnabled);
@@ -161,6 +162,13 @@ public final class SelfTest {
                     check(cause instanceof EntityRetiredException, "work for a removed entity was not rejected");
                     return null;
                 }));
+    }
+
+    /** Run from the console, on the global region, like a command typed in the server console. */
+    private void commandsAreRegistered() {
+        for (String command : List.of("foliate info", "example time")) {
+            check(server.dispatchCommand(server.getConsoleSender(), command), "'" + command + "' is not registered");
+        }
     }
 
     private CompletableFuture<Void> databaseAnswers() {
