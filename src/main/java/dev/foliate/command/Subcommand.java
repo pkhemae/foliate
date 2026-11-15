@@ -21,7 +21,9 @@ public interface Subcommand {
 
     /**
      * A condition on top of the permission, for a subcommand that only makes sense for some
-     * senders. The subcommand is hidden from the others.
+     * senders. The others can neither see nor run it. It is evaluated often, every time the server
+     * works out which commands a sender has, and from any thread: keep it cheap and free of
+     * side effects.
      */
     default boolean isAvailableTo(CommandSourceStack source) {
         return true;
@@ -29,7 +31,8 @@ public interface Subcommand {
 
     /**
      * Adds what the subcommand does to its node: at least {@code node.executes(...)}, and its
-     * arguments if it takes any. The name and the permission are already set.
+     * arguments if it takes any. The name is already set; the permission and
+     * {@link #isAvailableTo} are enforced afterwards, in addition to anything required here.
      */
     void build(LiteralArgumentBuilder<CommandSourceStack> node);
 }
