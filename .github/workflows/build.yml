@@ -57,13 +57,16 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
-      # -PacceptEula accepts the Minecraft EULA (https://aka.ms/MinecraftEULA) for this throwaway
+      # -PacceptEula=true accepts the Minecraft EULA (https://aka.ms/MinecraftEULA) for this throwaway
       # server. Remove this job if you do not agree to it.
       - name: Start Folia and run the self-test
-        run: ./gradlew runFolia -PselfTest -PacceptEula -Phooks=${{ matrix.hooks }} < /dev/null
+        # A run takes about a minute. If the plugin could not even be loaded nothing stops the
+        # server, so this is what ends the step.
+        timeout-minutes: 5
+        run: ./gradlew runFolia -PselfTest=true -PacceptEula=true -Phooks=${{ matrix.hooks }} < /dev/null
 
       - uses: actions/upload-artifact@v7
-        if: failure()
+        if: failure() || cancelled()
         with:
           name: server-log-hooks-${{ matrix.hooks }}
           path: run/logs/latest.log

@@ -21,13 +21,21 @@ val testServerPlugins: Action<DownloadPluginsSpec> = Action {
     }
 }
 
-// -PacceptEula accepts the Minecraft EULA (https://aka.ms/MinecraftEULA) for the test server, in
-// place of editing run/eula.txt. Meant for CI: only pass it if you agree to the EULA.
-val acceptEula: Boolean = providers.gradleProperty("acceptEula").isPresent
+// -PacceptEula=true accepts the Minecraft EULA (https://aka.ms/MinecraftEULA) for the test server,
+// in place of editing run/eula.txt. Meant for CI: only pass it if you agree to the EULA. Anything
+// but an explicit "true" leaves the EULA unaccepted.
+val acceptEula: Boolean = providers.gradleProperty("acceptEula").map(String::toBoolean).getOrElse(false)
 
-// -PselfTest makes the plugin test itself once the server is up, then stops the server. The task
-// fails unless the self-test passed and the plugin logged no error. This is the smoke test.
-val selfTest: Boolean = providers.gradleProperty("selfTest").isPresent
+// -PselfTest=true makes the plugin test itself once the server is up, then stops the server. The
+// task fails unless the self-test passed and nothing went wrong in the plugin. This is the smoke
+// test.
+val selfTest: Boolean = providers.gradleProperty("selfTest").map(String::toBoolean).getOrElse(false)
+
+// The modules the self-test must find enabled. Without this, a hook that silently failed to load
+// (its plugin could not download its libraries, say) would still give a green run.
+val expectedModules: String =
+    (listOf("config", "messages", "storage", "profiles", "sidebar") +
+        if (withHooks) listOf("placeholderapi", "zmenu") else emptyList()).joinToString(",")
 
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(25)
@@ -143,14 +151,21 @@ tasks.withType<RunServer>().configureEach {
         jvmArgs("-Dcom.mojang.eula.agree=true")
     }
     if (selfTest) {
-        jvmArgs("-Dfoliate.selftest=true")
+        jvmArgs("-Dfoliate.selftest=true", "-Dfoliate.selftest.expect=$expectedModules")
         val log = runDirectory.file("logs/latest.log")
         doFirst {
             log.get().asFile.delete()
         }
         doLast {
             val lines = log.get().asFile.takeIf { it.exists() }?.readLines().orEmpty()
-            val errors = lines.filter { "ERROR]: [Foliate]" in it || "dev.foliate" in it && "Exception" in it }
+            // Anything that goes wrong in the plugin, whoever logs it: the plugin itself, the
+            // server reporting a failed event handler or a failed enable/disable, or a stack
+            // trace passing through our code.
+            val errors = lines.filter {
+                ("/ERROR]" in it || "/FATAL]" in it) && "Foliate" in it ||
+                    "dev.foliate" in it && ("Exception" in it || "Error" in it) ||
+                    it.trimStart().startsWith("at ") && "dev.foliate" in it
+            }
             if (lines.none { "FOLIATE SELF-TEST PASSED" in it } || errors.isNotEmpty()) {
                 throw GradleException(
                     "The self-test did not pass. Relevant log lines:\n" +

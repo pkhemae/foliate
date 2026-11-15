@@ -34,6 +34,19 @@ public class FoliatePlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        try {
+            start();
+        } catch (RuntimeException | Error e) {
+            // The server would log this and carry on without the plugin, leaving the smoke test
+            // waiting for a verdict that cannot come.
+            if (SelfTest.requested()) {
+                SelfTest.abort(this, "the plugin failed to start: " + e);
+            }
+            throw e;
+        }
+    }
+
+    private void start() {
         FoliaSchedulers schedulers = new FoliaSchedulers(this);
         ModuleManager modules = new ModuleManager(getSLF4JLogger());
         this.schedulers = schedulers;

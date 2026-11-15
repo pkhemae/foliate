@@ -6,8 +6,11 @@ import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.core.scheduler.TaskHandle;
 import dev.foliate.core.storage.Database;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -23,8 +26,11 @@ import org.slf4j.Logger;
 
 /**
  * Exercises the plugin on a real server, then stops the server. Started only when the JVM runs
- * with {@code -Dfoliate.selftest=true}, which {@code ./gradlew runFolia -PselfTest} does; the
+ * with {@code -Dfoliate.selftest=true}, which {@code ./gradlew runFolia -PselfTest=true} does; the
  * build then fails unless the log contains {@link #PASSED}.
+ *
+ * <p>Never set that property on a production server: the self-test loads the spawn chunk, reloads
+ * every module and stops the server.
  *
  * <p>Unit tests run everything on one thread, so they cannot catch what breaks on Folia: work on
  * the wrong region, a timer that survives its cancellation, a scheduler call that only fails on a
@@ -37,7 +43,9 @@ public final class SelfTest {
     public static final String FAILED = "FOLIATE SELF-TEST FAILED";
 
     private static final String PROPERTY = "foliate.selftest";
+    private static final String EXPECTED_MODULES_PROPERTY = "foliate.selftest.expect";
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
+    private static final long CLEANUP_TIMEOUT_SECONDS = 5;
 
     private final Plugin plugin;
     private final Server server;
@@ -46,6 +54,8 @@ public final class SelfTest {
     private final Database database;
     private final Logger logger;
     private final AtomicBoolean finished = new AtomicBoolean();
+    private volatile @Nullable Entity marker;
+    private volatile @Nullable Runnable releaseChunk;
 
     public SelfTest(Plugin plugin, Schedulers schedulers, ModuleManager modules, Database database) {
         this.plugin = plugin;
@@ -94,14 +104,18 @@ public final class SelfTest {
                     check(server.isOwnedByCurrentRegion(spawn), "a region task did not run on the owning region");
                     // Entity tasks only run while the entity is loaded: keep its chunk loaded.
                     world.addPluginChunkTicket(chunkX, chunkZ, plugin);
-                    return (Entity) world.spawn(spawn, Marker.class);
+                    releaseChunk = () -> world.removePluginChunkTicket(chunkX, chunkZ, plugin);
+                    // Never saved with the chunk, so nothing stays in the world if cleanup fails.
+                    Entity spawned = world.spawn(spawn, Marker.class, entity -> entity.setPersistent(false));
+                    marker = spawned;
+                    return spawned;
                 }))
                 .thenCompose(marker -> entityTimerStopsWhenCancelled(marker)
                         .thenCompose(ignored -> teleportFromAnotherThread(marker, spawn))
                         .thenCompose(ignored -> removedEntityIsReported(marker)))
-                .thenCompose(ignored -> schedulers.region(spawn).run(() -> world.removePluginChunkTicket(chunkX, chunkZ, plugin)))
                 .thenCompose(ignored -> databaseAnswers())
-                .thenCompose(ignored -> schedulers.async().run(this::everyModuleReloads));
+                .thenCompose(ignored -> schedulers.async().run(this::everyModuleReloads))
+                .thenRun(this::expectedModulesAreEnabled);
     }
 
     private CompletableFuture<Void> entityTimerStopsWhenCancelled(Entity marker) {
@@ -157,6 +171,19 @@ public final class SelfTest {
                 .thenAccept(valid -> check(valid, "the database connection is not valid"));
     }
 
+    /**
+     * The smoke test says which modules it expects, so that an optional hook which quietly failed
+     * to start (and is therefore simply absent) fails the run instead of going unnoticed.
+     */
+    private void expectedModulesAreEnabled() {
+        String expected = System.getProperty(EXPECTED_MODULES_PROPERTY, "");
+        List<String> missing = Arrays.stream(expected.split(","))
+                .map(String::strip)
+                .filter(module -> !module.isEmpty() && !modules.enabledNames().contains(module))
+                .toList();
+        check(missing.isEmpty(), "modules expected but not enabled: " + missing);
+    }
+
     private void everyModuleReloads() {
         Map<String, Throwable> failures = modules.reloadAll();
         check(failures.isEmpty(), "modules failed to reload: " + failures.keySet());
@@ -168,7 +195,7 @@ public final class SelfTest {
         }
     }
 
-    /** Logs the verdict once and stops the server. */
+    /** Logs the verdict once, undoes what the test did to the world, and stops the server. */
     private void finish(@Nullable String failure) {
         if (!finished.compareAndSet(false, true)) {
             return;
@@ -178,6 +205,25 @@ public final class SelfTest {
         } else {
             logger.error("{}: {}", FAILED, failure);
         }
-        schedulers.global().execute(server::shutdown);
+        // Whatever the verdict, and without waiting forever: if a region is what hangs, cleanup
+        // cannot run there either, and the server still has to stop.
+        cleanUp()
+                .thenCompose(ignored -> schedulers.global().run(server::shutdown))
+                .orTimeout(CLEANUP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .exceptionally(error -> {
+                    server.shutdown();
+                    return null;
+                });
+    }
+
+    private CompletableFuture<Void> cleanUp() {
+        Entity spawned = marker;
+        Runnable release = releaseChunk;
+        CompletableFuture<Void> removed = spawned == null
+                ? CompletableFuture.completedFuture(null)
+                : schedulers.entity(spawned).run(spawned::remove).exceptionally(alreadyGone -> null);
+        return removed.thenCompose(ignored -> release == null
+                ? CompletableFuture.completedFuture(null)
+                : schedulers.region(server.getWorlds().getFirst().getSpawnLocation()).run(release));
     }
 }
