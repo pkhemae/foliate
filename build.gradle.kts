@@ -46,6 +46,7 @@ dependencies {
     testImplementation(libs.mockbukkit)
     // MockBukkit does not expose the server API to consumers, tests need it on their own classpath.
     testImplementation(libs.folia.api)
+    testImplementation(libs.placeholderapi)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
@@ -56,6 +57,7 @@ bukkitPluginYaml {
     apiVersion = minecraftVersion
     foliaSupported = true
     description = project.description
+    authors = listOf("Foliate contributors")
     website = "https://github.com/pkhemae/foliate"
     softDepend = listOf("PlaceholderAPI")
 
