@@ -125,6 +125,9 @@ tasks {
 
     test {
         useJUnitPlatform()
+        // ArchitectureTest reads the source files: without this, Gradle would call the test up to
+        // date after a change that does not alter the bytecode, such as an import.
+        inputs.dir("src/main/java").withPropertyName("sources").withPathSensitivity(PathSensitivity.RELATIVE)
     }
 
     jar {
