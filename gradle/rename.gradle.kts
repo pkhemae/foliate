@@ -1,0 +1,147 @@
+import java.io.File
+import java.nio.file.Files
+
+// One-off task that turns the template into your own plugin:
+//
+//   ./gradlew renameTemplate -PnewName=Skylands -PnewGroup=com.example.skylands -PnewRepository=you/skylands
+//
+// It rewrites every name derived from the template's (plugin name, base package, command,
+// permission nodes, table names, placeholder identifier...), moves the sources to the new package,
+// and then removes itself. Run it once, on a clean checkout, before writing any code of your own.
+
+val templateName = "Foliate"
+val templateGroup = "dev.foliate"
+val templateRepository = "pkhemae/foliate"
+
+val skippedDirectories = setOf(".git", ".gradle", ".idea", ".kotlin", "build", "run", "out", "wrapper")
+val textExtensions =
+    setOf("java", "kts", "toml", "properties", "yml", "yaml", "md", "json", "sql", "txt", "gitignore", "editorconfig")
+val textFileNames = setOf("LICENSE", ".gitignore", ".gitattributes", ".editorconfig")
+val javaKeywords = setOf(
+    "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue",
+    "default", "do", "double", "else", "enum", "extends", "final", "finally", "float", "for", "goto", "if",
+    "implements", "import", "instanceof", "int", "interface", "long", "native", "new", "package", "private",
+    "protected", "public", "return", "short", "static", "strictfp", "super", "switch", "synchronized", "this",
+    "throw", "throws", "transient", "try", "void", "volatile", "while", "true", "false", "null",
+)
+
+tasks.register("renameTemplate") {
+    group = "template"
+    description = "Renames the template. Needs -PnewName, -PnewGroup and -PnewRepository."
+
+    val newName = providers.gradleProperty("newName")
+    val newGroup = providers.gradleProperty("newGroup")
+    val newRepository = providers.gradleProperty("newRepository")
+    val root = layout.projectDirectory.asFile
+
+    doLast {
+        val name = newName.orNull ?: throw GradleException("Pass the plugin name: -PnewName=Skylands")
+        val basePackage = newGroup.orNull ?: throw GradleException("Pass the base package: -PnewGroup=com.example.skylands")
+        val repository = newRepository.orNull ?: throw GradleException("Pass the GitHub repository: -PnewRepository=you/skylands")
+        if (!Regex("[A-Z][A-Za-z0-9]*").matches(name)) {
+            throw GradleException("newName must be a class-like name such as Skylands, got '$name'")
+        }
+        if (!Regex("[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+").matches(basePackage)) {
+            throw GradleException("newGroup must be a lowercase package such as com.example.skylands, got '$basePackage'")
+        }
+        if (!Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+").matches(repository)) {
+            throw GradleException("newRepository must look like owner/name, got '$repository'")
+        }
+        // The replacements are plain text, applied one after the other: a new name that contains
+        // the template's would be rewritten a second time.
+        for ((label, value) in listOf("newName" to name, "newGroup" to basePackage, "newRepository" to repository)) {
+            if (templateName.lowercase() in value.lowercase()) {
+                throw GradleException("$label must not contain '${templateName.lowercase()}', got '$value'")
+            }
+        }
+        basePackage.split('.').firstOrNull { it in javaKeywords }?.let {
+            throw GradleException("newGroup cannot use the Java keyword '$it' as a package name")
+        }
+        val sourceFiles = root.walkTopDown()
+            .onEnter { it == root || it.name !in skippedDirectories }
+            .filter { it.isFile }
+            .toList()
+        // FoliateCommand would become ExampleCommand next to the existing ExampleCommand, and so on.
+        val existingNames = sourceFiles.map { it.name }.filterNot { templateName in it }.toSet()
+        sourceFiles.map { it.name }
+            .filter { templateName in it && it.replace(templateName, name) in existingNames }
+            .firstOrNull()
+            ?.let { throw GradleException("newName '$name' would turn $it into ${it.replace(templateName, name)}, which already exists") }
+        // Nothing can be undone by this task: start from a tree git can restore.
+        if (File(root, ".git").exists()) {
+            val status = providers.exec { commandLine("git", "status", "--porcelain") }.standardOutput.asText.get()
+            if (status.isNotBlank()) {
+                throw GradleException(
+                    "Commit or stash your changes first. If a rename goes wrong, " +
+                        "'git checkout . && git clean -fd' brings the tree back."
+                )
+            }
+        }
+
+        // The repository is replaced first and parked behind a token: its second half is the
+        // template's lowercase name, which the last replacement would otherwise rewrite.
+        val repositoryToken = "\u0000repository\u0000"
+        val replacements = listOf(
+            templateRepository to repositoryToken,
+            templateGroup to basePackage,
+            templateGroup.replace('.', '/') to basePackage.replace('.', '/'),
+            templateName to name,
+            templateName.uppercase() to name.uppercase(),
+            templateName.lowercase() to name.lowercase(),
+            repositoryToken to repository,
+        )
+
+        val files = root.walkTopDown()
+            .onEnter { it == root || it.name !in skippedDirectories }
+            .filter { it.isFile && (it.extension in textExtensions || it.name in textFileNames) }
+            // Not this script: it is deleted at the end, and must stay intact until then.
+            .filterNot { it.name == "rename.gradle.kts" }
+            .toList()
+        var rewritten = 0
+        for (file in files) {
+            val before = file.readText()
+            val after = replacements.fold(before) { text, (from, to) -> text.replace(from, to) }
+            if (after != before) {
+                file.writeText(after)
+                rewritten++
+            }
+        }
+
+        // Classes named after the template, then the package directories.
+        var moved = 0
+        root.walkTopDown()
+            .onEnter { it == root || it.name !in skippedDirectories }
+            .filter { it.isFile && templateName in it.name }
+            .toList()
+            .forEach { file ->
+                Files.move(file.toPath(), file.resolveSibling(file.name.replace(templateName, name)).toPath())
+                moved++
+            }
+        for (sources in listOf("src/main/java", "src/test/java")) {
+            val from = File(root, "$sources/${templateGroup.replace('.', '/')}")
+            val to = File(root, "$sources/${basePackage.replace('.', '/')}")
+            if (from.isDirectory && from != to) {
+                to.parentFile.mkdirs()
+                Files.move(from.toPath(), to.toPath())
+                // Remove what is left of the old package path, as long as it is empty.
+                var parent = from.parentFile
+                while (parent != File(root, sources) && parent.list()?.isEmpty() == true) {
+                    parent.delete()
+                    parent = parent.parentFile
+                }
+            }
+        }
+
+        // The task has done its job: take it out of the build.
+        val buildFile = File(root, "build.gradle.kts")
+        buildFile.writeText(
+            buildFile.readLines()
+                .filterNot { "rename.gradle.kts" in it || "renameTemplate" in it }
+                .joinToString("\n", postfix = "\n")
+        )
+        File(root, "gradle/rename.gradle.kts").delete()
+
+        println("Renamed to $name ($basePackage): $rewritten files rewritten, $moved files renamed.")
+        println("Next: ./gradlew build, then review the diff. The README still describes the template.")
+    }
+}

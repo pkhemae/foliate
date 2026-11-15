@@ -9,6 +9,9 @@ plugins {
     alias(libs.plugins.resource.factory.bukkit)
 }
 
+// Adds the one-off renameTemplate task. The task removes this line when it has run.
+apply(from = "gradle/rename.gradle.kts")
+
 val minecraftVersion: String = libs.versions.minecraft.get()
 
 // The plugin's name and base package, used below for plugin.yml, the relocation prefix and the
