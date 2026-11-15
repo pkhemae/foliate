@@ -2,7 +2,7 @@
 
 # Foliate
 
-**A production-ready starting point for Minecraft plugins on Folia.**
+**A starting point for Minecraft plugins on Folia, built the way Folia requires.**
 
 [![Build](https://github.com/pkhemae/foliate/actions/workflows/build.yml/badge.svg)](https://github.com/pkhemae/foliate/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -29,14 +29,14 @@ code instead of a list of rules. The same jar runs on Paper.
 | **Commands** | One class per subcommand, on Paper's native command API, with declared permissions |
 | **Storage** | SQLite out of the box, MySQL or MariaDB by configuration, with schema migrations |
 | **Player data** | Loaded before login, cached, saved in order, flushed on shutdown |
-| **Sidebar** | A per-player scoreboard that works on Folia |
+| **Sidebar** | A per-player scoreboard drawn with packets, since Bukkit scoreboards do not work on Folia |
 | **Integrations** | PlaceholderAPI and zMenu, both optional |
 | **Tests** | Unit tests, and a smoke test that boots a real Folia server in CI |
 | **Tooling** | One command to rename the template, GitHub releases on tag, Renovate, update check |
 
 ## Quick start
 
-Use this repository as a template, then make it yours:
+Clone or fork this repository, then make it yours:
 
 ```bash
 ./gradlew renameTemplate -PnewName=Skylands -PnewGroup=com.example.skylands -PnewRepository=you/skylands
@@ -77,8 +77,9 @@ The [wiki](https://github.com/pkhemae/foliate/wiki) has one page per topic.
 
 ## Status
 
-Foliate is verified by its unit tests and by a smoke test that runs on a real Folia 26.2 server
-and on Paper 26.2. What needs a connected player has not been verified yet: the sidebar drawing,
+Foliate is at version 0.1.0-SNAPSHOT and has no release yet. It is verified by its unit tests and
+by a smoke test that CI runs on a real Folia 26.2 server; the same smoke test was run by hand on
+Paper 26.2. What needs a connected player has not been verified yet: the sidebar drawing,
 a menu opening, and the login and quit flow of the player data. MySQL and MariaDB have not been
 exercised, only SQLite. See [#29](https://github.com/pkhemae/foliate/issues/29).
 

@@ -21,7 +21,8 @@ Thank you for helping. This page is the short version; the [wiki](https://github
    ./gradlew runFolia -PselfTest=true
    ```
 
-   The second command boots a real Folia server and needs the Minecraft EULA accepted in `run/eula.txt`.
+   The second command boots a real Folia server. The first time, it stops and asks you to accept
+   the Minecraft EULA in `run/eula.txt`; run it again after that.
 4. Open a pull request that says what changed, how you verified it, and what you could not verify. Link the issue with `Closes #<number>`.
 
 ## What a change needs
