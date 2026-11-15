@@ -125,29 +125,24 @@ framework: `FoliatePlugin#start` is the one place that shows what depends on wha
 
 ## Making it yours
 
-There is no rename script yet ([#27](https://github.com/pkhemae/foliate/issues/27)), so renaming is
-a search for `foliate`, in any case, across the repository. The build file keeps the name in two
-variables, which covers the generated `plugin.yml`, the relocation prefix and the smoke-test log
-check. The rest, by kind:
+```bash
+./gradlew renameTemplate -PnewName=Skylands -PnewGroup=com.example.skylands -PnewRepository=you/skylands
+```
 
-- **Project**: `rootProject.name` in `settings.gradle.kts`; `group` and `description` in
-  `gradle.properties`; `pluginName`, the authors, the website and the permission nodes in
-  `build.gradle.kts`; the copyright line in `LICENSE`.
-- **Yours to set**: the repository in `GitHubReleases.REPOSITORY`, which the update check reads
-  releases from, and `FoliatePlugin.BSTATS_PLUGIN_ID`, your id on bStats.
-- **Code**: the `dev.foliate` package and the `FoliatePlugin` class (rename them with your IDE,
-  which also updates the tests); the command name and its description in `FoliateCommand` and
-  `FoliatePlugin`; the nodes in `Permissions`; the placeholder identifier in `FoliateExpansion`.
-- **Tests**: the ones that type the command (`"foliate info"`) or check the placeholder identifier
-  and the default sidebar title need the new names.
-- **What administrators see**: the prefix and the `command.info` text in `lang/*.yml`, the default
-  sidebar title and the MySQL defaults in `PluginConfig`, the header in `ConfigService`, the
-  example menu in `inventories/example.yml`, the pool and thread names in `Database`.
-- **Decide before your first release**: the table names (`foliate_profiles`,
-  `foliate_schema_history`). A migration that has shipped cannot be edited.
-- **Smoke test**: the system properties `foliate.selftest` and `foliate.selftest.expect` and the
-  verdict text appear both in `SelfTest` and in `build.gradle.kts`. Renaming them is optional, but
-  change both sides together or the smoke test stops seeing the verdict.
+rewrites every name derived from the template's: the plugin name, the base package and its source
+folders, the command (`/skylands`), the permission nodes, the placeholder identifier, the table
+names, the texts administrators see, and the GitHub repository the update check and the website
+point to. It then removes itself from the build. Run it once, on a clean checkout, before writing
+any code of your own, and follow it with `./gradlew build`.
+
+What it leaves to you:
+
+- the description in `gradle.properties`, the authors in `build.gradle.kts` and the copyright
+  holder in `LICENSE`, which become "Skylands contributors";
+- `FoliatePlugin.BSTATS_PLUGIN_ID`, your id on bStats;
+- the table names, now `skylands_profiles` and `skylands_schema_history`: change them before your
+  first release if you want others, a migration that has shipped cannot be edited;
+- this README, which still describes the template.
 
 ### Removing a feature you do not need
 
