@@ -1,0 +1,5 @@
+# Les messages utilisent le format MiniMessage : https://docs.papermc.io/adventure/minimessage/format/
+# <prefix> insère le préfixe ci-dessous. Mettez "" pour désactiver un message.
+# Un message absent de ce fichier reprend le texte intégré au plugin.
+
+prefix: "<dark_gray>[<aqua>Foliate</aqua>]</dark_gray> "
