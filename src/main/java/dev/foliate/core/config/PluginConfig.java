@@ -33,6 +33,9 @@ public final class PluginConfig {
     @Comment("Scoreboard shown on the right of each player's screen.")
     private Sidebar sidebar = new Sidebar();
 
+    @Comment({"Where player data is kept.", "Changes in this section only apply after a server restart."})
+    private Storage storage = new Storage();
+
     private PluginConfig() {}
 
     /** The configuration a fresh install starts with. */
@@ -52,6 +55,10 @@ public final class PluginConfig {
         return sidebar;
     }
 
+    public Storage storage() {
+        return storage;
+    }
+
     /**
      * Checks what the types alone cannot express. Runs before a loaded configuration is published
      * or written back, and its message is shown to the administrator: name the setting as it
@@ -64,6 +71,7 @@ public final class PluginConfig {
             throw new ConfigException("default-locale must not be empty");
         }
         sidebar.validate();
+        storage.validate();
     }
 
     /** The {@code sidebar} section. */
@@ -82,7 +90,8 @@ public final class PluginConfig {
 
         @Comment({
             "Title and lines use the MiniMessage format.",
-            "Available tags: <player>, <online>, and <papi:placeholder> when PlaceholderAPI is installed."
+            "Available tags: <player>, <online>, and <papi:placeholder> when PlaceholderAPI is installed,",
+            "for example <papi:foliate_joins>."
         })
         private String title = "<aqua><bold>Foliate";
 
@@ -118,6 +127,94 @@ public final class PluginConfig {
             if (title.indexOf(LEGACY_CODE) >= 0 || lines.stream().anyMatch(line -> line.indexOf(LEGACY_CODE) >= 0)) {
                 throw new ConfigException(
                         "sidebar.title and sidebar.lines use the MiniMessage format: write <red> instead of legacy colour codes");
+            }
+        }
+    }
+
+    /** The {@code storage} section. */
+    @Configuration
+    public static final class Storage {
+
+        public enum Type {
+            SQLITE,
+            MYSQL
+        }
+
+        @Comment("Set to false to run without a database. Features that need one are then turned off.")
+        private boolean enabled = true;
+
+        @Comment({
+            "SQLITE keeps everything in a file in this folder and needs no setup.",
+            "MYSQL connects to a MySQL or MariaDB server, using the settings below."
+        })
+        private Type type = Type.SQLITE;
+
+        private Mysql mysql = new Mysql();
+
+        private Storage() {}
+
+        public boolean enabled() {
+            return enabled;
+        }
+
+        public Type type() {
+            return type;
+        }
+
+        public Mysql mysql() {
+            return mysql;
+        }
+
+        private void validate() throws ConfigException {
+            mysql.validate();
+        }
+    }
+
+    /** The {@code storage.mysql} section. */
+    @Configuration
+    public static final class Mysql {
+
+        private String host = "localhost";
+        private int port = 3306;
+        private String database = "foliate";
+        private String username = "foliate";
+        private String password = "";
+
+        @Comment("Maximum number of connections kept open.")
+        private int poolSize = 4;
+
+        private Mysql() {}
+
+        public String host() {
+            return host;
+        }
+
+        public int port() {
+            return port;
+        }
+
+        public String database() {
+            return database;
+        }
+
+        public String username() {
+            return username;
+        }
+
+        public String password() {
+            return password;
+        }
+
+        public int poolSize() {
+            return poolSize;
+        }
+
+        private void validate() throws ConfigException {
+            if (port < 1 || port > 65535) {
+                throw new ConfigException("storage.mysql.port must be between 1 and 65535");
+            }
+            if (poolSize < 1) {
+                throw new ConfigException("storage.mysql.pool-size must be at least 1");
             }
         }
     }

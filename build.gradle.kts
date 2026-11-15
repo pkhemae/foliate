@@ -46,6 +46,10 @@ dependencies {
     implementation(libs.configlib.yaml)
     implementation(libs.snakeyaml.engine)
     implementation(libs.fastboard)
+    implementation(libs.hikaricp) {
+        // The server provides SLF4J; bundling it would relocate it away from the server's logging.
+        exclude(group = "org.slf4j")
+    }
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -55,6 +59,7 @@ dependencies {
     testImplementation(libs.placeholderapi)
     testImplementation(libs.zmenu.api) { isTransitive = false }
     testRuntimeOnly(libs.junit.platform.launcher)
+    testRuntimeOnly(libs.sqlite.jdbc)
 }
 
 // Generates plugin.yml at build time, so the plugin metadata lives in one place.

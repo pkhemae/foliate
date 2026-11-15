@@ -9,10 +9,13 @@ import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
 import dev.foliate.core.scheduler.FoliaSchedulers;
+import dev.foliate.core.storage.Database;
 import dev.foliate.hook.placeholderapi.PlaceholderApiHook;
 import dev.foliate.hook.zmenu.ZMenuHook;
+import dev.foliate.profile.ProfileModule;
 import dev.foliate.sidebar.SidebarModule;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
+import java.time.Clock;
 import java.util.function.Supplier;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jspecify.annotations.Nullable;
@@ -44,6 +47,10 @@ public class FoliatePlugin extends JavaPlugin {
         modules.register(config);
         modules.register(messages);
         hook(modules, PlaceholderApiHook.PLUGIN_NAME, () -> new PlaceholderApiHook(getPluginMeta(), placeholders, messages));
+        Database database = new Database(getDataPath(), config, getSLF4JLogger());
+        modules.register(database);
+        modules.register(new ProfileModule(
+                this, database, messages, placeholders, getSLF4JLogger(), Clock.systemUTC()));
         modules.register(new SidebarModule(this, schedulers, config, messages));
         Menus menus = hook(modules, ZMenuHook.PLUGIN_NAME, () -> new ZMenuHook(this, schedulers, messages));
 

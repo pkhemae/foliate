@@ -10,6 +10,9 @@ configlib = "4.8.1"
 # The YAML engine ConfigLib reads and writes with. Keep it on the version ConfigLib depends on.
 snakeyaml-engine = "2.7"
 fastboard = "2.2.2"
+hikaricp = "7.1.0"
+# Only for tests: the server ships its own SQLite and MySQL drivers.
+sqlite-jdbc = "3.49.1.0"
 placeholderapi = "2.12.3"
 zmenu = "1.1.2.1"
 
@@ -29,6 +32,8 @@ zmenu-api = { module = "fr.maxlego08.menu:zmenu-api", version.ref = "zmenu" }
 configlib-yaml = { module = "de.exlll:configlib-yaml", version.ref = "configlib" }
 snakeyaml-engine = { module = "org.snakeyaml:snakeyaml-engine", version.ref = "snakeyaml-engine" }
 fastboard = { module = "fr.mrmicky:fastboard", version.ref = "fastboard" }
+hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
 
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }

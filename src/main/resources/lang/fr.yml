@@ -19,3 +19,6 @@ command:
 menu:
   unknown: "<prefix><red>Le menu <white><menu></white> n'existe pas."
   unavailable: "<prefix><red>Les menus ne sont pas disponibles pour le moment."
+
+profile:
+  load-failed: "<red>Vos données n'ont pas pu être chargées. Réessayez dans un instant."

@@ -63,6 +63,32 @@ class ModuleManagerTest {
     }
 
     @Test
+    void skippedModuleIsLeftOutWithoutBeingCleanedUp() {
+        manager.register(new Module() {
+            @Override
+            public String name() {
+                return "optional";
+            }
+
+            @Override
+            public void enable() throws ModuleSkippedException {
+                throw new ModuleSkippedException("turned off");
+            }
+
+            @Override
+            public void disable() {
+                events.add("disable optional");
+            }
+        });
+        manager.register(new RecordingModule("b"));
+
+        assertTrue(manager.enableAll());
+        manager.disableAll();
+
+        assertEquals(List.of("enable b", "disable b"), events);
+    }
+
+    @Test
     void reloadReportsFailuresAndKeepsGoing() {
         manager.register(new RecordingModule("broken").failingOn("reload"));
         manager.register(new RecordingModule("b"));
