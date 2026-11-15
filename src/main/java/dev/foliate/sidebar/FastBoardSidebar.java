@@ -19,11 +19,11 @@ final class FastBoardSidebar implements SidebarBoard {
      * server version it does not know. Doing it up front turns that into a clean startup error
      * instead of an exception on every join.
      */
-    static void ensureSupported() {
+    static void ensureSupported() throws SidebarUnavailableException {
         try {
             Class.forName(FastBoard.class.getName(), true, FastBoardSidebar.class.getClassLoader());
         } catch (ClassNotFoundException | LinkageError e) {
-            throw new IllegalStateException("FastBoard does not support this server version", e);
+            throw new SidebarUnavailableException("FastBoard does not support this server version", e);
         }
     }
 

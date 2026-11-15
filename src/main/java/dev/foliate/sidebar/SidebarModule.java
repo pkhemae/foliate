@@ -4,6 +4,7 @@ import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.config.PluginConfig;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
+import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.core.scheduler.TaskHandle;
 import java.util.List;
@@ -37,7 +38,7 @@ public final class SidebarModule implements Module, Listener {
     private final ConfigService config;
     private final MessageService messages;
     private final Function<Player, SidebarBoard> boardFactory;
-    private final Runnable supportCheck;
+    private final SupportCheck supportCheck;
     private final Map<UUID, Entry> entries = new ConcurrentHashMap<>();
 
     public SidebarModule(Plugin plugin, Schedulers schedulers, ConfigService config, MessageService messages) {
@@ -50,7 +51,7 @@ public final class SidebarModule implements Module, Listener {
             ConfigService config,
             MessageService messages,
             Function<Player, SidebarBoard> boardFactory,
-            Runnable supportCheck) {
+            SupportCheck supportCheck) {
         this.plugin = plugin;
         this.schedulers = schedulers;
         this.config = config;
@@ -65,7 +66,7 @@ public final class SidebarModule implements Module, Listener {
     }
 
     @Override
-    public void enable() {
+    public void enable() throws SidebarUnavailableException {
         supportCheck.run();
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
         refreshAll();
@@ -98,10 +99,15 @@ public final class SidebarModule implements Module, Listener {
     /** Applies the current settings to everyone online, each on their own scheduler. */
     private void refreshAll() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            schedulers.entity(player).executeOrRun(() -> {
-                hide(player);
-                show(player);
-            });
+            try {
+                schedulers.entity(player).executeOrRun(() -> {
+                    hide(player);
+                    show(player);
+                });
+            } catch (EntityRetiredException leaving) {
+                // Still listed as online but already on the way out: the quit event removes the
+                // board. Carry on with the other players.
+            }
         }
     }
 
@@ -138,6 +144,12 @@ public final class SidebarModule implements Module, Listener {
                 .map(line -> messages.parse(player, line, values))
                 .toList();
         board.update(title, lines);
+    }
+
+    /** Fails when sidebars cannot work on this server. */
+    @FunctionalInterface
+    interface SupportCheck {
+        void run() throws SidebarUnavailableException;
     }
 
     private record Entry(SidebarBoard board, TaskHandle refresh) {
