@@ -133,7 +133,9 @@ rewrites every name derived from the template's: the plugin name, the base packa
 folders, the command (`/skylands`), the permission nodes, the placeholder identifier, the table
 names, the texts administrators see, and the GitHub repository the update check and the website
 point to. It then removes itself from the build. Run it once, on a clean checkout, before writing
-any code of your own, and follow it with `./gradlew build`.
+any code of your own, and follow it with `./gradlew build`. It checks its inputs before touching
+anything and refuses to run with uncommitted changes; should a rename still go wrong,
+`git checkout . && git clean -fd` brings the tree back.
 
 What it leaves to you:
 
