@@ -1,4 +1,5 @@
 import xyz.jpenilla.resourcefactory.bukkit.Permission
+import xyz.jpenilla.runtask.pluginsapi.DownloadPluginsSpec
 
 plugins {
     java
@@ -9,6 +10,15 @@ plugins {
 
 val minecraftVersion: String = libs.versions.minecraft.get()
 
+// The test servers get the plugins we integrate with, so hooks are exercised by default.
+// Pass -Phooks=false to start without them and check the plugin runs on its own.
+val withHooks: Boolean = providers.gradleProperty("hooks").map(String::toBoolean).getOrElse(true)
+val testServerPlugins: Action<DownloadPluginsSpec> = Action {
+    if (withHooks) {
+        modrinth("placeholderapi", libs.versions.placeholderapi.get())
+    }
+}
+
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(25)
 }
@@ -16,10 +26,16 @@ java {
 repositories {
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/")
+    maven("https://repo.helpch.at/releases/") {
+        content { includeGroup("me.clip") }
+    }
 }
 
 dependencies {
     compileOnly(libs.folia.api)
+
+    // Optional integrations: provided by the other plugin when it is installed, never bundled.
+    compileOnly(libs.placeholderapi)
 
     // Bundled in the jar and relocated by shadowJar.
     implementation(libs.configlib.yaml)
@@ -30,6 +46,7 @@ dependencies {
     testImplementation(libs.mockbukkit)
     // MockBukkit does not expose the server API to consumers, tests need it on their own classpath.
     testImplementation(libs.folia.api)
+    testImplementation(libs.placeholderapi)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
@@ -40,7 +57,9 @@ bukkitPluginYaml {
     apiVersion = minecraftVersion
     foliaSupported = true
     description = project.description
+    authors = listOf("Foliate contributors")
     website = "https://github.com/pkhemae/foliate"
+    softDepend = listOf("PlaceholderAPI")
 
     // Keep in sync with dev.foliate.command.Permissions.
     permissions {
@@ -84,10 +103,12 @@ tasks {
 
     runServer {
         minecraftVersion(minecraftVersion)
+        downloadPlugins(testServerPlugins)
     }
 }
 
 // Adds the runFolia task, the one to use day to day: Paper cannot detect region violations.
 runPaper.folia.registerTask {
     minecraftVersion(minecraftVersion)
+    downloadPlugins(testServerPlugins)
 }
