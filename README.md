@@ -24,7 +24,6 @@ working code instead of a list of rules.
 | Player data | A worked example of loading, caching and saving per-player data without blocking a tick or losing a write. |
 | Metrics | bStats, off until you set your own bStats id, and switchable in `config.yml`. |
 | Update check | Asks GitHub once at startup for a newer release and logs it. Switchable in `config.yml`. |
-| Examples | `/example`: four commands showing how to reach another player, a block, world state and a file. |
 | Tests | Unit tests, plus a smoke test that boots a real Folia server in CI. |
 
 ## Getting started
@@ -90,8 +89,6 @@ concurrent collections (the profile cache). Never a plain `HashMap`.
 ones, and a future still waiting on such a task never completes. Whatever is left, such as saving
 data, has to run synchronously in `disable()`, and must not touch the world.
 
-`ExampleCommand` applies the first rule to four real cases, with the reasoning in its comments.
-
 Paper and unit tests run everything on one thread, so they cannot catch a violation of these rules.
 Only a Folia server can, which is why the smoke test exists.
 
@@ -114,7 +111,6 @@ dev.foliate
 ├── hook/                optional integrations: placeholderapi, zmenu
 ├── sidebar/             the FastBoard sidebar
 ├── profile/             the per-player data example
-├── example/             /example, the commands that demonstrate the threading rules
 ├── metrics/             bStats
 ├── update/              the update check
 └── selftest/            what the smoke test runs
@@ -152,7 +148,6 @@ A feature is its package, the tests of that package, and what refers to it:
 
 | Feature | Also remove |
 | --- | --- |
-| `example` | its two lines in `FoliatePlugin`; `COMMAND_EXAMPLE` in `Permissions` and its node in `build.gradle.kts`; the `example` keys in `lang/*.yml`; `"example time"` in `SelfTest` |
 | `metrics` | its line in `FoliatePlugin`; the `metrics` setting of `PluginConfig`; the `bstats` dependency |
 | `update` | its line in `FoliatePlugin`; the `updateCheck` setting of `PluginConfig`; `updates` in `expectedModules` |
 | `sidebar` | its line in `FoliatePlugin`; the `sidebar` section of `PluginConfig`; the `fastboard` dependency; `sidebar` in `expectedModules` (`build.gradle.kts`) |

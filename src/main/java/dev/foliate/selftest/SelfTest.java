@@ -166,7 +166,7 @@ public final class SelfTest {
 
     /** Run from the console, on the global region, like a command typed in the server console. */
     private void commandsAreRegistered() {
-        for (String command : List.of("foliate info", "example time")) {
+        for (String command : List.of("foliate info")) {
             check(server.dispatchCommand(server.getConsoleSender(), command), "'" + command + "' is not registered");
         }
     }
