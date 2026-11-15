@@ -14,7 +14,7 @@ cannot tell you.
 5. Push and open a PR containing `Closes #<issue>`. CI must be green.
 6. Review the PR with fresh eyes, post the findings on the PR, fix them.
 7. Squash-merge and delete the branch. With stacked PRs, retarget the next PR to `main` before
-   deleting the merged branch: GitHub closes a PR whose base branch disappears.
+   deleting the merged branch from the command line: GitHub then closes a PR left without a base.
 
 ## Architecture conventions
 
@@ -33,6 +33,6 @@ cannot tell you.
   only.
 - Files the plugin owns are read with `core.yaml.Yaml` or ConfigLib (YAML 1.2), never Bukkit's
   `YamlConfiguration` (YAML 1.1 would change the type of values such as `no`).
-- Code that schedules depends on the `Schedulers` interface and is tested with `ManualSchedulers`:
-  MockBukkit cannot cancel tasks.
+- Code that schedules depends on the `Schedulers` interface. Anything using timers or cancellation
+  is tested with `ManualSchedulers`: MockBukkit cannot cancel tasks.
 - Every package has a `package-info.java` annotated with `@NullMarked`.
