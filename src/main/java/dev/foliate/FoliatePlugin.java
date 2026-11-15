@@ -1,9 +1,12 @@
 package dev.foliate;
 
+import dev.foliate.command.FoliateCommand;
+import dev.foliate.core.Platform;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.scheduler.Schedulers;
+import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jspecify.annotations.Nullable;
 
@@ -33,7 +36,13 @@ public class FoliatePlugin extends JavaPlugin {
 
         if (!modules.enableAll()) {
             getServer().getPluginManager().disablePlugin(this);
+            return;
         }
+
+        FoliateCommand command = new FoliateCommand(
+                modules, messages, schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), Platform.describe());
+        getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> event.registrar()
+                .register(command.build(), "Shows information about Foliate and reloads it."));
     }
 
     @Override

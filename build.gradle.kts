@@ -1,3 +1,5 @@
+import xyz.jpenilla.resourcefactory.bukkit.Permission
+
 plugins {
     java
     alias(libs.plugins.shadow)
@@ -39,6 +41,18 @@ bukkitPluginYaml {
     foliaSupported = true
     description = project.description
     website = "https://github.com/pkhemae/foliate"
+
+    // Keep in sync with dev.foliate.command.Permissions.
+    permissions {
+        register("foliate.command.info") {
+            description = "Allows /foliate info."
+            default = Permission.Default.OP
+        }
+        register("foliate.command.reload") {
+            description = "Allows /foliate reload."
+            default = Permission.Default.OP
+        }
+    }
 }
 
 tasks {

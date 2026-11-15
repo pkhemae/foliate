@@ -3,3 +3,15 @@
 # A message missing from this file falls back to the plugin's built-in text.
 
 prefix: "<dark_gray>[<aqua>Foliate</aqua>]</dark_gray> "
+
+command:
+  info:
+    - "<prefix><white>Foliate <aqua><version></aqua>"
+    - "<gray>Platform: <white><platform>"
+    - "<gray>Modules: <white><modules>"
+  reload:
+    started: "<prefix><gray>Reloading..."
+    success: "<prefix><green>Configuration and messages reloaded."
+    failure: "<prefix><red>Could not reload <white><module></white>: <error>"
+    unexpected: "<prefix><red>Could not reload <white><module></white> because of an unexpected error. See the console."
+    error: "<prefix><red>The reload failed unexpectedly. See the console."
