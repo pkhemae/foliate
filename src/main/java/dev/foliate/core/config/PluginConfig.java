@@ -30,6 +30,21 @@ public final class PluginConfig {
     })
     private String defaultLocale = "en";
 
+    @Comment({
+        "Sends anonymous usage statistics to bStats.org: a random server id, player count, online mode,",
+        "server, plugin and Java versions, operating system and number of processor cores.",
+        "This is an outbound connection. It can also be turned off for every plugin in plugins/bStats/config.yml.",
+        "A change here applies after a server restart."
+    })
+    private boolean metrics = true;
+
+    @Comment({
+        "Asks GitHub once at startup whether a newer release exists, and says so in the console.",
+        "This is an outbound connection, made at startup: nothing about the server is sent beyond its address.",
+        "A change here applies after a server restart."
+    })
+    private boolean updateCheck = true;
+
     @Comment("Scoreboard shown on the right of each player's screen.")
     private Sidebar sidebar = new Sidebar();
 
@@ -49,6 +64,14 @@ public final class PluginConfig {
 
     public String defaultLocale() {
         return defaultLocale;
+    }
+
+    public boolean metrics() {
+        return metrics;
+    }
+
+    public boolean updateCheck() {
+        return updateCheck;
     }
 
     public Sidebar sidebar() {
