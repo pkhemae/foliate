@@ -52,6 +52,7 @@ dependencies {
     // MockBukkit does not expose the server API to consumers, tests need it on their own classpath.
     testImplementation(libs.folia.api)
     testImplementation(libs.placeholderapi)
+    testImplementation(libs.zmenu.api) { isTransitive = false }
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
