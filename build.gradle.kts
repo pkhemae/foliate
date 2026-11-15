@@ -16,6 +16,7 @@ val withHooks: Boolean = providers.gradleProperty("hooks").map(String::toBoolean
 val testServerPlugins: Action<DownloadPluginsSpec> = Action {
     if (withHooks) {
         modrinth("placeholderapi", libs.versions.placeholderapi.get())
+        modrinth("zmenu", libs.versions.zmenu.get())
     }
 }
 
@@ -29,6 +30,9 @@ repositories {
     maven("https://repo.helpch.at/releases/") {
         content { includeGroup("me.clip") }
     }
+    maven("https://repo.groupez.dev/releases/") {
+        content { includeGroupByRegex("fr\\.maxlego08.*") }
+    }
 }
 
 dependencies {
@@ -36,6 +40,7 @@ dependencies {
 
     // Optional integrations: provided by the other plugin when it is installed, never bundled.
     compileOnly(libs.placeholderapi)
+    compileOnly(libs.zmenu.api) { isTransitive = false }
 
     // Bundled in the jar and relocated by shadowJar.
     implementation(libs.configlib.yaml)
@@ -59,13 +64,17 @@ bukkitPluginYaml {
     description = project.description
     authors = listOf("Foliate contributors")
     website = "https://github.com/pkhemae/foliate"
-    softDepend = listOf("PlaceholderAPI")
+    softDepend = listOf("PlaceholderAPI", "zMenu")
 
     // Keep in sync with dev.foliate.command.Permissions.
     permissions {
         register("foliate.command.info") {
             description = "Allows /foliate info."
             default = Permission.Default.OP
+        }
+        register("foliate.command.menu") {
+            description = "Allows /foliate menu."
+            default = Permission.Default.TRUE
         }
         register("foliate.command.reload") {
             description = "Allows /foliate reload."

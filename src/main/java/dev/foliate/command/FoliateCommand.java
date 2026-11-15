@@ -1,8 +1,10 @@
 package dev.foliate.command;
 
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.tree.LiteralCommandNode;
+import dev.foliate.core.menu.Menus;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.scheduler.EntityRetiredException;
@@ -13,6 +15,8 @@ import java.util.function.Predicate;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
@@ -30,32 +34,54 @@ public final class FoliateCommand {
     private final Logger logger;
     private final String version;
     private final String platform;
+    private final @Nullable Menus menus;
 
+    /**
+     * @param menus null when no menu plugin is installed; the menu subcommand is then left out
+     */
     public FoliateCommand(
             ModuleManager modules,
             MessageService messages,
             Schedulers schedulers,
             Logger logger,
             String version,
-            String platform) {
+            String platform,
+            @Nullable Menus menus) {
         this.modules = modules;
         this.messages = messages;
         this.schedulers = schedulers;
         this.logger = logger;
         this.version = version;
         this.platform = platform;
+        this.menus = menus;
     }
 
     public LiteralCommandNode<CommandSourceStack> build() {
-        return Commands.literal("foliate")
-                .requires(permission(Permissions.COMMAND_INFO).or(permission(Permissions.COMMAND_RELOAD)))
+        Predicate<CommandSourceStack> anySubcommand =
+                permission(Permissions.COMMAND_INFO).or(permission(Permissions.COMMAND_RELOAD));
+        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("foliate")
                 .then(Commands.literal("info")
                         .requires(permission(Permissions.COMMAND_INFO))
                         .executes(this::info))
                 .then(Commands.literal("reload")
                         .requires(permission(Permissions.COMMAND_RELOAD))
-                        .executes(this::reload))
-                .build();
+                        .executes(this::reload));
+
+        Menus menus = this.menus;
+        if (menus != null) {
+            Predicate<CommandSourceStack> canOpenMenu = permission(Permissions.COMMAND_MENU)
+                    .and(source -> source.getExecutor() instanceof Player);
+            anySubcommand = anySubcommand.or(canOpenMenu);
+            root.then(Commands.literal("menu").requires(canOpenMenu).executes(context -> {
+                // The executor is the player the command runs as, which differs from the sender
+                // under /execute as. Menus#open hops to that player's region by itself.
+                if (context.getSource().getExecutor() instanceof Player player) {
+                    menus.open(player, "example");
+                }
+                return Command.SINGLE_SUCCESS;
+            }));
+        }
+        return root.requires(anySubcommand).build();
     }
 
     private int info(CommandContext<CommandSourceStack> context) {
