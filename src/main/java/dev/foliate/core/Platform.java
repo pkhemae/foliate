@@ -10,7 +10,10 @@ public final class Platform {
 
     private Platform() {}
 
-    /** True on Folia and its forks, where regions tick in parallel. */
+    /**
+     * True on Folia, where regions tick in parallel. A fork of Folia that ships under its own
+     * brand is only recognised if it still declares itself compatible with Folia's.
+     */
     public static boolean isFolia() {
         return ServerBuildInfo.buildInfo().isBrandCompatible(FOLIA);
     }

@@ -5,12 +5,14 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleManager;
+import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import java.util.function.Predicate;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Entity;
 import org.slf4j.Logger;
 
 /**
@@ -68,25 +70,53 @@ public final class FoliateCommand {
 
     private int reload(CommandContext<CommandSourceStack> context) {
         CommandSender sender = context.getSource().getSender();
+        // Said before returning: senders such as RCON only keep what they receive while the
+        // command runs, and the result below comes later.
+        messages.send(sender, "command.reload.started");
         // Reloading reads files: it must not run on the tick thread the command was typed on.
-        schedulers.async()
-                .supply(modules::reloadAll)
-                .thenAccept(failures -> {
-                    if (failures.isEmpty()) {
-                        messages.send(sender, "command.reload.success");
-                        return;
-                    }
-                    failures.forEach((module, error) -> messages.send(
-                            sender,
-                            "command.reload.failure",
-                            Placeholder.unparsed("module", module),
-                            Placeholder.unparsed("error", String.valueOf(error.getMessage()))));
-                })
-                .exceptionally(error -> {
-                    logger.error("Reload failed unexpectedly", error);
-                    return null;
-                });
+        schedulers.async().supply(modules::reloadAll).whenComplete((failures, error) -> reply(sender, () -> {
+            if (error != null) {
+                logger.error("Reload failed unexpectedly", error);
+                messages.send(sender, "command.reload.error");
+            } else if (failures.isEmpty()) {
+                messages.send(sender, "command.reload.success");
+            } else {
+                failures.forEach((module, failure) -> reportFailure(sender, module, failure));
+            }
+        }));
         return Command.SINGLE_SUCCESS;
+    }
+
+    private void reportFailure(CommandSender sender, String module, Throwable failure) {
+        // A checked exception is a problem the module anticipated and worded for an administrator:
+        // its first line is shown. Anything else is a bug whose details belong in the console.
+        if (failure instanceof RuntimeException || failure instanceof Error || failure.getMessage() == null) {
+            messages.send(sender, "command.reload.unexpected", Placeholder.unparsed("module", module));
+            return;
+        }
+        String reason = failure.getMessage().lines().findFirst().orElse("");
+        messages.send(
+                sender,
+                "command.reload.failure",
+                Placeholder.unparsed("module", module),
+                Placeholder.unparsed("error", reason));
+    }
+
+    /**
+     * Runs a reply where its recipient expects it: the sender's own region for an entity, the
+     * global region for the console and other non-entity senders. Some senders reject messages
+     * coming from another thread.
+     */
+    private void reply(CommandSender sender, Runnable reply) {
+        try {
+            if (sender instanceof Entity entity) {
+                schedulers.entity(entity).executeOrRun(reply);
+            } else {
+                schedulers.global().executeOrRun(reply);
+            }
+        } catch (EntityRetiredException gone) {
+            // The sender left before the reload finished: nobody to tell.
+        }
     }
 
     private static Predicate<CommandSourceStack> permission(String node) {
