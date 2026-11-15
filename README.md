@@ -205,16 +205,17 @@ until the test calls `tick(n)`. MockBukkit cannot cancel scheduled tasks.
 
 ## Releasing
 
-Push a tag named after the version, with a leading `v`:
+On a commit of `main` whose CI is green, push a tag named after the version, with a leading `v`:
 
 ```bash
 git tag v1.2.0 && git push origin v1.2.0
 ```
 
-The release workflow builds the plugin as that version, runs the tests, and publishes a GitHub
-release with the jar attached and generated notes. A tag with a suffix (`v1.2.0-rc.1`) becomes a
-pre-release. `gradle.properties` keeps the next snapshot version; bump it after a release. The
-update check reads these GitHub releases.
+The release workflow builds the plugin as that version, runs the tests and the Folia smoke test,
+and publishes a GitHub release with the jar attached and generated notes. A tag with a suffix
+(`v1.2.0-rc.1`) becomes a pre-release. `gradle.properties` keeps the next snapshot version; bump
+it after a release. The update check announces full releases only: GitHub's "latest release"
+never is a pre-release.
 
 ## Outbound connections
 

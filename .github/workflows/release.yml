@@ -16,6 +16,24 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history, to check the tag is on main. The token is not left in the git
+          # configuration while Gradle runs third-party code.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The update check of every installed copy reads the latest release: a tag it cannot parse,
+      # or one cut from a commit that never went through main, must not become that release.
+      - name: Check the tag
+        run: |
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$GITHUB_REF_NAME' is not a version tag such as v1.2.0 or v1.2.0-rc.1"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not on main"
+            exit 1
+          fi
 
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
@@ -28,6 +46,13 @@ jobs:
       - name: Build and test
         run: ./gradlew build -Pversion="${GITHUB_REF_NAME#v}"
 
+      # Same smoke test as CI: what is released has enabled on a real Folia server.
+      # -PacceptEula=true accepts the Minecraft EULA (https://aka.ms/MinecraftEULA) for this
+      # throwaway server.
+      - name: Smoke test on Folia
+        timeout-minutes: 5
+        run: ./gradlew runFolia -Pversion="${GITHUB_REF_NAME#v}" -PselfTest=true -PacceptEula=true < /dev/null
+
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -39,4 +64,9 @@ jobs:
           case "$version" in
             *-*) flags+=(--prerelease) ;;
           esac
-          gh release create "$GITHUB_REF_NAME" "${jar[@]}" "${flags[@]}"
+          # Re-running the job, or a release drafted by hand for the tag, must not fail here.
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${jar[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${jar[@]}" "${flags[@]}"
+          fi
