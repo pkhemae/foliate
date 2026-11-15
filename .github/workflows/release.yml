@@ -1,0 +1,42 @@
+name: Release
+
+# Pushing a tag such as v1.2.0 builds the plugin as version 1.2.0 and publishes it as a GitHub
+# release, which is also where the plugin's update check looks. A tag with a suffix, such as
+# v1.2.0-rc.1, is published as a pre-release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      # The tag is the version: gradle.properties keeps the next snapshot.
+      - name: Build and test
+        run: ./gradlew build -Pversion="${GITHUB_REF_NAME#v}"
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The installable jar, not the "-plain" one next to it.
+          jar=(build/libs/*-"${version}".jar)
+          flags=(--generate-notes --verify-tag)
+          case "$version" in
+            *-*) flags+=(--prerelease) ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" "${jar[@]}" "${flags[@]}"

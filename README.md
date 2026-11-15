@@ -203,6 +203,19 @@ null when zMenu is not installed: check it, as `FoliateCommand` does.
 **Test a module that uses timers.** Use `ManualSchedulers` from the test sources: nothing runs
 until the test calls `tick(n)`. MockBukkit cannot cancel scheduled tasks.
 
+## Releasing
+
+Push a tag named after the version, with a leading `v`:
+
+```bash
+git tag v1.2.0 && git push origin v1.2.0
+```
+
+The release workflow builds the plugin as that version, runs the tests, and publishes a GitHub
+release with the jar attached and generated notes. A tag with a suffix (`v1.2.0-rc.1`) becomes a
+pre-release. `gradle.properties` keeps the next snapshot version; bump it after a release. The
+update check reads these GitHub releases.
+
 ## Outbound connections
 
 Hangar and Modrinth require a plugin to say what it connects to. This one makes two kinds of
