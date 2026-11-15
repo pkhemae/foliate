@@ -61,8 +61,12 @@ public final class UpdateCheckModule implements Module {
                         currentVersion,
                         release.url());
             }
-        } catch (IOException | IllegalArgumentException e) {
-            logger.info("Could not check for a newer version: {}", e.getMessage());
+        } catch (IOException | RuntimeException | LinkageError e) {
+            // Includes a version that cannot be compared, and classes gone because the server
+            // stopped while the request was in flight. None of it is worth a stack trace.
+            logger.info(
+                    "Could not check for a newer version: {}",
+                    e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }

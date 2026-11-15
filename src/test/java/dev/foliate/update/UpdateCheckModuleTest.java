@@ -42,6 +42,7 @@ class UpdateCheckModuleTest {
         assertTrue(logged.isEmpty(), "the network call must not happen on the startup thread");
         schedulers.tick(1);
 
+        assertEquals(List.of("async"), schedulers.contextsUsed());
         assertEquals(1, logged.size());
         assertTrue(logged.getFirst().contains("v1.1.0"), logged.getFirst());
         assertTrue(logged.getFirst().contains("https://example.test/v1.1.0"), logged.getFirst());
@@ -65,6 +66,22 @@ class UpdateCheckModuleTest {
 
         assertEquals(1, logged.size());
         assertTrue(logged.getFirst().contains("no route to host"), logged.getFirst());
+    }
+
+    @Test
+    void failuresWithoutAMessageAndUnreadableVersionsAreStillExplained() {
+        module("1.0.0", () -> {
+                    throw new java.net.ConnectException();
+                })
+                .check();
+        module("1.0.0", () -> Optional.of(release("nightly"))).check();
+        module("1.0.0", () -> {
+                    throw new UnsupportedOperationException();
+                })
+                .check();
+
+        assertEquals(3, logged.size());
+        assertTrue(logged.stream().noneMatch(line -> line.endsWith("null")), logged.toString());
     }
 
     @Test

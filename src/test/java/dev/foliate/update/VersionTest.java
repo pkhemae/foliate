@@ -26,8 +26,15 @@ class VersionTest {
     }
 
     @Test
+    void buildMetadataAndLongNumbersAreAccepted() {
+        assertEquals(0, Version.parse("1.0.0+build.5").compareTo(Version.parse("1.0.0")));
+        assertTrue(newer("20261115123456", "20251115123456"));
+    }
+
+    @Test
     void textThatIsNotAVersionIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> Version.parse("latest"));
+        assertThrows(IllegalArgumentException.class, () -> Version.parse("1.0.0.Final"));
     }
 
     private static boolean newer(String candidate, String current) {

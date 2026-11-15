@@ -134,7 +134,7 @@ check. The rest, by kind:
   `gradle.properties`; `pluginName`, the authors, the website and the permission nodes in
   `build.gradle.kts`; the copyright line in `LICENSE`.
 - **Yours to set**: the repository in `GitHubReleases.REPOSITORY`, which the update check reads
-  releases from, and `MetricsModule.PLUGIN_ID`, your id on bStats.
+  releases from, and `FoliatePlugin.BSTATS_PLUGIN_ID`, your id on bStats.
 - **Code**: the `dev.foliate` package and the `FoliatePlugin` class (rename them with your IDE,
   which also updates the tests); the command name and its description in `FoliateCommand` and
   `FoliatePlugin`; the nodes in `Permissions`; the placeholder identifier in `FoliateExpansion`.
@@ -209,9 +209,15 @@ Hangar and Modrinth require a plugin to say what it connects to. This one makes 
 outbound connection, both of which an administrator can turn off in `config.yml`:
 
 - **Update check** (`update-check`): one request to the GitHub API at startup, to read the latest
-  release of the repository named in `GitHubReleases.REPOSITORY`. Nothing about the server is sent.
-- **Metrics** (`metrics`): anonymous statistics to bStats.org. Inactive until you register your
-  plugin on bStats and put its id in `MetricsModule.PLUGIN_ID`.
+  release of the repository named in `GitHubReleases.REPOSITORY`. Nothing about the server is sent
+  beyond what any request reveals, its address and Java's user agent. It is on by default, so the
+  very first start makes it before an administrator has seen the setting.
+- **Metrics** (`metrics`): anonymous statistics to bStats.org (a random server id, player count,
+  online mode, server, plugin and Java versions, operating system, processor cores). Inactive
+  until you register your plugin on bStats and put its id in `FoliatePlugin.BSTATS_PLUGIN_ID`.
+
+Both settings are read at startup: a change applies after a restart. With MySQL or MariaDB the
+plugin also connects to the database server the administrator configured.
 
 Tell your users about both on your download page.
 
