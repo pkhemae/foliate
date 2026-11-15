@@ -1,5 +1,6 @@
 package dev.foliate;
 
+import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.scheduler.Schedulers;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -24,6 +25,8 @@ public class FoliatePlugin extends JavaPlugin {
         this.modules = modules;
 
         // Register modules here, dependencies first.
+        ConfigService config = new ConfigService(getDataPath(), getSLF4JLogger());
+        modules.register(config);
 
         if (!modules.enableAll()) {
             getServer().getPluginManager().disablePlugin(this);
