@@ -21,7 +21,7 @@ working code instead of a list of rules.
 | Menus | YAML menus rendered by [zMenu](https://github.com/Maxlego08/zMenu). Optional. |
 | Sidebar | A per-player scoreboard drawn with FastBoard, since Bukkit scoreboards do not work on Folia. |
 | Storage | A SQL database (SQLite out of the box, MySQL or MariaDB by configuration) with schema migrations. |
-| Player data | A worked example of loading, caching and saving per-player data without blocking a tick. |
+| Player data | A worked example of loading, caching and saving per-player data without blocking a tick or losing a write. |
 | Tests | Unit tests, plus a smoke test that boots a real Folia server in CI. |
 
 ## Getting started
@@ -43,7 +43,7 @@ server stops and asks you to accept the Minecraft EULA in `run/eula.txt`. Add `-
 start without the two optional plugins.
 
 ```bash
-./gradlew runFolia -PselfTest
+./gradlew runFolia -PselfTest=true
 ```
 
 runs the smoke test: the plugin tests itself on the real server, then stops it, and the task fails
