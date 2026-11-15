@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 
 /**
- * Applies the SQL scripts under {@code db/migration/} that the database has not seen yet, in
+ * Applies the SQL scripts under {@code migrations/} that the database has not seen yet, in
  * order, each in its own transaction, and records them in a history table.
  *
  * <p>To change the schema, add a new script and append its name to {@link #SCRIPTS}. Never edit
@@ -29,7 +29,7 @@ import org.slf4j.Logger;
 final class Migrations {
 
     /** In the order they are applied. The position in this list, from 1, is the version. */
-    private static final List<String> SCRIPTS = List.of("V1__create_profiles.sql");
+    private static final List<String> SCRIPTS = List.of("001_create_profiles.sql");
 
     private static final String HISTORY_TABLE = "foliate_schema_history";
 
@@ -89,7 +89,7 @@ final class Migrations {
 
     private static void run(Connection connection, String script) throws SQLException, IOException {
         String sql;
-        try (InputStream in = Migrations.class.getResourceAsStream("/db/migration/" + script)) {
+        try (InputStream in = Migrations.class.getResourceAsStream("/migrations/" + script)) {
             if (in == null) {
                 throw new IOException("Migration " + script + " is missing from the plugin jar");
             }

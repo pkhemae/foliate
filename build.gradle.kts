@@ -100,7 +100,7 @@ bukkitPluginYaml {
     website = "https://github.com/pkhemae/foliate"
     softDepend = listOf("PlaceholderAPI", "zMenu")
 
-    // Keep in sync with dev.foliate.command.Permissions.
+    // Keep in sync with dev.foliate.commands.Permissions.
     permissions {
         register("foliate.command.info") {
             description = "Allows /foliate info."
