@@ -1,4 +1,5 @@
 import xyz.jpenilla.resourcefactory.bukkit.Permission
+import xyz.jpenilla.runpaper.task.RunServer
 import xyz.jpenilla.runtask.pluginsapi.DownloadPluginsSpec
 
 plugins {
@@ -19,6 +20,14 @@ val testServerPlugins: Action<DownloadPluginsSpec> = Action {
         modrinth("zmenu", libs.versions.zmenu.get())
     }
 }
+
+// -PacceptEula accepts the Minecraft EULA (https://aka.ms/MinecraftEULA) for the test server, in
+// place of editing run/eula.txt. Meant for CI: only pass it if you agree to the EULA.
+val acceptEula: Boolean = providers.gradleProperty("acceptEula").isPresent
+
+// -PselfTest makes the plugin test itself once the server is up, then stops the server. The task
+// fails unless the self-test passed and the plugin logged no error. This is the smoke test.
+val selfTest: Boolean = providers.gradleProperty("selfTest").isPresent
 
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(25)
@@ -127,4 +136,27 @@ tasks {
 runPaper.folia.registerTask {
     minecraftVersion(minecraftVersion)
     downloadPlugins(testServerPlugins)
+}
+
+tasks.withType<RunServer>().configureEach {
+    if (acceptEula) {
+        jvmArgs("-Dcom.mojang.eula.agree=true")
+    }
+    if (selfTest) {
+        jvmArgs("-Dfoliate.selftest=true")
+        val log = runDirectory.file("logs/latest.log")
+        doFirst {
+            log.get().asFile.delete()
+        }
+        doLast {
+            val lines = log.get().asFile.takeIf { it.exists() }?.readLines().orEmpty()
+            val errors = lines.filter { "ERROR]: [Foliate]" in it || "dev.foliate" in it && "Exception" in it }
+            if (lines.none { "FOLIATE SELF-TEST PASSED" in it } || errors.isNotEmpty()) {
+                throw GradleException(
+                    "The self-test did not pass. Relevant log lines:\n" +
+                        (errors + lines.filter { "SELF-TEST" in it }).distinct().joinToString("\n")
+                )
+            }
+        }
+    }
 }

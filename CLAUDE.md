@@ -8,8 +8,9 @@ cannot tell you.
 1. Work starts from a GitHub issue.
 2. Branch off `main`: `feat/<issue>-<slug>`, `fix/...`, `chore/...`, `docs/...`. Never commit to `main`.
 3. Small Conventional Commits, in English.
-4. Verify behaviour with `./gradlew runFolia`, not only `./gradlew build`: Paper and MockBukkit run
-   everything on one thread and cannot detect region violations.
+4. Verify behaviour on Folia, not only with `./gradlew build`: Paper and MockBukkit run everything
+   on one thread and cannot detect region violations. `./gradlew runFolia` starts a server to try
+   things by hand; `./gradlew runFolia -PselfTest` runs the automated smoke test.
 5. Push and open a PR containing `Closes #<issue>`. CI must be green.
 6. Review the PR with fresh eyes, post the findings on the PR, fix them.
 7. Squash-merge and delete the branch.

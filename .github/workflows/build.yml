@@ -36,3 +36,34 @@ jobs:
             build/libs/*.jar
             !build/libs/*-plain.jar
           if-no-files-found: error
+
+  # Unit tests run on one thread and cannot see region violations: this boots a real Folia server
+  # and lets the plugin test itself, with and without the optional plugins it integrates with.
+  smoke-test:
+    name: Folia smoke test (hooks ${{ matrix.hooks }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        hooks: [true, false]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # -PacceptEula accepts the Minecraft EULA (https://aka.ms/MinecraftEULA) for this throwaway
+      # server. Remove this job if you do not agree to it.
+      - name: Start Folia and run the self-test
+        run: ./gradlew runFolia -PselfTest -PacceptEula -Phooks=${{ matrix.hooks }} < /dev/null
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: server-log-hooks-${{ matrix.hooks }}
+          path: run/logs/latest.log
