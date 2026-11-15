@@ -14,7 +14,7 @@ import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleManager;
-import dev.foliate.core.scheduler.Schedulers;
+import dev.foliate.core.scheduler.FoliaSchedulers;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
@@ -83,13 +83,13 @@ class FoliateCommandTest {
         assertTrue(modules.enableAll());
 
         FoliateCommand command =
-                new FoliateCommand(modules, messages, new Schedulers(plugin), NOPLogger.NOP_LOGGER, "1.2.3", "Test 26.2",
+                new FoliateCommand(modules, messages, new FoliaSchedulers(plugin), NOPLogger.NOP_LOGGER, "1.2.3", "Test 26.2",
                 (player, menu) -> opened.add(player.getName() + " " + menu));
         dispatcher = new CommandDispatcher<>();
         dispatcher.getRoot().addChild(command.build());
         withoutMenus = new CommandDispatcher<>();
         withoutMenus.getRoot().addChild(new FoliateCommand(
-                        modules, messages, new Schedulers(plugin), NOPLogger.NOP_LOGGER, "1.2.3", "Test 26.2", null)
+                        modules, messages, new FoliaSchedulers(plugin), NOPLogger.NOP_LOGGER, "1.2.3", "Test 26.2", null)
                 .build());
     }
 

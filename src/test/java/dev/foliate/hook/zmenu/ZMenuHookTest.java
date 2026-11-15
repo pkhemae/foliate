@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.menu.MenuException;
 import dev.foliate.core.message.MessageService;
-import dev.foliate.core.scheduler.Schedulers;
+import dev.foliate.core.scheduler.FoliaSchedulers;
 import fr.maxlego08.menu.api.Inventory;
 import fr.maxlego08.menu.api.InventoryManager;
 import fr.maxlego08.menu.api.exceptions.InventoryException;
@@ -51,7 +51,7 @@ class ZMenuHookTest {
         MessageService messages = new MessageService(
                 directory, getClass().getClassLoader()::getResourceAsStream, config, NOPLogger.NOP_LOGGER);
         messages.enable();
-        hook = new ZMenuHook(plugin, new Schedulers(plugin), messages, this::fakeZMenu);
+        hook = new ZMenuHook(plugin, new FoliaSchedulers(plugin), messages, this::fakeZMenu);
     }
 
     @AfterEach
