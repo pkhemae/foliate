@@ -4,20 +4,11 @@
       <stop offset="0" stop-color="#161b22"/>
       <stop offset="1" stop-color="#0d1117"/>
     </linearGradient>
-    <linearGradient id="leaf" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#7ee787"/>
-      <stop offset="1" stop-color="#238636"/>
-    </linearGradient>
   </defs>
   <rect x="8" y="8" width="496" height="496" rx="36" fill="url(#background)" stroke="#30363d" stroke-width="4"/>
-  <g transform="rotate(38 256 256)">
-    <path d="M256 84 C376 144 392 288 256 400 C120 288 136 144 256 84 Z" fill="url(#leaf)"/>
-    <g stroke="#0d1117" stroke-width="12" stroke-linecap="round" fill="none" opacity="0.85">
-      <path d="M256 130 L256 400"/>
-      <path d="M256 330 L320 280 M256 330 L192 280"/>
-      <path d="M256 270 L322 218 M256 270 L190 218"/>
-      <path d="M256 210 L300 172 M256 210 L212 172"/>
-    </g>
-    <path d="M256 400 L256 452" stroke="#238636" stroke-width="14" stroke-linecap="round" fill="none"/>
+  <!-- The leaf is the "leaf" glyph of Material Design Icons (Pictogrammers, Apache 2.0), the icon
+       papermc.io uses for Folia. -->
+  <g transform="translate(106 106) scale(12.5)">
+    <path fill="#ffffff" d="M17,8C8,10 5.9,16.17 3.82,21.34L5.71,22L6.66,19.7C7.14,19.87 7.64,20 8,20C19,20 22,3 22,3C21,5 14,5.25 9,6.25C4,7.25 2,11.5 2,13.5C2,15.5 3.75,17.25 3.75,17.25C7,8 17,8 17,8Z"/>
   </g>
 </svg>
