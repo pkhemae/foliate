@@ -3,10 +3,10 @@
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
   "packageRules": [
     {
-      "description": "The Minecraft line is changed by hand, together with everything tied to it (see gradle/libs.versions.toml): only newer builds of the 26.2 line are proposed. Versions look like 26.2.build.7-beta, which is not semver.",
+      "description": "The Minecraft line is changed by hand, together with everything tied to it (see gradle/libs.versions.toml): only newer builds of the 26.2 line are proposed, hotfix lines such as 26.2.1 excluded. Versions look like 26.2.build.7-beta, which is not semver; alpha and beta builds count as pre-releases.",
       "matchPackageNames": ["dev.folia:folia-api"],
-      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)(\\.(?<patch>\\d+))?\\.build\\.(?<build>\\d+)-[a-z]+$",
-      "allowedVersions": "/^26\\.2(\\.\\d+)?\\.build\\./"
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)(\\.(?<patch>\\d+))?\\.build\\.(?<build>\\d+)-(?:(?<prerelease>alpha|beta)|stable)$",
+      "allowedVersions": "/^26\\.2\\.build\\./"
     },
     {
       "description": "The APIs of the optional plugins. The test servers download the plugins at the same versions, through the same catalog entries.",
