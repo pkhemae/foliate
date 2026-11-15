@@ -47,6 +47,9 @@ import org.slf4j.Logger;
  */
 public final class ProfileModule implements Module, Listener {
 
+    /** The SQL script that creates this module's table: to give to the {@code Database}. */
+    public static final String MIGRATION = "001_create_profiles.sql";
+
     private static final long LOAD_TIMEOUT_SECONDS = 10;
     private static final long FLUSH_TIMEOUT_SECONDS = 15;
 

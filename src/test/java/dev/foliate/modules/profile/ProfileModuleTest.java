@@ -18,6 +18,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -53,7 +54,8 @@ class ProfileModuleTest {
         messages = new MessageService(
                 directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
-        database = new Database(directory, () -> config.get().storage(), NOPLogger.NOP_LOGGER);
+        database = new Database(
+                directory, () -> config.get().storage(), List.of(ProfileModule.MIGRATION), NOPLogger.NOP_LOGGER);
         database.enable();
         profiles = new ProfileModule(
                 MockBukkit.createMockPlugin(), database, messages, placeholders, NOPLogger.NOP_LOGGER, clock);
@@ -206,7 +208,8 @@ class ProfileModuleTest {
         Path other = Files.createDirectory(directory.resolve("other"));
         ConfigService<PluginConfig> otherConfig = PluginConfig.service(other, NOPLogger.NOP_LOGGER);
         otherConfig.enable();
-        Database stopped = new Database(other, () -> otherConfig.get().storage(), NOPLogger.NOP_LOGGER);
+        Database stopped = new Database(
+                other, () -> otherConfig.get().storage(), List.of(ProfileModule.MIGRATION), NOPLogger.NOP_LOGGER);
         ProfileModule module = new ProfileModule(
                 MockBukkit.createMockPlugin(), stopped, messages, placeholders, NOPLogger.NOP_LOGGER, clock);
 

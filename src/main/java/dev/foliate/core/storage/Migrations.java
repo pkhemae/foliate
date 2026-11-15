@@ -19,26 +19,20 @@ import org.slf4j.Logger;
  * Applies the SQL scripts under {@code migrations/} that the database has not seen yet, in
  * order, each in its own transaction, and records them in a history table.
  *
- * <p>To change the schema, add a new script and append its name to {@link #SCRIPTS}. Never edit
- * a script that has shipped: servers that already ran it would not run it again. Scripts must stay
- * portable across SQLite and MySQL.
+ * <p>The scripts are given by the caller, in the order they apply: the position in the list, from
+ * 1, is the version. To change the schema, add a new script and append its name to that list. Never
+ * edit a script that has shipped: servers that already ran it would not run it again. Scripts must
+ * stay portable across SQLite and MySQL.
  *
  * <p>Keep each script to one change. MySQL commits schema statements as it runs them, so there a
  * script that fails halfway cannot be rolled back, and it is not recorded as applied either.
  */
 final class Migrations {
 
-    /** In the order they are applied. The position in this list, from 1, is the version. */
-    private static final List<String> SCRIPTS = List.of("001_create_profiles.sql");
-
     private static final String HISTORY_TABLE = "foliate_schema_history";
 
     private final Logger logger;
     private final List<String> scripts;
-
-    Migrations(Logger logger) {
-        this(logger, SCRIPTS);
-    }
 
     Migrations(Logger logger, List<String> scripts) {
         this.logger = logger;

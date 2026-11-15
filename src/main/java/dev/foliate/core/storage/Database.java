@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,16 +35,21 @@ public final class Database implements Module {
 
     private final Path dataDirectory;
     private final Supplier<StorageSettings> settings;
+    private final List<String> migrations;
     private final Logger logger;
     private volatile @Nullable HikariDataSource dataSource;
     private volatile @Nullable ExecutorService executor;
 
     /**
      * @param settings the current storage settings; read when the database starts
+     * @param migrations the names of the SQL scripts under {@code migrations/}, in the order they
+     *     apply; each part of the plugin that needs a table brings its own
      */
-    public Database(Path dataDirectory, Supplier<StorageSettings> settings, Logger logger) {
+    public Database(
+            Path dataDirectory, Supplier<StorageSettings> settings, List<String> migrations, Logger logger) {
         this.dataDirectory = dataDirectory;
         this.settings = settings;
+        this.migrations = List.copyOf(migrations);
         this.logger = logger;
     }
 
@@ -81,7 +87,7 @@ public final class Database implements Module {
         HikariDataSource source = new HikariDataSource(pool);
         dataSource = source;
         try (Connection connection = source.getConnection()) {
-            new Migrations(logger).apply(connection);
+            new Migrations(logger, migrations).apply(connection);
         }
 
         AtomicInteger counter = new AtomicInteger();

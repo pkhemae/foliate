@@ -60,7 +60,7 @@ public final class StorageSettings {
         @Comment("Maximum number of connections kept open.")
         private int poolSize = 4;
 
-        public Mysql() {}
+        private Mysql() {}
 
         public String host() {
             return host;

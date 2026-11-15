@@ -77,7 +77,8 @@ public class FoliatePlugin extends JavaPlugin {
         modules.register(new MetricsModule(this, () -> config.get().metrics(), BSTATS_PLUGIN_ID));
         modules.register(new UpdateCheckModule(
                 () -> config.get().updateCheck(), schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), new GitHubReleases()));
-        Database database = new Database(getDataPath(), () -> config.get().storage(), getSLF4JLogger());
+        Database database = new Database(
+                getDataPath(), () -> config.get().storage(), List.of(ProfileModule.MIGRATION), getSLF4JLogger());
         modules.register(database);
         modules.register(new ProfileModule(
                 this, database, messages, placeholders, getSLF4JLogger(), Clock.systemUTC()));

@@ -1,0 +1,4 @@
+CREATE TABLE notes (
+    id VARCHAR(36) PRIMARY KEY,
+    text VARCHAR(200) NOT NULL
+);

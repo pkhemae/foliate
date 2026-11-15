@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -25,6 +26,9 @@ import org.slf4j.helpers.NOPLogger;
 
 class DatabaseTest {
 
+    /** A script of the tests: the database knows nothing of the plugin's own tables. */
+    private static final List<String> MIGRATIONS = List.of("001_create_notes.sql");
+
     @TempDir
     Path directory;
 
@@ -35,7 +39,7 @@ class DatabaseTest {
     void setUp() throws Exception {
         config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
-        database = new Database(directory, () -> config.get().storage(), NOPLogger.NOP_LOGGER);
+        database = new Database(directory, () -> config.get().storage(), MIGRATIONS, NOPLogger.NOP_LOGGER);
     }
 
     @AfterEach
@@ -48,7 +52,7 @@ class DatabaseTest {
         database.enable();
 
         assertTrue(database.isRunning());
-        assertEquals(0, countRows("foliate_profiles"));
+        assertEquals(0, countRows("notes"));
         assertEquals(1, countRows("foliate_schema_history"));
     }
 
@@ -57,7 +61,7 @@ class DatabaseTest {
         database.enable();
         database.disable();
 
-        database = new Database(directory, () -> config.get().storage(), NOPLogger.NOP_LOGGER);
+        database = new Database(directory, () -> config.get().storage(), MIGRATIONS, NOPLogger.NOP_LOGGER);
         database.enable();
 
         assertEquals(1, countRows("foliate_schema_history"));
@@ -91,7 +95,7 @@ class DatabaseTest {
         database.enable();
         CompletableFuture<Integer> write = database.submit(connection -> {
             try (Statement statement = connection.createStatement()) {
-                return statement.executeUpdate("INSERT INTO foliate_profiles VALUES ('id', 'name', 1, 1, 1)");
+                return statement.executeUpdate("INSERT INTO notes VALUES ('id', 'text')");
             }
         });
 

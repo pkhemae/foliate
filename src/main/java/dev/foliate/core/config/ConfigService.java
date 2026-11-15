@@ -129,9 +129,11 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
                     : store.read(new ByteArrayInputStream(Yaml.dump(content).getBytes(StandardCharsets.UTF_8)));
             if (config.configVersion() != migrator.targetVersion()) {
                 // A programming error, not the administrator's: a step was added without the
-                // settings class starting at the new version, so migrations would run again.
-                throw new IllegalStateException("The settings class starts at config-version " + config.configVersion()
-                        + " but there are migration steps up to version " + migrator.targetVersion());
+                // settings class starting at the new version. A fresh install would then be written
+                // at the old version and migrated, needlessly, the next time it is loaded.
+                throw new IllegalStateException(config.getClass().getSimpleName() + " starts at config-version "
+                        + config.configVersion() + " but the migration steps lead to version "
+                        + migrator.targetVersion() + ": " + FILE_NAME + " would be written at the wrong version");
             }
             config.validate();
 
