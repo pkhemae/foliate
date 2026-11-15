@@ -79,7 +79,7 @@ public class FoliatePlugin extends JavaPlugin {
 
         FoliateCommand command = new FoliateCommand(
                 modules, messages, schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), Platform.describe(), menus);
-        ExampleCommand example = new ExampleCommand(schedulers, messages, getDataPath());
+        ExampleCommand example = new ExampleCommand(schedulers, messages, getDataPath(), getSLF4JLogger());
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
             event.registrar().register(command.build(), "Shows information about Foliate and reloads it.");
             event.registrar().register(example.build(), "Demonstrates the threading rules of Folia.");

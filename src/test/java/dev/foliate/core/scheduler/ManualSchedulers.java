@@ -24,7 +24,7 @@ import org.bukkit.entity.Player;
  * removed.
  *
  * <p>There are no regions here: every context runs on the same thread, so this proves nothing
- * about thread safety, nor that the right context was chosen.
+ * about thread safety. {@link #contextsUsed()} tells which context work was given to.
  */
 public final class ManualSchedulers implements Schedulers {
 
@@ -32,7 +32,9 @@ public final class ManualSchedulers implements Schedulers {
 
     private final List<Task> tasks = new ArrayList<>();
     private final Set<Entity> retired = new HashSet<>();
-    private final TaskContext shared = new ManualContext(() -> false);
+    private final List<String> used = new ArrayList<>();
+    private final TaskContext async = new ManualContext("async", () -> false);
+    private final TaskContext global = new ManualContext("global", () -> false);
     private long now;
 
     /**
@@ -57,6 +59,14 @@ public final class ManualSchedulers implements Schedulers {
         }
     }
 
+    /**
+     * The kind of context each piece of work was given to, in order: {@code async}, {@code global},
+     * {@code region} or {@code entity}. The only way a test can tell the right one was chosen.
+     */
+    public List<String> contextsUsed() {
+        return List.copyOf(used);
+    }
+
     /** Number of tasks still scheduled, repeating ones included. */
     public int pendingTasks() {
         return (int) tasks.stream().filter(Task::isLive).count();
@@ -64,22 +74,22 @@ public final class ManualSchedulers implements Schedulers {
 
     @Override
     public TaskContext async() {
-        return shared;
+        return async;
     }
 
     @Override
     public TaskContext global() {
-        return shared;
+        return global;
     }
 
     @Override
     public TaskContext region(Location location) {
-        return shared;
+        return new ManualContext("region", () -> false);
     }
 
     @Override
     public TaskContext entity(Entity entity) {
-        return new ManualContext(() -> retired.contains(entity)
+        return new ManualContext("entity", () -> retired.contains(entity)
                 || (entity instanceof Player player ? !player.isOnline() : !entity.isValid()));
     }
 
@@ -94,9 +104,11 @@ public final class ManualSchedulers implements Schedulers {
 
     private final class ManualContext implements TaskContext {
 
+        private final String kind;
         private final BooleanSupplier retired;
 
-        ManualContext(BooleanSupplier retired) {
+        ManualContext(String kind, BooleanSupplier retired) {
+            this.kind = kind;
             this.retired = retired;
         }
 
@@ -151,6 +163,7 @@ public final class ManualSchedulers implements Schedulers {
         }
 
         private Task schedule(Runnable runnable, Runnable whenRetired, long delay, long period) {
+            used.add(kind);
             Task task = new Task(runnable, whenRetired, retired, now + delay, period);
             if (retired.getAsBoolean()) {
                 task.cancelled = true;

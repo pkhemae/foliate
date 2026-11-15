@@ -27,8 +27,10 @@ example:
   feed:
     done: "<prefix><green><white><player></white> a été nourri."
     gone: "<prefix><red><white><player></white> n'est plus en ligne."
-  block: "<prefix><gray>Bloc en <white><x> <y> <z></white> : <white><type>"
+  block:
+    found: "<prefix><gray>Bloc en <white><x> <y> <z></white> : <white><type>"
+    unloaded: "<prefix><red>Rien n'est chargé en <white><x> <y> <z></white>."
   time: "<prefix><gray>Heure du monde : <white><time></white> ticks"
   note:
     saved: "<prefix><green>Note enregistrée."
-    failed: "<prefix><red>La note n'a pas pu être enregistrée. Consultez la console."
+  failed: "<prefix><red>Une erreur est survenue. Consultez la console."

@@ -27,8 +27,10 @@ example:
   feed:
     done: "<prefix><green>Fed <white><player></white>."
     gone: "<prefix><red><white><player></white> is no longer online."
-  block: "<prefix><gray>Block at <white><x> <y> <z></white>: <white><type>"
+  block:
+    found: "<prefix><gray>Block at <white><x> <y> <z></white>: <white><type>"
+    unloaded: "<prefix><red>Nothing is loaded at <white><x> <y> <z></white>."
   time: "<prefix><gray>World time: <white><time></white> ticks"
   note:
     saved: "<prefix><green>Note saved."
-    failed: "<prefix><red>The note could not be saved. See the console."
+  failed: "<prefix><red>Something went wrong. See the console."

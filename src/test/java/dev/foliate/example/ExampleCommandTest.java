@@ -1,6 +1,7 @@
 package dev.foliate.example;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -9,6 +10,7 @@ import dev.foliate.core.message.MessageService;
 import dev.foliate.core.scheduler.ManualSchedulers;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Location;
@@ -44,7 +46,7 @@ class ExampleCommandTest {
         MessageService messages = new MessageService(
                 directory, getClass().getClassLoader()::getResourceAsStream, config, NOPLogger.NOP_LOGGER);
         messages.enable();
-        command = new ExampleCommand(schedulers, messages, directory);
+        command = new ExampleCommand(schedulers, messages, directory, NOPLogger.NOP_LOGGER);
     }
 
     @AfterEach
@@ -64,6 +66,8 @@ class ExampleCommandTest {
         schedulers.tick(2);
         assertEquals(20, target.getFoodLevel());
         assertTrue(plain(sender.nextComponentMessage()).contains("Fed Target"));
+        // The work on the target's scheduler, the reply on the sender's.
+        assertEquals(List.of("entity", "entity"), schedulers.contextsUsed());
     }
 
     @Test
@@ -95,6 +99,7 @@ class ExampleCommandTest {
         PlayerMock sender = server.addPlayer("Sender");
         World world = sender.getWorld();
         Location location = new Location(world, 4, 70, -2);
+        world.loadChunk(0, -1);
         location.getBlock().setType(Material.GOLD_BLOCK);
 
         command.block(sender, location);
@@ -103,6 +108,42 @@ class ExampleCommandTest {
         String message = plain(sender.nextComponentMessage());
         assertTrue(message.contains("4 70 -2"), message);
         assertTrue(message.contains("gold_block"), message);
+        assertEquals("region", schedulers.contextsUsed().getFirst());
+    }
+
+    @Test
+    void blockInAChunkThatIsNotLoadedIsNotLoadedForTheOccasion() {
+        PlayerMock sender = server.addPlayer("Sender");
+        World world = sender.getWorld();
+        Location far = new Location(world, 50_000, 70, 50_000);
+
+        command.block(sender, far);
+        schedulers.tick(2);
+
+        assertTrue(plain(sender.nextComponentMessage()).contains("Nothing is loaded"));
+        assertFalse(world.isChunkLoaded(50_000 >> 4, 50_000 >> 4));
+    }
+
+    @Test
+    void failureIsReportedInsteadOfLeavingTheSenderWaiting() throws Exception {
+        PlayerMock sender = server.addPlayer("Sender");
+        // A directory where the notes file should be: the write fails.
+        Files.createDirectory(directory.resolve("example-notes.txt"));
+
+        command.note(sender, "lost");
+        schedulers.tick(2);
+
+        assertTrue(plain(sender.nextComponentMessage()).contains("Something went wrong"));
+    }
+
+    @Test
+    void overlongNoteIsCutBeforeItReachesTheDisk() throws Exception {
+        PlayerMock sender = server.addPlayer("Sender");
+
+        command.note(sender, "x".repeat(5_000));
+        schedulers.tick(2);
+
+        assertTrue(Files.size(directory.resolve("example-notes.txt")) < 300);
     }
 
     @Test
@@ -114,6 +155,7 @@ class ExampleCommandTest {
         schedulers.tick(2);
 
         assertTrue(plain(sender.nextComponentMessage()).contains("4321"));
+        assertEquals("global", schedulers.contextsUsed().getFirst());
     }
 
     @Test
@@ -126,6 +168,7 @@ class ExampleCommandTest {
 
         assertEquals("Sender: first\nSender: second\n", Files.readString(directory.resolve("example-notes.txt")).replace("\r\n", "\n"));
         assertTrue(plain(sender.nextComponentMessage()).contains("Note saved"));
+        assertEquals("async", schedulers.contextsUsed().getFirst());
     }
 
     @Test
