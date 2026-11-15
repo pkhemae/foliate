@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import dev.foliate.FoliatePlugin;
 import dev.foliate.core.config.ConfigService;
@@ -22,6 +23,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.TreeSet;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
@@ -40,7 +42,7 @@ import org.mockbukkit.mockbukkit.command.ConsoleCommandSenderMock;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
 import org.slf4j.helpers.NOPLogger;
 
-class FoliateCommandTest {
+class RootCommandTest {
 
     @TempDir
     Path directory;
@@ -83,15 +85,16 @@ class FoliateCommandTest {
         });
         assertTrue(modules.enableAll());
 
-        FoliateCommand command =
-                new FoliateCommand(modules, messages, new FoliaSchedulers(plugin), NOPLogger.NOP_LOGGER, "1.2.3", "Test 26.2",
-                (player, menu) -> opened.add(player.getName() + " " + menu));
+        FoliaSchedulers schedulers = new FoliaSchedulers(plugin);
+        List<Subcommand> administration = List.of(
+                new InfoCommand(modules, messages, "1.2.3", "Test 26.2"),
+                new ReloadCommand(modules, messages, schedulers, NOPLogger.NOP_LOGGER));
+        List<Subcommand> all = new ArrayList<>(administration);
+        all.add(new MenuCommand((player, menu) -> opened.add(player.getName() + " " + menu)));
         dispatcher = new CommandDispatcher<>();
-        dispatcher.getRoot().addChild(command.build());
+        dispatcher.getRoot().addChild(new RootCommand("foliate", all).build());
         withoutMenus = new CommandDispatcher<>();
-        withoutMenus.getRoot().addChild(new FoliateCommand(
-                        modules, messages, new FoliaSchedulers(plugin), NOPLogger.NOP_LOGGER, "1.2.3", "Test 26.2", null)
-                .build());
+        withoutMenus.getRoot().addChild(new RootCommand("foliate", administration).build());
     }
 
     @AfterEach
@@ -163,6 +166,40 @@ class FoliateCommandTest {
         runAsyncWork();
 
         assertTrue(plain(console.nextComponentMessage()).contains("reloaded"));
+    }
+
+    @Test
+    void subcommandThatSetsItsOwnRequirementStillNeedsItsPermission() {
+        Subcommand restricted = stub("secret", Permissions.COMMAND_RELOAD, node -> node.requires(source -> true)
+                .executes(context -> 1));
+        CommandDispatcher<CommandSourceStack> commands = new CommandDispatcher<>();
+        commands.getRoot().addChild(new RootCommand("foliate", List.of(restricted)).build());
+        PlayerMock player = server.addPlayer();
+        player.addAttachment(plugin, Permissions.COMMAND_INFO, true);
+
+        assertThrows(CommandSyntaxException.class, () -> commands.execute("foliate secret", new Source(player)));
+    }
+
+    @Test
+    void commandIsHiddenWhenItsOnlySubcommandIsUnavailable() {
+        Subcommand playersOnly = new MenuCommand((player, menu) -> {});
+        CommandDispatcher<CommandSourceStack> commands = new CommandDispatcher<>();
+        commands.getRoot().addChild(new RootCommand("foliate", List.of(playersOnly)).build());
+
+        assertThrows(
+                CommandSyntaxException.class,
+                () -> commands.execute("foliate menu", new Source(server.getConsoleSender())));
+    }
+
+    @Test
+    void mistakesInTheListOfSubcommandsAreCaughtAtStartup() {
+        Subcommand first = stub("same", Permissions.COMMAND_INFO, node -> node.executes(context -> 1));
+        Subcommand second = stub("same", Permissions.COMMAND_RELOAD, node -> node.executes(context -> 1));
+        Subcommand idle = stub("idle", Permissions.COMMAND_INFO, node -> {});
+
+        assertThrows(IllegalArgumentException.class, () -> new RootCommand("foliate", List.of()));
+        assertThrows(IllegalArgumentException.class, () -> new RootCommand("foliate", List.of(first, second)));
+        assertThrows(IllegalStateException.class, new RootCommand("foliate", List.of(idle))::build);
     }
 
     @Test
@@ -243,6 +280,26 @@ class FoliateCommandTest {
         for (String node : List.of(Permissions.COMMAND_INFO, Permissions.COMMAND_RELOAD)) {
             assertEquals(PermissionDefault.OP, server.getPluginManager().getPermission(node).getDefault(), node);
         }
+    }
+
+    private static Subcommand stub(
+            String name, String permission, Consumer<LiteralArgumentBuilder<CommandSourceStack>> build) {
+        return new Subcommand() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public String permission() {
+                return permission;
+            }
+
+            @Override
+            public void build(LiteralArgumentBuilder<CommandSourceStack> node) {
+                build.accept(node);
+            }
+        };
     }
 
     private PlayerMock operator() {

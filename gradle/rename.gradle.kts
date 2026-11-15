@@ -61,7 +61,7 @@ tasks.register("renameTemplate") {
             .onEnter { it == root || it.name !in skippedDirectories }
             .filter { it.isFile }
             .toList()
-        // FoliateCommand would become ExampleCommand next to the existing ExampleCommand, and so on.
+        // A class named after the template must not land on the name of an existing one.
         val existingNames = sourceFiles.map { it.name }.filterNot { templateName in it }.toSet()
         sourceFiles.map { it.name }
             .filter { templateName in it && it.replace(templateName, name) in existingNames }
