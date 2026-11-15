@@ -10,6 +10,7 @@ configlib = "4.8.1"
 # The YAML engine ConfigLib reads and writes with. Keep it on the version ConfigLib depends on.
 snakeyaml-engine = "2.7"
 placeholderapi = "2.12.3"
+zmenu = "1.1.2.1"
 
 junit = "6.1.3"
 # The artifact name (mockbukkit-v26.2) is tied to minecraft too.
@@ -23,6 +24,7 @@ resource-factory = "1.4.0"
 folia-api = { module = "dev.folia:folia-api", version.ref = "folia-api" }
 
 placeholderapi = { module = "me.clip:placeholderapi", version.ref = "placeholderapi" }
+zmenu-api = { module = "fr.maxlego08.menu:zmenu-api", version.ref = "zmenu" }
 configlib-yaml = { module = "de.exlll:configlib-yaml", version.ref = "configlib" }
 snakeyaml-engine = { module = "org.snakeyaml:snakeyaml-engine", version.ref = "snakeyaml-engine" }
 
