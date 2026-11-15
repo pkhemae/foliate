@@ -25,7 +25,7 @@ public class FoliatePlugin extends JavaPlugin {
         this.modules = modules;
 
         // Register modules here, dependencies first.
-        ConfigService config = new ConfigService(getDataPath());
+        ConfigService config = new ConfigService(getDataPath(), getSLF4JLogger());
         modules.register(config);
 
         if (!modules.enableAll()) {

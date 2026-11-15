@@ -21,6 +21,7 @@ dependencies {
 
     // Bundled in the jar and relocated by shadowJar.
     implementation(libs.configlib.yaml)
+    implementation(libs.snakeyaml.engine)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
