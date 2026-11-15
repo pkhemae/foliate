@@ -55,6 +55,8 @@ public final class ModuleManager {
             try {
                 module.enable();
                 enabled.add(module);
+            } catch (ModuleSkippedException e) {
+                logger.info("Module '{}' is not enabled: {}", module.name(), e.getMessage());
             } catch (Exception | LinkageError e) {
                 disable(module);
                 if (module.required()) {

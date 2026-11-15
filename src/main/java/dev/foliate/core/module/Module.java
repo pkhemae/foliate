@@ -24,6 +24,9 @@ public interface Module {
      * Starts the module. Throwing leaves the module disabled without affecting the others;
      * {@link #disable()} is then called to undo whatever had already been set up.
      *
+     * @throws ModuleSkippedException if the module has nothing to do in this setup, for example
+     *     because it is turned off in the configuration; this is logged as information, not as an
+     *     error
      * @throws Exception if the module cannot start
      */
     void enable() throws Exception;
