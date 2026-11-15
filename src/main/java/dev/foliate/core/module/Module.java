@@ -3,9 +3,9 @@ package dev.foliate.core.module;
 /**
  * A self-contained part of the plugin with its own lifecycle.
  *
- * <p>{@link #enable()} and {@link #disable()} run on the server startup and shutdown threads.
- * {@link #reload()} runs off-region, on an async thread: it may do blocking I/O, but must go
- * through the schedulers to touch the world.
+ * <p>{@link #enable()} runs on the server startup thread and {@link #disable()} on the shutdown
+ * thread. {@link #reload()} runs on whichever thread asked for the reload, which must not be a
+ * tick thread: it may do blocking I/O, but has to go through the schedulers to touch the world.
  */
 public interface Module {
 
@@ -13,7 +13,16 @@ public interface Module {
     String name();
 
     /**
-     * Starts the module. Throwing leaves the module disabled without affecting the others.
+     * Whether the plugin cannot run without this module. When a required module fails to enable,
+     * the modules enabled before it are disabled again and the plugin shuts itself down.
+     */
+    default boolean required() {
+        return false;
+    }
+
+    /**
+     * Starts the module. Throwing leaves the module disabled without affecting the others;
+     * {@link #disable()} is then called to undo whatever had already been set up.
      *
      * @throws Exception if the module cannot start
      */
@@ -28,8 +37,11 @@ public interface Module {
     default void reload() throws Exception {}
 
     /**
-     * Stops the module. Region tickers are already stopped when the server shuts down, so this
-     * must not schedule region or entity work: close resources and flush data only.
+     * Stops the module. Must cope with a module that only got halfway through {@link #enable()}.
+     *
+     * <p>During shutdown nothing can be scheduled any more, not even async tasks, and region
+     * tickers are stopped: do what is left synchronously (blocking is fine here), and do not touch
+     * the world.
      */
     default void disable() {}
 }

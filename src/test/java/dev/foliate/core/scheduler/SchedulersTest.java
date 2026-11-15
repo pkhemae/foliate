@@ -4,8 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.foliate.FoliatePlugin;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -13,6 +13,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.kyori.adventure.util.Ticks;
 import org.bukkit.Location;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Zombie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +35,7 @@ class SchedulersTest {
     @BeforeEach
     void setUp() {
         server = MockBukkit.mock();
-        schedulers = new Schedulers(MockBukkit.load(FoliatePlugin.class));
+        schedulers = new Schedulers(MockBukkit.createMockPlugin());
     }
 
     @AfterEach
@@ -122,6 +124,66 @@ class SchedulersTest {
     }
 
     @Test
+    void supplyForARemovedEntityFailsInsteadOfHanging() {
+        Entity entity = removedEntity();
+
+        CompletableFuture<Integer> future = schedulers.entity(entity).supply(() -> 42);
+        server.getScheduler().performTicks(1);
+
+        ExecutionException failure = assertThrows(ExecutionException.class, future::get);
+        assertInstanceOf(EntityRetiredException.class, failure.getCause());
+    }
+
+    @Test
+    void executeForARemovedEntityIsRejected() {
+        Entity entity = removedEntity();
+
+        assertThrows(EntityRetiredException.class, () -> schedulers.entity(entity).execute(() -> {}));
+    }
+
+    @Test
+    void chainThroughARemovedEntityCompletesExceptionally() {
+        Entity entity = removedEntity();
+
+        CompletableFuture<Void> chain = schedulers.global()
+                .supply(() -> 42)
+                .thenCompose(value -> schedulers.entity(entity).run(() -> {}));
+        server.getScheduler().performTicks(2);
+
+        assertTrue(chain.isCompletedExceptionally());
+    }
+
+    @Test
+    void teleportOfARemovedEntityCompletesWithFalse() throws Exception {
+        Entity entity = removedEntity();
+        Location destination = entity.getLocation().add(0, 5, 0);
+
+        // Called from a thread that does not own the entity, as an async callback would.
+        CompletableFuture<Boolean> result = CompletableFuture.supplyAsync(() -> schedulers.teleport(entity, destination))
+                .thenCompose(future -> future);
+        server.getScheduler().performTicks(1);
+
+        assertFalse(result.get(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void negativeAsyncDelayCountsAsZero() throws Exception {
+        CompletableFuture<Boolean> ran = new CompletableFuture<>();
+
+        schedulers.async().runLater(Duration.ofSeconds(-1), () -> ran.complete(true));
+        server.getScheduler().performTicks(1);
+
+        assertTrue(ran.get(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void executeOrRunContainsFailuresWhenRunningInline() {
+        schedulers.region(location()).executeOrRun(() -> {
+            throw new IllegalStateException("boom");
+        });
+    }
+
+    @Test
     void executeOrRunRunsInlineWhenTheContextIsCurrent() {
         AtomicInteger runs = new AtomicInteger();
 
@@ -129,6 +191,13 @@ class SchedulersTest {
         schedulers.region(location()).executeOrRun(runs::incrementAndGet);
 
         assertEquals(1, runs.get());
+    }
+
+    private Entity removedEntity() {
+        Location location = location();
+        Entity entity = location.getWorld().spawn(location, Zombie.class);
+        entity.remove();
+        return entity;
     }
 
     private Location location() {

@@ -25,17 +25,21 @@ public class FoliatePlugin extends JavaPlugin {
 
         // Register modules here, dependencies first.
 
-        modules.enableAll();
+        if (!modules.enableAll()) {
+            getServer().getPluginManager().disablePlugin(this);
+        }
     }
 
     @Override
     public void onDisable() {
-        // Region tickers are already stopped at this point: nothing below may touch the world.
-        if (modules != null) {
-            modules.disableAll();
-        }
+        // Region tickers are already stopped and nothing can be scheduled any more: what is left
+        // runs synchronously and must not touch the world. Timers go first, so none fires while a
+        // module is releasing its resources.
         if (schedulers != null) {
             schedulers.shutdown();
+        }
+        if (modules != null) {
+            modules.disableAll();
         }
     }
 }

@@ -4,8 +4,10 @@ import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.bukkit.Location;
@@ -28,6 +30,10 @@ import org.slf4j.Logger;
  * </ul>
  *
  * <p>Thread-safe. {@code BukkitScheduler} must never be used: it does not work on Folia.
+ *
+ * <p>Nothing can be scheduled once the plugin is disabling: the server rejects global and async
+ * tasks and silently drops region and entity ones. Work left for {@code onDisable} has to run
+ * synchronously, on the thread that calls it.
  */
 public final class Schedulers {
 
@@ -63,10 +69,12 @@ public final class Schedulers {
     }
 
     /**
-     * Teleports an entity from any thread. {@code Entity#teleport} is broken on Folia, and
-     * {@code teleportAsync} must be called from the region owning the entity: this does both.
+     * Teleports an entity from any thread, on Folia and on Paper alike. {@code Entity#teleport} is
+     * broken on Folia, and Paper only accepts {@code teleportAsync} from the thread ticking the
+     * entity: this hops to the entity's scheduler first when needed.
      *
-     * <p>Never call {@code join()} or {@code get()} on the result from a tick thread.
+     * <p>Completes with {@code false} when the teleport was refused or the entity no longer
+     * exists. Never call {@code join()} or {@code get()} on the result from a tick thread.
      */
     public CompletableFuture<Boolean> teleport(Entity entity, Location destination) {
         Location target = destination.clone();
@@ -74,12 +82,25 @@ public final class Schedulers {
         if (context.isCurrent()) {
             return entity.teleportAsync(target);
         }
-        return context.supply(() -> entity.teleportAsync(target)).thenCompose(future -> future);
+        return context.supply(() -> entity.teleportAsync(target))
+                .thenCompose(future -> future)
+                .exceptionally(error -> {
+                    Throwable cause = error instanceof CompletionException && error.getCause() != null
+                            ? error.getCause()
+                            : error;
+                    if (cause instanceof EntityRetiredException) {
+                        return false;
+                    }
+                    throw new CompletionException(cause);
+                });
     }
 
     /**
-     * Cancels every repeating task and all pending global and async tasks. Called once from
-     * {@code onDisable}, after the modules are disabled.
+     * Cancels every repeating task and all pending global and async tasks. Called first thing in
+     * {@code onDisable}, so that no timer fires while the modules release their resources.
+     *
+     * <p>Futures of tasks that had not started yet are left incomplete: nothing may wait on them
+     * during shutdown.
      */
     public void shutdown() {
         timers.forEach(ScheduledTask::cancel);
@@ -92,11 +113,20 @@ public final class Schedulers {
         return Math.max(1L, duration.toMillis() / MILLIS_PER_TICK);
     }
 
-    /** Wraps a task so that a failure is logged instead of vanishing in a scheduler thread. */
+    private static long millis(Duration duration) {
+        return Math.max(0L, duration.toMillis());
+    }
+
+    /**
+     * Wraps a task so that a failure is logged instead of vanishing in a scheduler thread. An
+     * {@link EntityRetiredException} is an expected outcome, not a failure, and is not logged.
+     */
     private Runnable logged(Runnable task) {
         return () -> {
             try {
                 task.run();
+            } catch (EntityRetiredException expected) {
+                // The task tried to reach an entity that is gone, typically a player who left.
             } catch (Throwable t) {
                 logger.error("Unhandled exception in scheduled task", t);
             }
@@ -118,17 +148,29 @@ public final class Schedulers {
         };
     }
 
-    private TaskHandle handle(@Nullable ScheduledTask task, boolean repeating) {
-        if (task == null) {
-            return CancelledHandle.INSTANCE;
-        }
-        if (repeating) {
-            timers.add(task);
-        }
+    private TaskHandle handle(@Nullable ScheduledTask task) {
+        return task == null ? CancelledHandle.INSTANCE : new ScheduledHandle(task);
+    }
+
+    private TaskHandle timer(ScheduledTask task) {
+        timers.add(task);
         return new ScheduledHandle(task);
     }
 
-    private final class AsyncContext implements TaskContext {
+    /** Behaviour shared by every context. */
+    private abstract class Context implements TaskContext {
+
+        @Override
+        public final void executeOrRun(Runnable task) {
+            if (isCurrent()) {
+                logged(task).run();
+            } else {
+                execute(task);
+            }
+        }
+    }
+
+    private final class AsyncContext extends Context {
 
         @Override
         public void execute(Runnable task) {
@@ -137,23 +179,19 @@ public final class Schedulers {
 
         @Override
         public TaskHandle runLater(Duration delay, Runnable task) {
-            return handle(
-                    server.getAsyncScheduler()
-                            .runDelayed(plugin, consumer(task), delay.toMillis(), TimeUnit.MILLISECONDS),
-                    false);
+            return handle(server.getAsyncScheduler()
+                    .runDelayed(plugin, consumer(task), millis(delay), TimeUnit.MILLISECONDS));
         }
 
         @Override
         public TaskHandle runTimer(Duration initialDelay, Duration period, Runnable task) {
-            return handle(
-                    server.getAsyncScheduler()
-                            .runAtFixedRate(
-                                    plugin,
-                                    consumer(task),
-                                    initialDelay.toMillis(),
-                                    Math.max(1L, period.toMillis()),
-                                    TimeUnit.MILLISECONDS),
-                    true);
+            return timer(server.getAsyncScheduler()
+                    .runAtFixedRate(
+                            plugin,
+                            consumer(task),
+                            millis(initialDelay),
+                            Math.max(1L, period.toMillis()),
+                            TimeUnit.MILLISECONDS));
         }
 
         @Override
@@ -169,7 +207,7 @@ public final class Schedulers {
         }
     }
 
-    private final class GlobalContext implements TaskContext {
+    private final class GlobalContext extends Context {
 
         @Override
         public void execute(Runnable task) {
@@ -178,15 +216,13 @@ public final class Schedulers {
 
         @Override
         public TaskHandle runLater(Duration delay, Runnable task) {
-            return handle(server.getGlobalRegionScheduler().runDelayed(plugin, consumer(task), ticks(delay)), false);
+            return handle(server.getGlobalRegionScheduler().runDelayed(plugin, consumer(task), ticks(delay)));
         }
 
         @Override
         public TaskHandle runTimer(Duration initialDelay, Duration period, Runnable task) {
-            return handle(
-                    server.getGlobalRegionScheduler()
-                            .runAtFixedRate(plugin, consumer(task), ticks(initialDelay), ticks(period)),
-                    true);
+            return timer(server.getGlobalRegionScheduler()
+                    .runAtFixedRate(plugin, consumer(task), ticks(initialDelay), ticks(period)));
         }
 
         @Override
@@ -202,7 +238,7 @@ public final class Schedulers {
         }
     }
 
-    private final class RegionContext implements TaskContext {
+    private final class RegionContext extends Context {
 
         private final Location location;
 
@@ -217,16 +253,13 @@ public final class Schedulers {
 
         @Override
         public TaskHandle runLater(Duration delay, Runnable task) {
-            return handle(
-                    server.getRegionScheduler().runDelayed(plugin, location, consumer(task), ticks(delay)), false);
+            return handle(server.getRegionScheduler().runDelayed(plugin, location, consumer(task), ticks(delay)));
         }
 
         @Override
         public TaskHandle runTimer(Duration initialDelay, Duration period, Runnable task) {
-            return handle(
-                    server.getRegionScheduler()
-                            .runAtFixedRate(plugin, location, consumer(task), ticks(initialDelay), ticks(period)),
-                    true);
+            return timer(server.getRegionScheduler()
+                    .runAtFixedRate(plugin, location, consumer(task), ticks(initialDelay), ticks(period)));
         }
 
         @Override
@@ -242,7 +275,7 @@ public final class Schedulers {
         }
     }
 
-    private final class EntityContext implements TaskContext {
+    private final class EntityContext extends Context {
 
         private final Entity entity;
 
@@ -252,20 +285,40 @@ public final class Schedulers {
 
         @Override
         public void execute(Runnable task) {
-            entity.getScheduler().execute(plugin, logged(task), null, 1L);
+            if (!entity.getScheduler().execute(plugin, logged(task), null, 1L)) {
+                throw new EntityRetiredException();
+            }
         }
 
         @Override
         public TaskHandle runLater(Duration delay, Runnable task) {
-            return handle(entity.getScheduler().runDelayed(plugin, consumer(task), null, ticks(delay)), false);
+            return handle(entity.getScheduler().runDelayed(plugin, consumer(task), null, ticks(delay)));
         }
 
         @Override
         public TaskHandle runTimer(Duration initialDelay, Duration period, Runnable task) {
-            return handle(
-                    entity.getScheduler()
-                            .runAtFixedRate(plugin, consumer(task), null, ticks(initialDelay), ticks(period)),
-                    true);
+            // The server cancels the task by itself when the entity is removed. Without this
+            // callback the task, and through it the entity, would stay referenced by the timer set
+            // until shutdown.
+            AtomicReference<@Nullable ScheduledTask> tracked = new AtomicReference<>();
+            Runnable retired = () -> {
+                ScheduledTask timer = tracked.get();
+                if (timer != null) {
+                    timers.remove(timer);
+                }
+            };
+            ScheduledTask scheduled = entity.getScheduler()
+                    .runAtFixedRate(plugin, consumer(task), retired, ticks(initialDelay), ticks(period));
+            if (scheduled == null) {
+                return CancelledHandle.INSTANCE;
+            }
+            tracked.set(scheduled);
+            TaskHandle handle = timer(scheduled);
+            if (scheduled.isCancelled()) {
+                // The entity was removed between scheduling and tracking.
+                timers.remove(scheduled);
+            }
+            return handle;
         }
 
         @Override

@@ -1,6 +1,7 @@
 package dev.foliate.core.module;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,7 +21,7 @@ class ModuleManagerTest {
         manager.register(new RecordingModule("a"));
         manager.register(new RecordingModule("b"));
 
-        manager.enableAll();
+        assertTrue(manager.enableAll());
         manager.disableAll();
 
         assertEquals(List.of("enable a", "enable b", "disable b", "disable a"), events);
@@ -29,78 +30,100 @@ class ModuleManagerTest {
     @Test
     void moduleFailingToEnableDoesNotStopTheOthers() {
         manager.register(new RecordingModule("a"));
-        manager.register(new FailingModule("broken", true, false));
+        manager.register(new RecordingModule("broken").failingOn("enable"));
         manager.register(new RecordingModule("c"));
 
-        manager.enableAll();
+        assertTrue(manager.enableAll());
 
         assertEquals(List.of("a", "c"), manager.enabledNames());
     }
 
     @Test
-    void moduleThatFailedToEnableIsNeitherReloadedNorDisabled() {
-        manager.register(new FailingModule("broken", true, false));
+    void moduleFailingToEnableIsCleanedUpOnceThenLeftAlone() {
+        manager.register(new RecordingModule("broken").failingOn("enable"));
         manager.enableAll();
 
         manager.reloadAll();
         manager.disableAll();
 
-        assertEquals(List.of(), events);
+        assertEquals(List.of("enable broken", "disable broken"), events);
+    }
+
+    @Test
+    void requiredModuleFailingToEnableStopsEverything() {
+        manager.register(new RecordingModule("a"));
+        manager.register(new RecordingModule("broken").failingOn("enable").markRequired());
+        manager.register(new RecordingModule("c"));
+
+        boolean started = manager.enableAll();
+
+        assertFalse(started);
+        assertEquals(List.of("enable a", "enable broken", "disable broken", "disable a"), events);
+        assertTrue(manager.enabledNames().isEmpty());
     }
 
     @Test
     void reloadReportsFailuresAndKeepsGoing() {
-        manager.register(new FailingModule("broken", false, true));
+        manager.register(new RecordingModule("broken").failingOn("reload"));
         manager.register(new RecordingModule("b"));
         manager.enableAll();
         events.clear();
 
-        Map<String, Exception> failures = manager.reloadAll();
+        Map<String, Throwable> failures = manager.reloadAll();
 
         assertEquals(List.of("broken"), List.copyOf(failures.keySet()));
-        assertEquals(List.of("reload b"), events);
+        assertEquals(List.of("reload broken", "reload b"), events);
     }
 
     @Test
     void disableFailureDoesNotStopTheOthers() {
         manager.register(new RecordingModule("a"));
-        manager.register(new Module() {
-            @Override
-            public String name() {
-                return "broken";
-            }
-
-            @Override
-            public void enable() {}
-
-            @Override
-            public void disable() {
-                throw new IllegalStateException("boom");
-            }
-        });
+        manager.register(new RecordingModule("broken").failingOn("disable"));
         manager.enableAll();
         events.clear();
 
         manager.disableAll();
 
-        assertEquals(List.of("disable a"), events);
+        assertEquals(List.of("disable broken", "disable a"), events);
         assertTrue(manager.enabledNames().isEmpty());
     }
 
     @Test
-    void registeringAfterEnableIsRejected() {
-        manager.register(new RecordingModule("a"));
+    void registeringAfterEnableIsRejectedEvenWhenNothingEnabled() {
+        manager.register(new RecordingModule("broken").failingOn("enable"));
         manager.enableAll();
 
         assertThrows(IllegalStateException.class, () -> manager.register(new RecordingModule("late")));
     }
 
-    private class RecordingModule implements Module {
+    @Test
+    void enablingTwiceIsRejected() {
+        manager.register(new RecordingModule("a"));
+        manager.enableAll();
+
+        assertThrows(IllegalStateException.class, manager::enableAll);
+        assertEquals(List.of("a"), manager.enabledNames());
+    }
+
+    /** Records every lifecycle call, and can be told to throw from one of them. */
+    private final class RecordingModule implements Module {
 
         private final String name;
+        private String failing = "";
+        private boolean required;
 
         RecordingModule(String name) {
             this.name = name;
+        }
+
+        RecordingModule failingOn(String step) {
+            failing = step;
+            return this;
+        }
+
+        RecordingModule markRequired() {
+            required = true;
+            return this;
         }
 
         @Override
@@ -109,42 +132,28 @@ class ModuleManagerTest {
         }
 
         @Override
+        public boolean required() {
+            return required;
+        }
+
+        @Override
         public void enable() {
-            events.add("enable " + name);
+            step("enable");
         }
 
         @Override
         public void reload() {
-            events.add("reload " + name);
+            step("reload");
         }
 
         @Override
         public void disable() {
-            events.add("disable " + name);
-        }
-    }
-
-    private final class FailingModule extends RecordingModule {
-
-        private final boolean failOnEnable;
-        private final boolean failOnReload;
-
-        FailingModule(String name, boolean failOnEnable, boolean failOnReload) {
-            super(name);
-            this.failOnEnable = failOnEnable;
-            this.failOnReload = failOnReload;
+            step("disable");
         }
 
-        @Override
-        public void enable() {
-            if (failOnEnable) {
-                throw new IllegalStateException("boom");
-            }
-        }
-
-        @Override
-        public void reload() {
-            if (failOnReload) {
+        private void step(String step) {
+            events.add(step + " " + name);
+            if (step.equals(failing)) {
                 throw new IllegalStateException("boom");
             }
         }
