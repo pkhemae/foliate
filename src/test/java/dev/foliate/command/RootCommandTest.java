@@ -40,7 +40,7 @@ import org.mockbukkit.mockbukkit.command.ConsoleCommandSenderMock;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
 import org.slf4j.helpers.NOPLogger;
 
-class FoliateCommandTest {
+class RootCommandTest {
 
     @TempDir
     Path directory;
@@ -83,15 +83,16 @@ class FoliateCommandTest {
         });
         assertTrue(modules.enableAll());
 
-        FoliateCommand command =
-                new FoliateCommand(modules, messages, new FoliaSchedulers(plugin), NOPLogger.NOP_LOGGER, "1.2.3", "Test 26.2",
-                (player, menu) -> opened.add(player.getName() + " " + menu));
+        FoliaSchedulers schedulers = new FoliaSchedulers(plugin);
+        List<Subcommand> administration = List.of(
+                new InfoCommand(modules, messages, "1.2.3", "Test 26.2"),
+                new ReloadCommand(modules, messages, schedulers, NOPLogger.NOP_LOGGER));
+        List<Subcommand> all = new ArrayList<>(administration);
+        all.add(new MenuCommand((player, menu) -> opened.add(player.getName() + " " + menu)));
         dispatcher = new CommandDispatcher<>();
-        dispatcher.getRoot().addChild(command.build());
+        dispatcher.getRoot().addChild(new RootCommand("foliate", all).build());
         withoutMenus = new CommandDispatcher<>();
-        withoutMenus.getRoot().addChild(new FoliateCommand(
-                        modules, messages, new FoliaSchedulers(plugin), NOPLogger.NOP_LOGGER, "1.2.3", "Test 26.2", null)
-                .build());
+        withoutMenus.getRoot().addChild(new RootCommand("foliate", administration).build());
     }
 
     @AfterEach

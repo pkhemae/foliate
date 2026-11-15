@@ -1,6 +1,10 @@
 package dev.foliate;
 
-import dev.foliate.command.FoliateCommand;
+import dev.foliate.command.InfoCommand;
+import dev.foliate.command.MenuCommand;
+import dev.foliate.command.ReloadCommand;
+import dev.foliate.command.RootCommand;
+import dev.foliate.command.Subcommand;
 import dev.foliate.core.Platform;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.menu.Menus;
@@ -20,6 +24,8 @@ import dev.foliate.update.GitHubReleases;
 import dev.foliate.update.UpdateCheckModule;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Supplier;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jspecify.annotations.Nullable;
@@ -85,8 +91,14 @@ public class FoliatePlugin extends JavaPlugin {
             return;
         }
 
-        FoliateCommand command = new FoliateCommand(
-                modules, messages, schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), Platform.describe(), menus);
+        // One class per subcommand: to add one, write it and add it to this list.
+        List<Subcommand> subcommands = new ArrayList<>();
+        subcommands.add(new InfoCommand(modules, messages, getPluginMeta().getVersion(), Platform.describe()));
+        subcommands.add(new ReloadCommand(modules, messages, schedulers, getSLF4JLogger()));
+        if (menus != null) {
+            subcommands.add(new MenuCommand(menus));
+        }
+        RootCommand command = new RootCommand("foliate", subcommands);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> event.registrar()
                 .register(command.build(), "Shows information about Foliate and reloads it."));
 

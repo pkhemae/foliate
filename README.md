@@ -154,7 +154,7 @@ A feature is its package, the tests of that package, and what refers to it:
 | `profile` | its line in `FoliatePlugin`; `profiles` in `expectedModules`. Keep or replace the `V1` migration script: the database tests use its table |
 | `core/storage` (with `profile`) | the `Database` lines in `FoliatePlugin` and in `SelfTest`; the `storage` section of `PluginConfig`; the `hikaricp` and `sqlite-jdbc` dependencies; `storage` in `expectedModules` |
 | `hook/placeholderapi` | its line in `FoliatePlugin`; `PlaceholderAPI` in `softDepend`; its `compileOnly` and `testImplementation` dependencies, its repository and its entry in `testServerPlugins`; `placeholderapi` in `expectedModules` |
-| `hook/zmenu` | its line in `FoliatePlugin` (pass `null` as the menus of `FoliateCommand`, or remove that parameter and the `menu` subcommand); `core/menu`; `zMenu` in `softDepend`; its dependencies, repository and `testServerPlugins` entry; `inventories/`; `zmenu` in `expectedModules` |
+| `hook/zmenu` | its line in `FoliatePlugin` and `MenuCommand`; `core/menu`; `zMenu` in `softDepend`; its dependencies, repository and `testServerPlugins` entry; `inventories/`; `zmenu` in `expectedModules` |
 
 `expectedModules` is the list of modules the smoke test insists on finding enabled: leaving a removed
 module in it makes the smoke test fail, which is the reminder.
@@ -173,11 +173,10 @@ typed with `Placeholder.unparsed`, never `Placeholder.parsed`.
 **Add a feature.** Write a class implementing `Module` and register it in `FoliatePlugin`, after
 the modules it depends on. Do the setup in `enable()`, undo it in `disable()`.
 
-**Add a subcommand.** Add a branch in `FoliateCommand#build`, a constant in `Permissions`, and the
-same node in the `permissions` block of `build.gradle.kts`; a test fails if the two lists differ.
-Also add the new permission to `anySubcommand` in `build`: it decides who sees `/foliate` at all,
-and a player holding only the new permission is otherwise locked out. A handler runs on the
-sender's region: to act on another player or location, go through `Schedulers`.
+**Add a subcommand.** Write a class implementing `Subcommand` (see `InfoCommand`) and add it to the
+list in `FoliatePlugin`. Give it a constant in `Permissions` and the same node in the `permissions`
+block of `build.gradle.kts`; a test fails if the two lists differ. A handler runs on the sender's
+region: to act on another player or location, go through `Schedulers`.
 
 **Integrate another plugin.** Follow `PlaceholderApiHook`: a `Module` created through
 `FoliatePlugin#hook`, so it only exists when the other plugin is installed. Add the plugin to
@@ -187,7 +186,7 @@ the hook class. To have it on the test servers and required by the smoke test, a
 
 **Add a menu.** Put the zMenu file in `src/main/resources/inventories/` and its name in
 `ZMenuHook.MENUS`, then call `menus.open(player, "name")`. The `Menus` given by `FoliatePlugin` is
-null when zMenu is not installed: check it, as `FoliateCommand` does.
+null when zMenu is not installed: check it, as `FoliatePlugin` does before adding `MenuCommand`.
 
 **Change the database schema.** Add a script to `src/main/resources/db/migration/` and its name to
 `Migrations.SCRIPTS`. Never edit a script that has shipped.
