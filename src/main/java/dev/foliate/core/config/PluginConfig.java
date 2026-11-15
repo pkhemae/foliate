@@ -23,6 +23,12 @@ public final class PluginConfig {
     @Comment("Logs extra details that help when reporting a problem.")
     private boolean debug = false;
 
+    @Comment({
+        "Language of the console, and of players whose game language has no file in the lang folder.",
+        "Must be the name of a file in that folder, without the extension."
+    })
+    private String defaultLocale = "en";
+
     private PluginConfig() {}
 
     /** The configuration a fresh install starts with. */
@@ -34,6 +40,10 @@ public final class PluginConfig {
         return debug;
     }
 
+    public String defaultLocale() {
+        return defaultLocale;
+    }
+
     /**
      * Checks what the types alone cannot express. Runs before a loaded configuration is published
      * or written back, and its message is shown to the administrator: name the setting as it
@@ -42,6 +52,8 @@ public final class PluginConfig {
      * @throws ConfigException with a message an administrator can act on
      */
     void validate() throws ConfigException {
-        // Nothing yet. Example: if (interval < 1) throw new ConfigException("interval must be at least 1");
+        if (defaultLocale.isBlank()) {
+            throw new ConfigException("default-locale must not be empty");
+        }
     }
 }
