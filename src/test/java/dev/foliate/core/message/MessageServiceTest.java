@@ -1,6 +1,7 @@
 package dev.foliate.core.message;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -21,6 +22,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import net.kyori.adventure.title.Title;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -141,6 +143,117 @@ class MessageServiceTest {
         config.reload();
 
         assertThrows(MessageException.class, messages::reload);
+        assertEquals("[P] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
+    }
+
+    @Test
+    void defaultLocaleIsUsedBeforeEnglish() throws Exception {
+        useDefaultLocale("fr");
+
+        assertEquals("[P] Bonjour Alex", plain(Locale.JAPANESE, "greeting", "Alex"));
+        // French has no such key: English built-in text is the last resort.
+        assertEquals("English only", plain(Locale.JAPANESE, "only-english", "Alex"));
+    }
+
+    @Test
+    void viewerWithoutALocaleGetsTheDefaultLocale() throws Exception {
+        useDefaultLocale("fr");
+        RecordingAudience console = new RecordingAudience(null);
+
+        messages.send(console, "greeting", Placeholder.unparsed("player", "Alex"));
+
+        assertEquals(List.of("[P] Bonjour Alex"), console.received);
+    }
+
+    @Test
+    void filesThatAreNotNamedAfterALocaleAreIgnored() throws Exception {
+        Files.writeString(directory.resolve("lang/backup.yml"), "greeting: \"from backup\"\n");
+        Files.writeString(directory.resolve("lang/en - Copy.yml"), "greeting: \"from copy\"\n");
+
+        messages.reload();
+
+        assertEquals("[P] Hello Alex", plain(Locale.of("backup"), "greeting", "Alex"));
+    }
+
+    @Test
+    void hyphenatedFileNameIsARegionalLocale() throws Exception {
+        Files.writeString(directory.resolve("lang/fr-CA.yml"), "greeting: \"Allo <player>\"\n");
+
+        messages.reload();
+
+        assertEquals("Allo Alex", plain(Locale.CANADA_FRENCH, "greeting", "Alex"));
+        assertEquals("[P] Bonjour Alex", plain(Locale.FRANCE, "greeting", "Alex"));
+    }
+
+    @Test
+    void keysNamedLikeYamlBooleansAreKept() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "toggle:\n  on: \"Enabled\"\n  off: \"Disabled\"\n  yes: no\n");
+
+        messages.reload();
+
+        assertEquals("Enabled", plain(Locale.ENGLISH, "toggle.on", "Alex"));
+        assertEquals("Disabled", plain(Locale.ENGLISH, "toggle.off", "Alex"));
+        assertEquals("no", plain(Locale.ENGLISH, "toggle.yes", "Alex"));
+    }
+
+    @Test
+    void argumentsTakePrecedenceOverSharedTags() {
+        messages.addSharedResolver(Placeholder.unparsed("player", "SHARED"));
+        messages.addSharedResolver(Placeholder.unparsed("server", "lobby"));
+
+        assertEquals("[P] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
+    }
+
+    @Test
+    void sharedTagsAreAvailableInEveryMessage() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "where: \"On <server>\"\n");
+        messages.reload();
+        messages.addSharedResolver(Placeholder.unparsed("server", "lobby"));
+
+        assertEquals("On lobby", plain(Locale.ENGLISH, "where", "Alex"));
+    }
+
+    @Test
+    void listMessageCanBeRenderedLineByLine() {
+        RecordingAudience viewer = new RecordingAudience(Locale.US);
+
+        List<String> lines = messages.renderLines(viewer, "multi").stream()
+                .map(PlainTextComponentSerializer.plainText()::serialize)
+                .toList();
+
+        assertEquals(List.of("one", "two"), lines);
+    }
+
+    @Test
+    void deletedLanguageStaysDeletedAndItsSpeakersGetTheDefault() throws Exception {
+        Files.delete(directory.resolve("lang/fr.yml"));
+
+        messages.reload();
+
+        assertFalse(Files.exists(directory.resolve("lang/fr.yml")));
+        assertEquals("[P] Hello Alex", plain(Locale.FRENCH, "greeting", "Alex"));
+    }
+
+    @Test
+    void brokenExtraLanguageIsSkippedAtStartupButRefusedOnReload() throws Exception {
+        Files.writeString(directory.resolve("lang/de.yml"), "greeting: [unclosed\n");
+        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, config, NOPLogger.NOP_LOGGER);
+
+        fresh.enable();
+
+        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render(Locale.GERMAN, "greeting", Placeholder.unparsed("player", "Alex"))));
+        assertThrows(MessageException.class, fresh::reload);
+    }
+
+    @Test
+    void titleIsNotShownWhenBothPartsAreEmpty() {
+        RecordingAudience viewer = new RecordingAudience(Locale.US);
+
+        messages.showTitle(viewer, "silent", "silent");
+        messages.showTitle(viewer, "farewell.short", "silent");
+
+        assertEquals(1, viewer.titles);
     }
 
     @Test
@@ -154,6 +267,12 @@ class MessageServiceTest {
 
         assertEquals(List.of("[P] Bonjour Alex"), french.received);
         assertEquals(List.of("[P] Hello Alex"), english.received);
+    }
+
+    private void useDefaultLocale(String locale) throws Exception {
+        Files.writeString(directory.resolve("config.yml"), "default-locale: " + locale + "\n");
+        config.reload();
+        messages.reload();
     }
 
     private String plain(Locale locale, String key, String player) {
@@ -179,9 +298,18 @@ class MessageServiceTest {
 
         private final List<String> received = new ArrayList<>();
         private final Pointers pointers;
+        private int titles;
 
+        /** @param locale null for a viewer that has none, like the console */
         RecordingAudience(Locale locale) {
-            this.pointers = Pointers.builder().withStatic(Identity.LOCALE, locale).build();
+            this.pointers = locale == null
+                    ? Pointers.empty()
+                    : Pointers.builder().withStatic(Identity.LOCALE, locale).build();
+        }
+
+        @Override
+        public void showTitle(Title title) {
+            titles++;
         }
 
         @Override

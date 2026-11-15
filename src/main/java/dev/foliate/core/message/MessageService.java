@@ -2,6 +2,8 @@ package dev.foliate.core.message;
 
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.module.Module;
+import dev.foliate.core.yaml.Yaml;
+import dev.foliate.core.yaml.YamlException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -15,6 +17,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.identity.Identity;
@@ -25,8 +28,6 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.title.Title;
 import net.kyori.adventure.translation.Translator;
-import org.bukkit.configuration.InvalidConfigurationException;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -35,9 +36,12 @@ import org.slf4j.Logger;
  * written in MiniMessage, and are rendered in the language of whoever receives them.
  *
  * <p>Lookup order for a key: the viewer's locale ({@code fr_CA}), its language ({@code fr}), the
- * configured default locale, then English. Within a locale, a key missing from the file on disk
- * falls back to the file bundled in the jar, so new messages work after an update without the
- * administrator touching anything.
+ * configured default locale, then the English text built into the jar. Within a locale, a key
+ * missing from the file on disk falls back to the built-in text for that locale, so new messages
+ * work after an update without the administrator touching anything.
+ *
+ * <p>The language files are the administrator's: the built-in ones are copied once, on first
+ * start. Deleting one removes that language, and adding one adds a language.
  *
  * <p>Values coming from players must be passed with {@link Placeholder#unparsed} or
  * {@link Placeholder#component}, never {@link Placeholder#parsed}: parsed input would let a player
@@ -54,6 +58,9 @@ public final class MessageService implements Module {
     private static final String PREFIX_KEY = "prefix";
     private static final String EXTENSION = ".yml";
 
+    /** {@code en}, {@code pt_BR}, {@code fr-CA}: what a language file may be called. */
+    private static final Pattern LOCALE_NAME = Pattern.compile("[a-zA-Z]{2,3}([_-][a-zA-Z]{2,4})?");
+
     private final Path directory;
     private final Function<String, @Nullable InputStream> resources;
     private final ConfigService config;
@@ -61,7 +68,7 @@ public final class MessageService implements Module {
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final List<TagResolver> sharedResolvers = new CopyOnWriteArrayList<>();
     private final Set<String> reportedMissingKeys = ConcurrentHashMap.newKeySet();
-    private volatile Catalog catalog = new Catalog(Map.of(), Locale.ENGLISH);
+    private volatile Catalog catalog = new Catalog(Map.of(), Map.of(), Locale.ENGLISH);
 
     /**
      * @param dataDirectory the plugin data folder; messages are read from its {@code lang} folder
@@ -88,20 +95,23 @@ public final class MessageService implements Module {
         return true;
     }
 
+    /** A broken language file is skipped at startup, so one typo does not keep the plugin down. */
     @Override
     public void enable() throws MessageException {
-        catalog = load();
+        catalog = load(false);
     }
 
+    /** A broken language file refuses the reload: the administrator is there to see why. */
     @Override
     public void reload() throws MessageException {
-        catalog = load();
+        catalog = load(true);
         reportedMissingKeys.clear();
     }
 
     /**
      * Makes a tag available in every message, for example a placeholder bridge. The resolver is
-     * given the viewer as its target when the message is rendered for someone.
+     * given the viewer as its target when the message is rendered for someone. Arguments passed
+     * when sending a message take precedence over shared tags of the same name.
      */
     public void addSharedResolver(TagResolver resolver) {
         sharedResolvers.add(resolver);
@@ -130,80 +140,134 @@ public final class MessageService implements Module {
         });
     }
 
+    /** Shows a title. Nothing is shown when both messages are empty. */
     public void showTitle(Audience audience, String titleKey, String subtitleKey, TagResolver... arguments) {
-        audience.forEachAudience(viewer ->
-                viewer.showTitle(Title.title(render(viewer, titleKey, arguments), render(viewer, subtitleKey, arguments))));
+        audience.forEachAudience(viewer -> {
+            Component title = render(viewer, titleKey, arguments);
+            Component subtitle = render(viewer, subtitleKey, arguments);
+            if (!title.equals(Component.empty()) || !subtitle.equals(Component.empty())) {
+                viewer.showTitle(Title.title(title, subtitle));
+            }
+        });
     }
 
-    /** Renders a message for a viewer, in the viewer's language. */
+    /** Renders a message for a viewer, in the viewer's language. A list is joined with newlines. */
     public Component render(Pointered viewer, String key, TagResolver... arguments) {
         Catalog current = catalog;
         Locale locale = viewer.getOrDefault(Identity.LOCALE, current.defaultLocale());
-        return render(current, locale, viewer, key, arguments);
+        List<String> lines = find(current, locale, key);
+        return lines == null
+                ? Component.text(key)
+                : deserialize(current, locale, viewer, String.join("\n", lines), arguments);
     }
 
     /** Renders a message in a given language, for text that has no single viewer. */
     public Component render(Locale locale, String key, TagResolver... arguments) {
-        return render(catalog, locale, null, key, arguments);
+        Catalog current = catalog;
+        List<String> lines = find(current, locale, key);
+        return lines == null
+                ? Component.text(key)
+                : deserialize(current, locale, null, String.join("\n", lines), arguments);
     }
 
-    private Component render(
-            Catalog current, Locale locale, @Nullable Pointered viewer, String key, TagResolver[] arguments) {
-        String template = current.find(locale, key);
-        if (template == null) {
-            if (reportedMissingKeys.add(key)) {
-                logger.warn("Message '{}' is not defined in any language file", key);
-            }
-            return Component.text(key);
+    /**
+     * Renders a message written as a list, one component per entry: what item lore and scoreboard
+     * lines need. A message written as a single text gives a single line.
+     */
+    public List<Component> renderLines(Pointered viewer, String key, TagResolver... arguments) {
+        Catalog current = catalog;
+        Locale locale = viewer.getOrDefault(Identity.LOCALE, current.defaultLocale());
+        List<String> lines = find(current, locale, key);
+        if (lines == null) {
+            return List.of(Component.text(key));
         }
+        return lines.stream()
+                .map(line -> deserialize(current, locale, viewer, line, arguments))
+                .toList();
+    }
+
+    private @Nullable List<String> find(Catalog current, Locale locale, String key) {
+        List<String> lines = current.find(locale, key);
+        if (lines == null && reportedMissingKeys.add(key)) {
+            logger.warn("Message '{}' is not defined in any language file", key);
+        }
+        return lines;
+    }
+
+    private Component deserialize(
+            Catalog current, Locale locale, @Nullable Pointered viewer, String template, TagResolver[] arguments) {
         if (template.isEmpty()) {
             return Component.empty();
         }
 
-        TagResolver.Builder resolver = TagResolver.builder().resolvers(arguments).resolvers(sharedResolvers);
-        String prefix = current.find(locale, PREFIX_KEY);
+        // When two resolvers know the same tag the last one wins: shared tags go first, so that
+        // what the caller passes for this message always takes precedence.
+        TagResolver.Builder resolver = TagResolver.builder().resolvers(sharedResolvers);
+        List<String> prefix = current.find(locale, PREFIX_KEY);
         if (prefix != null) {
             // Parsed on purpose: the prefix is MiniMessage written by the administrator.
-            resolver.resolver(Placeholder.parsed(PREFIX_KEY, prefix));
+            resolver.resolver(Placeholder.parsed(PREFIX_KEY, String.join("\n", prefix)));
         }
+        resolver.resolvers(arguments);
         return viewer == null
                 ? miniMessage.deserialize(template, resolver.build())
                 : miniMessage.deserialize(template, viewer, resolver.build());
     }
 
-    private Catalog load() throws MessageException {
+    private Catalog load(boolean strict) throws MessageException {
         try {
-            Files.createDirectories(directory);
-            Map<Locale, Map<String, String>> templates = new HashMap<>();
-
+            Map<Locale, Map<String, List<String>>> builtIn = new HashMap<>();
+            Map<String, String> bundledFiles = new HashMap<>();
             for (String name : BUNDLED_LOCALES) {
-                String bundled = readBundled(name);
-                Path file = directory.resolve(name + EXTENSION);
-                if (Files.notExists(file)) {
-                    Files.writeString(file, bundled);
-                }
-                templates.put(Translator.parseLocale(name), parse(name + EXTENSION + " (bundled)", bundled));
+                String content = readBundled(name);
+                bundledFiles.put(name, content);
+                builtIn.put(Translator.parseLocale(name), parse(name + EXTENSION + " (built in)", content));
             }
 
+            if (Files.notExists(directory)) {
+                Files.createDirectories(directory);
+                for (Map.Entry<String, String> bundled : bundledFiles.entrySet()) {
+                    Files.writeString(directory.resolve(bundled.getKey() + EXTENSION), bundled.getValue());
+                }
+            }
+
+            Map<Locale, Map<String, List<String>>> languages = new HashMap<>();
             try (Stream<Path> files = Files.list(directory)) {
-                for (Path file : files.filter(path -> path.getFileName().toString().endsWith(EXTENSION)).toList()) {
+                List<Path> languageFiles = files.filter(path -> path.getFileName().toString().endsWith(EXTENSION))
+                        .toList();
+                for (Path file : languageFiles) {
                     String fileName = file.getFileName().toString();
-                    Locale locale = Translator.parseLocale(fileName.substring(0, fileName.length() - EXTENSION.length()));
-                    if (locale == null) {
+                    String name = fileName.substring(0, fileName.length() - EXTENSION.length());
+                    if (!LOCALE_NAME.matcher(name).matches()) {
                         logger.warn("Ignoring lang/{}: the file name is not a locale such as 'en' or 'pt_BR'", fileName);
                         continue;
                     }
-                    templates.computeIfAbsent(locale, key -> new HashMap<>()).putAll(parse(fileName, Files.readString(file)));
+                    Locale locale = Translator.parseLocale(name.replace('-', '_'));
+                    Map<String, List<String>> onDisk;
+                    try {
+                        onDisk = parse(fileName, Files.readString(file));
+                    } catch (MessageException e) {
+                        if (strict) {
+                            throw e;
+                        }
+                        logger.error("Ignoring {}: fix the file and reload", e.getMessage());
+                        continue;
+                    }
+                    Map<String, List<String>> messages = new HashMap<>(builtIn.getOrDefault(locale, Map.of()));
+                    messages.putAll(onDisk);
+                    languages.put(locale, Map.copyOf(messages));
                 }
             }
 
-            Locale defaultLocale = Translator.parseLocale(config.get().defaultLocale());
-            if (defaultLocale == null || !templates.containsKey(defaultLocale)) {
-                throw new MessageException("default-locale '" + config.get().defaultLocale()
-                        + "' has no matching file in the lang folder");
+            String configured = config.get().defaultLocale();
+            Locale defaultLocale = LOCALE_NAME.matcher(configured).matches()
+                    ? Translator.parseLocale(configured.replace('-', '_'))
+                    : null;
+            if (defaultLocale == null || !languages.containsKey(defaultLocale)) {
+                throw new MessageException(
+                        "default-locale '" + configured + "' has no usable file in the lang folder");
             }
-            templates.replaceAll((locale, messages) -> Map.copyOf(messages));
-            return new Catalog(Map.copyOf(templates), defaultLocale);
+            return new Catalog(Map.copyOf(languages), builtIn.get(Locale.ENGLISH), defaultLocale);
         } catch (IOException e) {
             throw new MessageException("Language files could not be read: " + e.getMessage(), e);
         }
@@ -218,44 +282,52 @@ public final class MessageService implements Module {
         }
     }
 
-    /** Flattens a YAML file into dotted keys. A list becomes one message with a line per entry. */
-    private static Map<String, String> parse(String source, String content) throws MessageException {
-        YamlConfiguration yaml = new YamlConfiguration();
+    /** Flattens a YAML file into dotted keys. A list is a message with one line per entry. */
+    private static Map<String, List<String>> parse(String source, String content) throws MessageException {
+        Map<String, Object> flat;
         try {
-            yaml.loadFromString(content);
-        } catch (InvalidConfigurationException e) {
-            throw new MessageException("lang/" + source + " is not valid YAML: " + e.getMessage(), e);
+            flat = Yaml.flatten(Yaml.parse(content));
+        } catch (YamlException e) {
+            throw new MessageException("lang/" + source + " is " + e.getMessage(), e);
         }
-        Map<String, String> messages = new HashMap<>();
-        for (String key : yaml.getKeys(true)) {
-            Object value = yaml.get(key);
+        Map<String, List<String>> messages = new HashMap<>();
+        flat.forEach((key, value) -> {
             if (value instanceof List<?> lines) {
-                messages.put(key, String.join("\n", lines.stream().map(String::valueOf).toList()));
-            } else if (value != null && !yaml.isConfigurationSection(key)) {
-                messages.put(key, String.valueOf(value));
+                messages.put(key, lines.stream().map(String::valueOf).toList());
+            } else if (value != null) {
+                messages.put(key, List.of(String.valueOf(value)));
             }
-        }
-        return messages;
+        });
+        return Map.copyOf(messages);
     }
 
-    /** An immutable set of messages, replaced as a whole on reload. */
-    private record Catalog(Map<Locale, Map<String, String>> templates, Locale defaultLocale) {
+    /**
+     * An immutable set of messages, replaced as a whole on reload.
+     *
+     * @param languages the languages available on disk, each already completed with its built-in
+     *     text
+     * @param builtInEnglish the last resort, present even when the English file was deleted
+     */
+    private record Catalog(
+            Map<Locale, Map<String, List<String>>> languages,
+            Map<String, List<String>> builtInEnglish,
+            Locale defaultLocale) {
 
-        @Nullable String find(Locale locale, String key) {
-            String template = find(templates.get(locale), key);
-            if (template == null && !locale.getCountry().isEmpty()) {
-                template = find(templates.get(Locale.of(locale.getLanguage())), key);
+        @Nullable List<String> find(Locale locale, String key) {
+            List<String> lines = find(languages.get(locale), key);
+            if (lines == null && !locale.getCountry().isEmpty()) {
+                lines = find(languages.get(Locale.of(locale.getLanguage())), key);
             }
-            if (template == null) {
-                template = find(templates.get(defaultLocale), key);
+            if (lines == null) {
+                lines = find(languages.get(defaultLocale), key);
             }
-            if (template == null) {
-                template = find(templates.get(Locale.ENGLISH), key);
+            if (lines == null) {
+                lines = builtInEnglish.get(key);
             }
-            return template;
+            return lines;
         }
 
-        private static @Nullable String find(@Nullable Map<String, String> messages, String key) {
+        private static @Nullable List<String> find(@Nullable Map<String, List<String>> messages, String key) {
             return messages == null ? null : messages.get(key);
         }
     }
