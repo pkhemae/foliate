@@ -95,6 +95,7 @@ Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Changes are l
 [MIT](LICENSE). PlaceholderAPI and zMenu are separate plugins under their own licenses and are not
 bundled.
 
-The leaf in the logo is the icon of the [Folia](https://github.com/PaperMC/Folia) project and
-belongs to its authors. Foliate is an independent template, not affiliated with or endorsed by
-PaperMC. If you build your own plugin from it, replace `assets/logo.svg` with your own.
+The leaf in the logo is the "leaf" glyph of [Material Design Icons](https://pictogrammers.com/library/mdi/)
+(Apache 2.0), the icon papermc.io uses for Folia. Foliate is an independent template, not
+affiliated with or endorsed by PaperMC. If you build your own plugin from it, replace
+`assets/logo.svg` with your own.
