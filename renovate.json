@@ -1,0 +1,27 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "packageRules": [
+    {
+      "description": "The Minecraft line is changed by hand, together with everything tied to it (see gradle/libs.versions.toml): only newer builds of the 26.2 line are proposed, hotfix lines such as 26.2.1 excluded. Versions look like 26.2.build.7-beta, which is not semver; alpha and beta builds count as pre-releases.",
+      "matchPackageNames": ["dev.folia:folia-api"],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)(\\.(?<patch>\\d+))?\\.build\\.(?<build>\\d+)-(?:(?<prerelease>alpha|beta)|stable)$",
+      "allowedVersions": "/^26\\.2\\.build\\./"
+    },
+    {
+      "description": "The APIs of the optional plugins. The test servers download the plugins at the same versions, through the same catalog entries.",
+      "matchPackageNames": ["me.clip:placeholderapi", "fr.maxlego08.menu:zmenu-api"],
+      "groupName": "optional plugin APIs"
+    },
+    {
+      "description": "Must stay on the version ConfigLib depends on: bump it by hand when ConfigLib moves.",
+      "matchPackageNames": ["org.snakeyaml:snakeyaml-engine"],
+      "enabled": false
+    },
+    {
+      "description": "Test only, kept on the version the server ships so tests run against the same driver.",
+      "matchPackageNames": ["org.xerial:sqlite-jdbc"],
+      "enabled": false
+    }
+  ]
+}
