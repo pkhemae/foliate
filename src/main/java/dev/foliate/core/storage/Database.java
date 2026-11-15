@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 public final class Database implements Module {
 
     private static final long SHUTDOWN_TIMEOUT_SECONDS = 15;
+    private static final long CONNECTION_TIMEOUT_MILLIS = 10_000;
 
     private final Path dataDirectory;
     private final ConfigService config;
@@ -72,6 +73,8 @@ public final class Database implements Module {
             threads = mysql.poolSize();
         }
         pool.setMaximumPoolSize(threads);
+        // Fail fast when the database is unreachable instead of holding a login or the shutdown.
+        pool.setConnectionTimeout(CONNECTION_TIMEOUT_MILLIS);
 
         HikariDataSource source = new HikariDataSource(pool);
         dataSource = source;
@@ -146,8 +149,9 @@ public final class Database implements Module {
     }
 
     /**
-     * Runs work on the calling thread. Only for callers that are already off the tick threads and
-     * need the result before returning, such as the pre-login event.
+     * Runs work on the calling thread, ahead of anything queued with {@link #submit}. Only for
+     * work that does not depend on queued writes, such as the schema migrations: to read data that
+     * a queued write may be about to change, {@code submit} and wait for the future instead.
      */
     public <T> T call(SqlFunction<T> work) throws SQLException {
         HikariDataSource source = dataSource;

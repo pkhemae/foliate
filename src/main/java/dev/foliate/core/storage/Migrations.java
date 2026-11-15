@@ -8,9 +8,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 
 /**
@@ -20,6 +22,9 @@ import org.slf4j.Logger;
  * <p>To change the schema, add a new script and append its name to {@link #SCRIPTS}. Never edit
  * a script that has shipped: servers that already ran it would not run it again. Scripts must stay
  * portable across SQLite and MySQL.
+ *
+ * <p>Keep each script to one change. MySQL commits schema statements as it runs them, so there a
+ * script that fails halfway cannot be rolled back, and it is not recorded as applied either.
  */
 final class Migrations {
 
@@ -91,14 +96,28 @@ final class Migrations {
             sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
         try (Statement statement = connection.createStatement()) {
-            // Statements end with a semicolon at the end of a line; scripts hold no procedures.
-            for (String part : sql.split(";\\s*(\\r?\\n|$)")) {
-                String single = part.strip();
-                if (!single.isEmpty()) {
-                    statement.execute(single);
-                }
+            for (String single : statements(sql)) {
+                statement.execute(single);
             }
         }
+    }
+
+    /**
+     * Splits a script into statements. Deliberately simple: comments start with {@code --} and run
+     * to the end of the line, and statements are separated by semicolons. A script must therefore
+     * not contain {@code --} or a semicolon inside a quoted value, nor stored procedures.
+     */
+    static List<String> statements(String script) {
+        String withoutComments = script.lines()
+                .map(line -> {
+                    int comment = line.indexOf("--");
+                    return comment < 0 ? line : line.substring(0, comment);
+                })
+                .collect(Collectors.joining("\n"));
+        return Arrays.stream(withoutComments.split(";"))
+                .map(String::strip)
+                .filter(statement -> !statement.isEmpty())
+                .toList();
     }
 
     private static void record(Connection connection, int version, String script) throws SQLException {
