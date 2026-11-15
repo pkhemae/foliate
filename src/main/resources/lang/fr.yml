@@ -3,3 +3,12 @@
 # Un message absent de ce fichier reprend le texte intégré au plugin.
 
 prefix: "<dark_gray>[<aqua>Foliate</aqua>]</dark_gray> "
+
+command:
+  info:
+    - "<prefix><white>Foliate <aqua><version></aqua>"
+    - "<gray>Plateforme : <white><platform>"
+    - "<gray>Modules : <white><modules>"
+  reload:
+    success: "<prefix><green>Configuration et messages rechargés."
+    failure: "<prefix><red>Impossible de recharger <white><module></white> : <error>"
