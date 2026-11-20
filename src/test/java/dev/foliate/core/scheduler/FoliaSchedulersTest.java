@@ -6,11 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.papermc.paper.threadedregions.scheduler.EntityScheduler;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import net.kyori.adventure.util.Ticks;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
@@ -24,9 +28,9 @@ import org.mockbukkit.mockbukkit.entity.PlayerMock;
 
 /**
  * Covers the facade's own logic. MockBukkit runs every scheduler on one simulated thread, so these
- * tests say nothing about region safety: that is what the Folia smoke test is for. Cancellation and
- * entity timers are not covered here either: MockBukkit implements neither
- * {@code ScheduledTask#cancel} nor {@code ScheduledTask#isCancelled}.
+ * tests say nothing about region safety: that is what the Folia smoke test is for. Cancellation is
+ * not covered here either: MockBukkit implements neither {@code ScheduledTask#cancel} nor
+ * {@code ScheduledTask#isCancelled}. The one entity timer test plays the server with proxies.
  */
 class FoliaSchedulersTest {
 
@@ -203,5 +207,63 @@ class FoliaSchedulersTest {
 
     private Location location() {
         return new Location(server.addSimpleWorld("world"), 0, 64, 0);
+    }
+
+    /**
+     * An entity removed while its timer is being scheduled has the retire callback run before the
+     * task is known. MockBukkit has no entity scheduler to do that, so the server's side is played
+     * by proxies. The task reports itself as not cancelled: the state a retired task is left in is
+     * the server's business, so the timer must be forgotten because the callback ran.
+     */
+    @Test
+    void timerOfAnEntityRetiredWhileBeingScheduledIsNotKeptUntilShutdown() {
+        AtomicInteger cancelled = new AtomicInteger();
+        ScheduledTask task = proxy(ScheduledTask.class, (method, args) -> {
+            if (method.getName().equals("cancel")) {
+                cancelled.incrementAndGet();
+            }
+            return null;
+        });
+        EntityScheduler scheduler = proxy(EntityScheduler.class, (method, args) -> {
+            if (method.getName().equals("runAtFixedRate")) {
+                ((Runnable) args[2]).run(); // retired before the task is returned
+                return task;
+            }
+            return null;
+        });
+        Entity entity = proxy(Entity.class, (method, args) -> method.getName().equals("getScheduler") ? scheduler : null);
+
+        schedulers.entity(entity).runTimer(Duration.ofSeconds(1), Duration.ofSeconds(1), () -> {});
+        schedulers.shutdown();
+
+        assertEquals(0, cancelled.get());
+    }
+
+    private interface Answer {
+        Object to(java.lang.reflect.Method method, Object[] args);
+    }
+
+    /** An implementation of an interface answering through {@code answer}; unanswered primitives are zero. */
+    private static <T> T proxy(Class<T> type, Answer answer) {
+        Object proxy = Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type}, (self, method, args) -> {
+            switch (method.getName()) {
+                case "hashCode" -> {
+                    return System.identityHashCode(self);
+                }
+                case "equals" -> {
+                    return self == args[0];
+                }
+                case "toString" -> {
+                    return type.getSimpleName() + " fake";
+                }
+                default -> {}
+            }
+            Object result = answer.to(method, args);
+            if (result == null && method.getReturnType() == boolean.class) {
+                return false;
+            }
+            return result;
+        });
+        return type.cast(proxy);
     }
 }

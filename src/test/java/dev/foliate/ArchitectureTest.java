@@ -19,8 +19,8 @@ import org.junit.jupiter.api.Test;
  * modules, hooks and commands depend on {@code core} only, never on each other. Only
  * {@code FoliatePlugin} and {@code PluginConfig}, which compose everything, may know it all.
  *
- * <p>It reads the imports of the source files, so a violation is reported with the file and the
- * line, before it can spread.
+ * <p>It reads every mention of the plugin's packages in the source files (imports, wildcard or
+ * static, and qualified names), so a violation is reported with the file before it can spread.
  */
 class ArchitectureTest {
 
@@ -60,6 +60,7 @@ class ArchitectureTest {
 
                 class Example {
                     dev.foliate.commands.FoliateCommand command;
+                    // see dev.foliate.modules
                 }
                 """;
 
@@ -68,7 +69,8 @@ class ArchitectureTest {
                         "modules.profile.*",
                         "hooks.zmenu.ZMenuHook.NAME",
                         "PluginConfig",
-                        "commands.FoliateCommand"),
+                        "commands.FoliateCommand",
+                        "modules"),
                 foreignReferences("modules.sidebar", source));
     }
 
@@ -108,6 +110,7 @@ class ArchitectureTest {
         if (Character.isUpperCase(parts[0].charAt(0)) || parts[0].equals("*")) {
             return "root";
         }
-        return GROUPS.contains(parts[0]) ? parts[0] + "." + parts[1] : parts[0];
+        // A bare "modules" or "hooks", in a comment for instance, names no part in particular.
+        return GROUPS.contains(parts[0]) && parts.length > 1 ? parts[0] + "." + parts[1] : parts[0];
     }
 }
