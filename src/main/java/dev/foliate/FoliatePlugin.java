@@ -19,7 +19,7 @@ import dev.foliate.hooks.zmenu.ZMenuHook;
 import dev.foliate.modules.metrics.MetricsModule;
 import dev.foliate.modules.profile.ProfileModule;
 import dev.foliate.selftest.SelfTest;
-import dev.foliate.modules.sidebar.SidebarModule;
+import dev.foliate.modules.scoreboard.ScoreboardModule;
 import dev.foliate.modules.update.GitHubReleases;
 import dev.foliate.modules.update.UpdateCheckModule;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
@@ -82,7 +82,7 @@ public class FoliatePlugin extends JavaPlugin {
         modules.register(database);
         modules.register(new ProfileModule(
                 this, database, messages, placeholders, getSLF4JLogger(), Clock.systemUTC()));
-        modules.register(new SidebarModule(this, schedulers, () -> config.get().sidebar(), messages));
+        modules.register(new ScoreboardModule(this, schedulers, () -> config.get().scoreboard(), messages));
         Menus menus = hook(modules, ZMenuHook.PLUGIN_NAME, () -> new ZMenuHook(this, schedulers, messages));
 
         if (!modules.enableAll()) {

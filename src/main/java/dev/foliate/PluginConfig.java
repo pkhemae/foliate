@@ -6,7 +6,7 @@ import dev.foliate.core.config.ConfigException;
 import dev.foliate.core.config.ConfigRoot;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.StorageSettings;
-import dev.foliate.modules.sidebar.SidebarSettings;
+import dev.foliate.modules.scoreboard.ScoreboardSettings;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -72,7 +72,7 @@ public final class PluginConfig implements ConfigRoot {
     private boolean updateCheck = true;
 
     @Comment("Scoreboard shown on the right of each player's screen.")
-    private SidebarSettings sidebar = new SidebarSettings();
+    private ScoreboardSettings scoreboard = new ScoreboardSettings();
 
     @Comment({"Where player data is kept.", "Changes in this section only apply after a server restart."})
     private StorageSettings storage = new StorageSettings();
@@ -101,8 +101,8 @@ public final class PluginConfig implements ConfigRoot {
         return updateCheck;
     }
 
-    public SidebarSettings sidebar() {
-        return sidebar;
+    public ScoreboardSettings scoreboard() {
+        return scoreboard;
     }
 
     public StorageSettings storage() {
@@ -114,7 +114,7 @@ public final class PluginConfig implements ConfigRoot {
         if (defaultLocale.isBlank()) {
             throw new ConfigException("default-locale must not be empty");
         }
-        sidebar.validate();
+        scoreboard.validate();
         storage.validate();
     }
 }

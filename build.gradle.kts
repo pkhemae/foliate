@@ -49,7 +49,7 @@ val clientTest: Boolean = providers.gradleProperty("clientTest").map(String::toB
 // The modules the self-test must find enabled. Without this, a hook that silently failed to load
 // (its plugin could not download its libraries, say) would still give a green run.
 val expectedModules: String =
-    (listOf("config", "messages", "storage", "profiles", "sidebar", "updates") +
+    (listOf("config", "messages", "storage", "profiles", "scoreboard", "updates") +
         if (withHooks) listOf("placeholderapi", "zmenu") else emptyList()).joinToString(",")
 
 java {
