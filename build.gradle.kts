@@ -1,3 +1,4 @@
+import java.util.zip.ZipFile
 import xyz.jpenilla.resourcefactory.bukkit.Permission
 import xyz.jpenilla.runpaper.task.RunServer
 import xyz.jpenilla.runtask.pluginsapi.DownloadPluginsSpec
@@ -19,6 +20,7 @@ val minecraftVersion: String = libs.versions.minecraft.get()
 // gradle.properties, which the base package follows).
 val pluginName = "Foliate"
 val basePackage: String = project.group.toString()
+val mainClass = "$basePackage.FoliatePlugin"
 
 // The test servers get the plugins we integrate with, so hooks are exercised by default.
 // Pass -Phooks=false to start without them and check the plugin runs on its own.
@@ -35,9 +37,9 @@ val testServerPlugins: Action<DownloadPluginsSpec> = Action {
 // but an explicit "true" leaves the EULA unaccepted.
 val acceptEula: Boolean = providers.gradleProperty("acceptEula").map(String::toBoolean).getOrElse(false)
 
-// -PselfTest=true makes the plugin test itself once the server is up, then stops the server. The
-// task fails unless the self-test passed and nothing went wrong in the plugin. This is the smoke
-// test.
+// -PselfTest=true installs the self-test jar (see selfTestJar) instead of the plugin jar: the
+// plugin tests itself once the server is up, then stops the server. The task fails unless the
+// self-test passed and nothing went wrong in the plugin. This is the smoke test.
 val selfTest: Boolean = providers.gradleProperty("selfTest").map(String::toBoolean).getOrElse(false)
 
 // -PclientTest=true (with -PselfTest=true) makes the self-test wait for a real client to join and
@@ -63,6 +65,15 @@ val expectedModules: String =
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(25)
 }
+
+// The self-test and its checks: compiled against the plugin, never part of its jar. The checks of
+// a module sit in the module's package, so that they can use what it keeps package-private.
+val selftest: SourceSet = sourceSets.create("selftest") {
+    compileClasspath += sourceSets.main.get().output
+    runtimeClasspath += sourceSets.main.get().output
+}
+configurations[selftest.compileOnlyConfigurationName].extendsFrom(configurations.compileOnly.get())
+configurations[selftest.implementationConfigurationName].extendsFrom(configurations.implementation.get())
 
 repositories {
     mavenCentral()
@@ -98,6 +109,8 @@ dependencies {
     testImplementation(libs.folia.api)
     testImplementation(libs.placeholderapi)
     testImplementation(libs.zmenu.api) { isTransitive = false }
+    // The tests of the self-test's checks.
+    testImplementation(selftest.output)
     testRuntimeOnly(libs.junit.platform.launcher)
     testRuntimeOnly(libs.sqlite.jdbc)
     testRuntimeOnly(libs.mysql.connector)
@@ -106,7 +119,7 @@ dependencies {
 // Generates plugin.yml at build time, so the plugin metadata lives in one place.
 bukkitPluginYaml {
     name = pluginName
-    main = "$basePackage.FoliatePlugin"
+    main = mainClass
     apiVersion = minecraftVersion
     foliaSupported = true
     description = project.description
@@ -150,6 +163,7 @@ tasks {
         // ArchitectureTest reads the source files: without this, Gradle would call the test up to
         // date after a change that does not alter the bytecode, such as an import.
         inputs.dir("src/main/java").withPropertyName("sources").withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.dir("src/selftest/java").withPropertyName("selfTestSources").withPathSensitivity(PathSensitivity.RELATIVE)
         // The tests that need a MySQL or MariaDB server run only when the environment points at one:
         // without declaring it, Gradle would reuse a run (or a cached one) made without a server.
         for (name in listOf("PORT", "HOST", "DATABASE", "USER")) {
@@ -180,6 +194,48 @@ tasks {
     }
 }
 
+// The plugin with the self-test: the plugin jar itself, entry for entry, plus the selftest source
+// set, and a plugin.yml whose main class is SelfTestPlugin. So the smoke test runs what is
+// released. Only the test servers get it, never next to the plugin jar; it is built in its own
+// folder, away from the jars to install. The self-test's classes are not relocated: they may use
+// the plugin and the server's API, not a bundled library directly.
+val selfTestJar = tasks.register<Jar>("selfTestJar") {
+    description = "Builds the plugin jar with its self-test, for the smoke test."
+    archiveClassifier = "selftest"
+    destinationDirectory = layout.buildDirectory.dir("selftest")
+    from(zipTree(tasks.shadowJar.flatMap { it.archiveFile })) {
+        exclude("META-INF/MANIFEST.MF")
+    }
+    from(selftest.output)
+    // A class of the self-test must not hide one of the plugin, nor the other way round.
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    manifest.attributes("Multi-Release" to "true")
+    val mainLine = "main: $basePackage.selftest.SelfTestPlugin"
+    filesMatching("plugin.yml") {
+        filter { line -> if (line.startsWith("main:")) mainLine else line }
+    }
+    // Without its main class the self-test would not start, and the smoke test would only end at
+    // its timeout.
+    doLast {
+        ZipFile(archiveFile.get().asFile).use { zip ->
+            val pluginYml = zip.getInputStream(zip.getEntry("plugin.yml")).reader().readText()
+            if (mainLine !in pluginYml.lines()) {
+                throw GradleException("The self-test jar's plugin.yml does not say '$mainLine'")
+            }
+        }
+    }
+}
+
+tasks.check {
+    // So that the build, and a renamed template, always package the self-test.
+    dependsOn(selfTestJar)
+}
+
+// The test servers get the jar named here, not whatever jar run-paper would find on its own.
+runPaper {
+    disablePluginJarDetection()
+}
+
 // Adds the runFolia task, the one to use day to day: Paper cannot detect region violations.
 runPaper.folia.registerTask {
     minecraftVersion(minecraftVersion)
@@ -187,11 +243,12 @@ runPaper.folia.registerTask {
 }
 
 tasks.withType<RunServer>().configureEach {
+    pluginJars(if (selfTest) selfTestJar else tasks.shadowJar)
     if (acceptEula) {
         jvmArgs("-Dcom.mojang.eula.agree=true")
     }
     if (selfTest) {
-        jvmArgs("-Dfoliate.selftest=true", "-Dfoliate.selftest.expect=$expectedModules")
+        jvmArgs("-Dfoliate.selftest.expect=$expectedModules")
         if (clientTest) {
             jvmArgs("-Dfoliate.selftest.client=true", "-Dfoliate.selftest.client.languages=$clientLanguages", "-Dfoliate.selftest.client.typed=$clientTyped")
             doFirst {

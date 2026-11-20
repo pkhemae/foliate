@@ -45,7 +45,8 @@ jobs:
       - name: Build and test
         run: ./gradlew build -Pversion="${GITHUB_REF_NAME#v}"
 
-      # Same smoke test as CI: what is released has enabled on a real Folia server.
+      # Same smoke test as CI: what is released has enabled on a real Folia server. The self-test
+      # jar is the released jar, entry for entry, plus the self-test.
       # -PacceptEula=true accepts the Minecraft EULA (https://aka.ms/MinecraftEULA) for this
       # throwaway server.
       - name: Smoke test on Folia
