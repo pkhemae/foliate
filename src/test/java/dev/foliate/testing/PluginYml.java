@@ -33,11 +33,13 @@ public final class PluginYml {
             Map<?, ?> fields = (Map<?, ?>) content;
             PermissionDefault permissionDefault =
                     PermissionDefault.getByName(String.valueOf(fields.get("default")));
+            if (permissionDefault == null) {
+                throw new IllegalStateException(
+                        "permission " + name + " has no valid default in plugin.yml: " + fields.get("default"));
+            }
+            Object description = fields.get("description");
             server.getPluginManager()
-                    .addPermission(new Permission(
-                            name,
-                            String.valueOf(fields.get("description")),
-                            permissionDefault == null ? PermissionDefault.OP : permissionDefault));
+                    .addPermission(new Permission(name, description == null ? "" : description.toString(), permissionDefault));
         });
     }
 

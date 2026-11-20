@@ -13,6 +13,7 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -138,10 +139,12 @@ public final class ProfileModule implements Module, PlayerCheck, ProfileLookup, 
         HandlerList.unregisterAll(this);
         placeholders.unregister("joins");
         long now = clock.millis();
-        online.values().forEach(profile -> write(profile.seen(now)));
-        online.clear();
-        loggingIn.clear();
-        pendingJoins.clear();
+        synchronized (lifecycle) {
+            online.values().forEach(profile -> write(profile.seen(now)));
+            online.clear();
+            loggingIn.clear();
+            pendingJoins.clear();
+        }
         if (!awaitWrites(FLUSH_TIMEOUT_SECONDS)) {
             logger.warn("Some player profiles were not saved within {} seconds", FLUSH_TIMEOUT_SECONDS);
         }
@@ -193,8 +196,9 @@ public final class ProfileModule implements Module, PlayerCheck, ProfileLookup, 
      * <p>Changing a profile is a read, a computation and a write, and two threads doing it at
      * once must not lose either change: the new profile is computed from the one that is cached at
      * that moment, under the lock the join and the quit use, and its save is queued under the same
-     * lock, so the saves reach the database in the order the changes were made. Keep {@code change}
-     * quick and free of side effects; it runs under that lock and may not run again.
+     * lock, so the saves reach the database in the order the changes were made. {@code change}
+     * runs under that lock, so keep it quick and free of side effects: it must not block, and
+     * must not call {@code update} again (the inner change would be overwritten).
      *
      * @param change gives the new profile from the current one, as {@code PlayerProfile#joined} does
      * @return the new profile, or empty when the player is not online (nothing is changed or saved)
@@ -205,7 +209,10 @@ public final class ProfileModule implements Module, PlayerCheck, ProfileLookup, 
             if (current == null) {
                 return Optional.empty();
             }
-            PlayerProfile changed = change.apply(current);
+            PlayerProfile changed = Objects.requireNonNull(change.apply(current), "the change gave no profile");
+            if (!changed.id().equals(id)) {
+                throw new IllegalArgumentException("a change must keep the id of the profile it changes");
+            }
             online.put(id, changed);
             write(changed);
             return Optional.of(changed);
@@ -265,8 +272,12 @@ public final class ProfileModule implements Module, PlayerCheck, ProfileLookup, 
         PendingLogin pending = loggingIn.remove(id);
         if (pending != null && now - pending.at() <= LOGIN_TTL_MILLIS) {
             PlayerProfile joined = pending.profile().joined(name, now);
-            online.put(id, joined);
-            write(joined);
+            // Under the lock `update` uses: a change made between the two lines would otherwise be
+            // saved before this older profile, and the database would end up with the older one.
+            synchronized (lifecycle) {
+                online.put(id, joined);
+                write(joined);
+            }
             return;
         }
         // No usable pre-login: the plugin was enabled while the player connected, or the login

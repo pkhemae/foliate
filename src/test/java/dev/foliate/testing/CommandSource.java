@@ -53,4 +53,3 @@ public record CommandSource(CommandSender sender, Entity executor) implements Co
         return this;
     }
 }
-

@@ -314,7 +314,7 @@ class ProfileModuleTest {
         PlayerMock player = server.addPlayer("Alex");
         UUID id = player.getUniqueId();
         int threads = 8;
-        int each = 50;
+        int each = 200;
         ExecutorService pool = Executors.newFixedThreadPool(threads);
         try {
             List<Future<?>> done = new ArrayList<>();
@@ -336,6 +336,37 @@ class ProfileModuleTest {
         assertEquals(1 + threads * each, profiles.find(id).orElseThrow().joins());
         // The last save to land is the last change made, whatever the number of storage threads.
         assertEquals(1 + threads * each, stored(id).orElseThrow().joins());
+    }
+
+    @Test
+    void changeThatThrowsOrReturnsAnotherPlayersProfileChangesNothing() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        PlayerProfile before = profiles.find(id).orElseThrow();
+
+        assertThrows(IllegalStateException.class, () -> profiles.update(id, profile -> {
+            throw new IllegalStateException("broken change");
+        }));
+        assertThrows(IllegalArgumentException.class, () -> profiles.update(id, profile ->
+                new PlayerProfile(UUID.randomUUID(), profile.name(), profile.firstSeen(), profile.lastSeen(), 99)));
+        assertThrows(NullPointerException.class, () -> profiles.update(id, profile -> null));
+        flush();
+
+        assertEquals(before, profiles.find(id).orElseThrow());
+        // The lock was let go: the next change works.
+        assertEquals(before.joins() + 1, profiles.update(id, profile -> withJoins(profile, profile.joins() + 1)).orElseThrow().joins());
+    }
+
+    @Test
+    void changeMadeJustAfterTheLoginIsNotOverwrittenByTheJoinsOwnSave() throws Exception {
+        UUID id = UUID.randomUUID();
+        profiles.beginLogin(id, "Alex");
+
+        profiles.join(id, "Alex");
+        profiles.update(id, profile -> withJoins(profile, 40));
+        flush();
+
+        assertEquals(40, stored(id).orElseThrow().joins());
     }
 
     @Test
