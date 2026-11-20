@@ -154,10 +154,12 @@ class ProfileStorageOnMysqlTest {
         profiles.enable();
         UUID id = UUID.randomUUID();
 
-        server.addPlayer(new PlayerMock(server, "Alex", id));
-        profiles.quit(id);
-        server.addPlayer(new PlayerMock(server, "Alex", id));
-        profiles.quit(id);
+        PlayerMock first = new PlayerMock(server, "Alex", id);
+        server.addPlayer(first);
+        first.disconnect();
+        PlayerMock second = new PlayerMock(server, "Alex", id);
+        server.addPlayer(second);
+        second.disconnect();
         assertTrue(profiles.awaitWrites(10));
 
         PlayerProfile stored = database.call(connection -> repository.find(connection, id)).orElseThrow();

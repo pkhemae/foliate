@@ -1,5 +1,6 @@
 package dev.foliate.modules.profile;
 
+import dev.foliate.core.player.PlayerRepository;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -8,9 +9,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** SQL for profiles. Plain JDBC, written to run unchanged on SQLite and MySQL. */
-final class ProfileRepository {
+final class ProfileRepository implements PlayerRepository<PlayerProfile> {
 
-    Optional<PlayerProfile> find(Connection connection, UUID id) throws SQLException {
+    @Override
+    public Optional<PlayerProfile> find(Connection connection, UUID id) throws SQLException {
         try (PreparedStatement select = connection.prepareStatement(
                 "SELECT name, first_seen, last_seen, joins FROM foliate_profiles WHERE id = ?")) {
             select.setString(1, id.toString());
@@ -25,7 +27,8 @@ final class ProfileRepository {
     }
 
     /** Inserts or updates. Update first: "upsert" syntax differs between SQLite and MySQL. */
-    void save(Connection connection, PlayerProfile profile) throws SQLException {
+    @Override
+    public void save(Connection connection, PlayerProfile profile) throws SQLException {
         try (PreparedStatement update = connection.prepareStatement(
                 "UPDATE foliate_profiles SET name = ?, last_seen = ?, joins = ? WHERE id = ?")) {
             update.setString(1, profile.name());

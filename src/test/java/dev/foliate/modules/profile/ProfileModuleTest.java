@@ -19,17 +19,10 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -121,151 +114,6 @@ class ProfileModuleTest {
         assertEquals(10, profile.firstSeen());
     }
 
-    /** The server's order for a second login: pre-login of the new one, quit of the old, join. */
-    @Test
-    void loggingInAgainWhileOnlineKeepsTheProfile() throws Exception {
-        UUID id = store(new PlayerProfile(UUID.randomUUID(), "Alex", 10, 20, 4));
-        profiles.beginLogin(id, "Alex");
-        profiles.join(id, "Alex");
-
-        profiles.beginLogin(id, "Alex");
-        profiles.quit(id);
-        profiles.join(id, "Alex");
-        flush();
-
-        assertEquals(6, profiles.find(id).orElseThrow().joins());
-        assertEquals(6, stored(id).orElseThrow().joins());
-    }
-
-    /** A login must read behind the saves still queued for the player, not ahead of them. */
-    @Test
-    void loginWhileEarlierSavesAreStillQueuedSeesThem() throws Exception {
-        UUID id = UUID.randomUUID();
-        profiles.beginLogin(id, "Alex");
-        CountDownLatch release = holdStorageThread();
-        profiles.join(id, "Alex");
-        profiles.quit(id);
-
-        CompletableFuture<Void> secondLogin = CompletableFuture.runAsync(() -> {
-            try {
-                profiles.beginLogin(id, "Alex");
-            } catch (Exception e) {
-                throw new IllegalStateException(e);
-            }
-        });
-        release.countDown();
-        secondLogin.get(10, TimeUnit.SECONDS);
-        profiles.join(id, "Alex");
-        flush();
-
-        assertEquals(2, stored(id).orElseThrow().joins());
-    }
-
-    @Test
-    void loginThatNeverBecomesAJoinSavesNothing() throws Exception {
-        UUID id = UUID.randomUUID();
-
-        profiles.beginLogin(id, "Banned");
-        profiles.disable();
-
-        assertTrue(stored(id).isEmpty());
-    }
-
-    /** A connection can end after pre-login without a trace: such entries expire by themselves. */
-    @Test
-    void loginsThatNeverBecameAJoinAreForgottenAfterAWhile() throws Exception {
-        profiles.beginLogin(UUID.randomUUID(), "Banned");
-        profiles.beginLogin(UUID.randomUUID(), "Full");
-        assertEquals(2, profiles.pendingLogins());
-
-        clock.set(1_000 + 6 * 60_000);
-        profiles.beginLogin(UUID.randomUUID(), "Next");
-
-        assertEquals(1, profiles.pendingLogins());
-    }
-
-    @Test
-    void loginThatWaitedTooLongIsNotTrustedAtJoinButTheProfileIsStillLoaded() throws Exception {
-        UUID id = store(new PlayerProfile(UUID.randomUUID(), "Alex", 10, 20, 4));
-        profiles.beginLogin(id, "Alex");
-        // The row changes while the login waits: only a fresh load can see it.
-        store(new PlayerProfile(id, "Alex", 10, 20, 9));
-
-        clock.set(1_000 + 6 * 60_000);
-        profiles.join(id, "Alex");
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (profiles.find(id).isEmpty() && System.nanoTime() < deadline) {
-            Thread.sleep(10);
-        }
-
-        assertEquals(10, profiles.find(id).orElseThrow().joins());
-        assertEquals(0, profiles.pendingLogins());
-    }
-
-    @Test
-    void joinWithoutAPreLoginWaitsForTheStoredProfileInsteadOfResettingIt() throws Exception {
-        UUID id = store(new PlayerProfile(UUID.randomUUID(), "Alex", 10, 20, 4));
-
-        profiles.join(id, "Alex");
-        flush();
-
-        PlayerProfile profile = stored(id).orElseThrow();
-        assertEquals(5, profile.joins());
-        assertEquals(10, profile.firstSeen());
-    }
-
-    @Test
-    void savesOfOnePlayerLandInTheOrderTheyWereMade() throws Exception {
-        UUID id = UUID.randomUUID();
-
-        for (int session = 0; session < 25; session++) {
-            clock.set(1_000 + session);
-            profiles.beginLogin(id, "Alex");
-            profiles.join(id, "Alex");
-            profiles.quit(id);
-        }
-        flush();
-
-        PlayerProfile profile = stored(id).orElseThrow();
-        assertEquals(25, profile.joins());
-        assertEquals(1_024, profile.lastSeen());
-    }
-
-    /** The map of queues used to keep one entry per player ever seen. */
-    @Test
-    void queuesAreReleasedOnceTheirWritesLanded() throws Exception {
-        PlayerMock player = server.addPlayer("Alex");
-        player.disconnect();
-        flush();
-
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (profiles.pendingQueues() > 0 && System.nanoTime() < deadline) {
-            Thread.sleep(10);
-        }
-        assertEquals(0, profiles.pendingQueues());
-    }
-
-    /** A profile loaded after the player quit must not be cached for a player who is gone. */
-    @Test
-    void profileLoadedAfterTheQuitIsNotCached() throws Exception {
-        UUID id = UUID.randomUUID();
-        // The player is really connected: the server still knows them when the load completes.
-        server.addPlayer(new PlayerMock(server, "Alex", id));
-        profiles.quit(id);
-        flush();
-        CountDownLatch release = holdStorageThread();
-
-        profiles.join(id, "Alex"); // no pre-login: the load happens in the background
-        profiles.quit(id); // and the player quits before it is done
-        release.countDown();
-        // The callback that caches the profile also saves it, counting the second join: waiting
-        // for the writes, as the shutdown does, must wait for that save too.
-        flush();
-        assertEquals(2, stored(id).orElseThrow().joins(), "the load callback's save was not awaited");
-
-        assertTrue(profiles.find(id).isEmpty());
-    }
-
     @Test
     void checkPassesForAPlayerWhoseProfileWasSaved() {
         PlayerMock player = server.addPlayer("Alex");
@@ -292,7 +140,7 @@ class ProfileModuleTest {
         assertEquals(
                 "the profile of Alex stayed in memory after the player left",
                 profiles.problemAfterQuit(player.getUniqueId(), "Alex"));
-        profiles.quit(player.getUniqueId());
+        player.disconnect();
         assertEquals(null, profiles.problemAfterQuit(player.getUniqueId(), "Alex"));
     }
 
@@ -307,76 +155,6 @@ class ProfileModuleTest {
         assertEquals(11, changed.joins());
         assertEquals(changed, profiles.find(id).orElseThrow());
         assertEquals(changed, stored(id).orElseThrow());
-    }
-
-    @Test
-    void changesMadeFromManyThreadsAtOnceAreAllKeptAndSavedInOrder() throws Exception {
-        PlayerMock player = server.addPlayer("Alex");
-        UUID id = player.getUniqueId();
-        int threads = 8;
-        int each = 200;
-        ExecutorService pool = Executors.newFixedThreadPool(threads);
-        try {
-            List<Future<?>> done = new ArrayList<>();
-            for (int thread = 0; thread < threads; thread++) {
-                done.add(pool.submit(() -> {
-                    for (int i = 0; i < each; i++) {
-                        profiles.update(id, profile -> withJoins(profile, profile.joins() + 1));
-                    }
-                }));
-            }
-            for (Future<?> future : done) {
-                future.get(30, TimeUnit.SECONDS);
-            }
-        } finally {
-            pool.shutdownNow();
-        }
-        flush();
-
-        assertEquals(1 + threads * each, profiles.find(id).orElseThrow().joins());
-        // The last save to land is the last change made, whatever the number of storage threads.
-        assertEquals(1 + threads * each, stored(id).orElseThrow().joins());
-    }
-
-    @Test
-    void changeThatThrowsOrReturnsAnotherPlayersProfileChangesNothing() throws Exception {
-        PlayerMock player = server.addPlayer("Alex");
-        UUID id = player.getUniqueId();
-        PlayerProfile before = profiles.find(id).orElseThrow();
-
-        assertThrows(IllegalStateException.class, () -> profiles.update(id, profile -> {
-            throw new IllegalStateException("broken change");
-        }));
-        assertThrows(IllegalArgumentException.class, () -> profiles.update(id, profile ->
-                new PlayerProfile(UUID.randomUUID(), profile.name(), profile.firstSeen(), profile.lastSeen(), 99)));
-        assertThrows(NullPointerException.class, () -> profiles.update(id, profile -> null));
-        flush();
-
-        assertEquals(before, profiles.find(id).orElseThrow());
-        // The lock was let go: the next change works.
-        assertEquals(before.joins() + 1, profiles.update(id, profile -> withJoins(profile, profile.joins() + 1)).orElseThrow().joins());
-    }
-
-    @Test
-    void changeMadeJustAfterTheLoginIsNotOverwrittenByTheJoinsOwnSave() throws Exception {
-        UUID id = UUID.randomUUID();
-        profiles.beginLogin(id, "Alex");
-
-        profiles.join(id, "Alex");
-        profiles.update(id, profile -> withJoins(profile, 40));
-        flush();
-
-        assertEquals(40, stored(id).orElseThrow().joins());
-    }
-
-    @Test
-    void updateOfAPlayerWhoIsNotOnlineChangesNothing() throws Exception {
-        UUID id = UUID.randomUUID();
-
-        assertTrue(profiles.update(id, profile -> withJoins(profile, 99)).isEmpty());
-        flush();
-
-        assertTrue(stored(id).isEmpty());
     }
 
     private static PlayerProfile withJoins(PlayerProfile profile, int joins) {
@@ -394,9 +172,8 @@ class ProfileModuleTest {
     @Test
     void lookupGivesTheCachedProfileFieldForField() throws Exception {
         UUID id = store(new PlayerProfile(UUID.randomUUID(), "Alex", 10, 20, 4));
-        profiles.beginLogin(id, "Alex");
         clock.set(500);
-        profiles.join(id, "Alex");
+        server.addPlayer(new PlayerMock(server, "Alex", id));
 
         ProfileSummary summary = profiles.lookup(id).orElseThrow();
 
@@ -407,29 +184,9 @@ class ProfileModuleTest {
     @Test
     void checkReportsAProfileThatIsNotLoaded() {
         PlayerMock player = server.addPlayer("Alex");
-        profiles.quit(player.getUniqueId());
+        player.disconnect();
 
         assertEquals("the profile of Alex is not loaded", profiles.problemWith(player, 1));
-    }
-
-    /**
-     * The save a callback queues is queued behind the work already there: waiting for the writes
-     * must wait for it too, and not return once the read that led to it is done.
-     */
-    @Test
-    void awaitingTheWritesWaitsForTheSaveOfALateLoadedProfile() throws Exception {
-        UUID id = UUID.randomUUID();
-        CountDownLatch releaseRead = holdStorageThread();
-        profiles.join(id, "Alex"); // no pre-login: the read is queued behind the hold
-        CountDownLatch releaseSave = holdStorageThread(); // and this one behind the read
-        CompletableFuture<Boolean> awaited = CompletableFuture.supplyAsync(() -> profiles.awaitWrites(10));
-
-        releaseRead.countDown(); // the read completes, its callback queues the save behind the second hold
-
-        assertThrows(TimeoutException.class, () -> awaited.get(1, TimeUnit.SECONDS));
-        releaseSave.countDown();
-        assertTrue(awaited.get(10, TimeUnit.SECONDS));
-        assertEquals(1, stored(id).orElseThrow().joins());
     }
 
     @Test

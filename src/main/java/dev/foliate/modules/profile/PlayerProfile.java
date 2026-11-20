@@ -1,5 +1,6 @@
 package dev.foliate.modules.profile;
 
+import dev.foliate.core.player.PlayerData;
 import java.util.UUID;
 
 /**
@@ -9,7 +10,7 @@ import java.util.UUID;
  * @param firstSeen epoch milliseconds
  * @param lastSeen epoch milliseconds
  */
-public record PlayerProfile(UUID id, String name, long firstSeen, long lastSeen, int joins) {
+public record PlayerProfile(UUID id, String name, long firstSeen, long lastSeen, int joins) implements PlayerData {
 
     static PlayerProfile create(UUID id, String name, long now) {
         return new PlayerProfile(id, name, now, now, 0);
