@@ -81,12 +81,14 @@ The [wiki](https://github.com/pkhemae/foliate/wiki) has one page per topic.
 
 Foliate is at version 0.1.0-SNAPSHOT and has no release yet. It is verified by its unit tests and
 by a smoke test that CI runs on a real Folia 26.2 server; the same smoke test was run by hand on
-Paper 26.2. A second CI job joins that server with a real Minecraft client, run headlessly: the
-scoreboard is created and refreshed without error, the profile is loaded and saved, the example menu
-opens and the connection holds, and once the player is kicked no module keeps anything of them. A
-headless client draws nothing, so what the screen shows is not checked; commands are run as the
-player rather than typed by one, and a second join of the same player is not exercised. MySQL and MariaDB have not
-been exercised, only SQLite.
+Paper 26.2. Other CI jobs join that server with a real Minecraft client, run headlessly, twice as
+the same player and in two languages: the scoreboard is created and refreshed without error, the
+profile is loaded, saved and counted again on the return, the example menu opens, the connection
+holds, messages come in the player's language, and once the player is kicked no module keeps
+anything of them. A Fabric client also types a command. The profile storage runs in CI on MySQL 8.4
+and MariaDB 11.4, but the whole plugin has only been run on SQLite. A headless client draws
+nothing, so what the screen shows is not checked, and clicks in a menu are not exercised
+([#56](https://github.com/pkhemae/foliate/issues/56)).
 
 ## Contributing
 
