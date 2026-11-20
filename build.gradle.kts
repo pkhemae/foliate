@@ -86,7 +86,6 @@ dependencies {
     implementation(libs.configlib.yaml)
     implementation(libs.snakeyaml.engine)
     implementation(libs.fastboard)
-    implementation(libs.bstats)
     implementation(libs.hikaricp) {
         // The server provides SLF4J; bundling it would relocate it away from the server's logging.
         exclude(group = "org.slf4j")
