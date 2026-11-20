@@ -13,7 +13,7 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
    on one thread and cannot detect region violations. `./gradlew runFolia` starts a server to try
    things by hand; `./gradlew runFolia -PselfTest=true` runs the automated smoke test. What needs
    a connected player is checked by a CI job that joins with a headless client (the script is in
-   `.github/scripts/`); it cannot run locally, as the client needs a Microsoft account there.
+   `.github/scripts/`); HeadlessMC only allows an offline account in CI, so it is not run locally.
 5. Push and open a PR containing `Closes #<issue>`. CI must be green.
 6. Review the PR with fresh eyes, post the findings on the PR, fix them.
 7. Squash-merge and delete the branch. With stacked PRs, retarget the next PR to `main` before

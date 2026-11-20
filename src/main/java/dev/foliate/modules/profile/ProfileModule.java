@@ -145,7 +145,9 @@ public final class ProfileModule implements Module, PlayerCheck, Listener {
         if (find(id).isEmpty()) {
             return "the profile of " + player.getName() + " is not loaded";
         }
-        awaitWrites(FLUSH_TIMEOUT_SECONDS);
+        if (!awaitWrites(FLUSH_TIMEOUT_SECONDS)) {
+            return "the profile of " + player.getName() + " was still being saved after " + FLUSH_TIMEOUT_SECONDS + " seconds";
+        }
         try {
             if (database.call(connection -> repository.find(connection, id)).isEmpty()) {
                 return "the profile of " + player.getName() + " was not saved";
@@ -154,6 +156,11 @@ public final class ProfileModule implements Module, PlayerCheck, Listener {
             return "the profile of " + player.getName() + " could not be read back: " + e.getMessage();
         }
         return null;
+    }
+
+    @Override
+    public @Nullable String problemAfterQuit(UUID id, String name) {
+        return find(id).isPresent() ? "the profile of " + name + " stayed in memory after the player left" : null;
     }
 
     /** The profile of an online player. Safe from any thread, never blocks. */

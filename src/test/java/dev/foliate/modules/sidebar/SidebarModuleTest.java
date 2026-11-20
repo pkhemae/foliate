@@ -83,6 +83,16 @@ class SidebarModuleTest {
         server.getPluginManager().callEvent(new PlayerQuitEvent(player, Component.empty(), PlayerQuitEvent.QuitReason.DISCONNECTED));
 
         assertEquals("no sidebar was created for Alex", sidebar.problemWith(player));
+        assertEquals(null, sidebar.problemAfterQuit(player.getUniqueId(), "Alex"));
+    }
+
+    @Test
+    void checkAfterTheQuitReportsABoardThatWasKept() {
+        PlayerMock player = server.addPlayer("Alex");
+
+        assertEquals(
+                "the sidebar of Alex was kept after the player left",
+                sidebar.problemAfterQuit(player.getUniqueId(), "Alex"));
     }
 
     @Test

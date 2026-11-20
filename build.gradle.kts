@@ -174,10 +174,15 @@ tasks.withType<RunServer>().configureEach {
         if (clientTest) {
             jvmArgs("-Dfoliate.selftest.client=true")
             doFirst {
+                // The server is switched to offline mode, which would stay on a developer's
+                // machine: this is for CI runners, which are thrown away.
+                if (System.getenv("CI") != "true") {
+                    throw GradleException("-PclientTest switches the server to offline mode: it is for CI only")
+                }
                 // The server completes the other settings on its first start.
                 runDirectory.file("server.properties").get().asFile.apply {
                     parentFile.mkdirs()
-                    writeText("online-mode=false\nenforce-secure-profile=false\n")
+                    writeText("server-ip=127.0.0.1\nonline-mode=false\nenforce-secure-profile=false\n")
                 }
             }
         }

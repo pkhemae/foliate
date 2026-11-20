@@ -95,6 +95,11 @@ public final class SidebarModule implements Module, PlayerCheck, Listener {
         return "no sidebar was created for " + player.getName();
     }
 
+    @Override
+    public @Nullable String problemAfterQuit(UUID id, String name) {
+        return entries.containsKey(id) ? "the sidebar of " + name + " was kept after the player left" : null;
+    }
+
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         show(event.getPlayer());

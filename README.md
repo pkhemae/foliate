@@ -83,8 +83,9 @@ Foliate is at version 0.1.0-SNAPSHOT and has no release yet. It is verified by i
 by a smoke test that CI runs on a real Folia 26.2 server; the same smoke test was run by hand on
 Paper 26.2. A second CI job joins that server with a real Minecraft client, run headlessly: the
 sidebar is created and refreshed without error, the profile is loaded and saved, the example menu
-opens and the connection holds. A headless client draws nothing, so what the screen shows is not
-checked, and commands are run as the player rather than typed by one. MySQL and MariaDB have not
+opens and the connection holds, and once the player is kicked no module keeps anything of them. A
+headless client draws nothing, so what the screen shows is not checked; commands are run as the
+player rather than typed by one, and a second join of the same player is not exercised. MySQL and MariaDB have not
 been exercised, only SQLite.
 
 ## Contributing
