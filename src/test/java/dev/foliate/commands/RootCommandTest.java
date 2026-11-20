@@ -246,7 +246,7 @@ class RootCommandTest {
 
         String message = plain(player.nextComponentMessage());
         assertEquals(
-                "[Foliate] Alex\nFirst seen: 2023-11-14 22:13 UTC\nLast seen: 2023-11-14 23:13 UTC\nJoins: 7",
+                "[Foliate] Alex\nFirst seen: 2023-11-14 22:13 UTC\nOnline since: 2023-11-14 23:13 UTC\nJoins: 7",
                 message.replace("\r", ""));
     }
 
@@ -269,7 +269,7 @@ class RootCommandTest {
 
         dispatcher.execute("foliate profile Nobody", new Source(player));
 
-        assertTrue(plain(player.nextComponentMessage()).contains("No profile is loaded for Nobody"));
+        assertEquals("[Foliate] Nobody is not online.", plain(player.nextComponentMessage()));
     }
 
     @Test
@@ -278,7 +278,35 @@ class RootCommandTest {
 
         dispatcher.execute("foliate profile", new Source(player));
 
-        assertTrue(plain(player.nextComponentMessage()).contains("No profile is loaded for Alex"));
+        assertEquals("[Foliate] The profile of Alex is not loaded yet.", plain(player.nextComponentMessage()));
+    }
+
+    @Test
+    void runningTheCommandAsSomeoneElseNeedsThePermissionToSeeOthers() throws Exception {
+        PlayerMock alex = server.addPlayer("Alex");
+        PlayerMock target = server.addPlayer("Target");
+        profiles.put(target.getUniqueId(), new ProfileSummary("Target", 10, 20, 3));
+
+        // What "/execute as Target run foliate profile" typed by Alex looks like.
+        assertThrows(
+                CommandSyntaxException.class,
+                () -> dispatcher.execute("foliate profile", new Source(alex, target)));
+
+        alex.addAttachment(plugin, Permissions.COMMAND_PROFILE_OTHERS, true);
+        dispatcher.execute("foliate profile", new Source(alex, target));
+        assertTrue(plain(alex.nextComponentMessage()).contains("Joins: 3"));
+    }
+
+    @Test
+    void playerWithoutThePermissionToSeeOthersIsNotSuggestedAnyone() throws Exception {
+        PlayerMock alex = server.addPlayer("Alex");
+        server.addPlayer("Bob");
+
+        var suggestions = dispatcher
+                .getCompletionSuggestions(dispatcher.parse("foliate profile ", new Source(alex)))
+                .get();
+
+        assertTrue(suggestions.isEmpty());
     }
 
     @Test

@@ -19,10 +19,11 @@ command:
     show:
       - "<prefix><white><player></white>"
       - "<gray>Première connexion : <white><first-seen>"
-      - "<gray>Dernière connexion : <white><last-seen>"
+      - "<gray>En ligne depuis : <white><since>"
       - "<gray>Connexions : <white><joins>"
-    name-required: "<prefix><red>Indiquez un joueur : <white>/foliate profile \\<player></white>"
-    unknown: "<prefix><red>Aucun profil n'est chargé pour <white><player></white> : ce joueur n'est pas en ligne."
+    name-required: "<prefix><red>Indiquez un joueur : <white>/foliate profile \\<joueur></white>"
+    unknown: "<prefix><red><white><player></white> n'est pas en ligne."
+    not-loaded: "<prefix><red>Le profil de <white><player></white> n'est pas encore chargé."
 
 menu:
   unknown: "<prefix><red>Le menu <white><menu></white> n'existe pas."

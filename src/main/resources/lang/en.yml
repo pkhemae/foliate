@@ -19,10 +19,11 @@ command:
     show:
       - "<prefix><white><player></white>"
       - "<gray>First seen: <white><first-seen>"
-      - "<gray>Last seen: <white><last-seen>"
+      - "<gray>Online since: <white><since>"
       - "<gray>Joins: <white><joins>"
     name-required: "<prefix><red>Name a player: <white>/foliate profile \\<player></white>"
-    unknown: "<prefix><red>No profile is loaded for <white><player></white>: they are not online."
+    unknown: "<prefix><red><white><player></white> is not online."
+    not-loaded: "<prefix><red>The profile of <white><player></white> is not loaded yet."
 
 menu:
   unknown: "<prefix><red>The menu <white><menu></white> does not exist."

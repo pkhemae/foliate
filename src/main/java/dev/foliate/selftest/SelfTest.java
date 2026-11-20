@@ -374,7 +374,10 @@ public final class SelfTest {
 
     /** Run from the console, on the global region, like a command typed in the server console. */
     private void commandsAreRegistered() {
-        for (String command : List.of("foliate info", "foliate profile")) {
+        List<String> registered = modules.enabledNames().contains("profiles")
+                ? List.of("foliate info", "foliate profile")
+                : List.of("foliate info");
+        for (String command : registered) {
             check(server.dispatchCommand(server.getConsoleSender(), command), "'" + command + "' is not registered");
         }
     }
