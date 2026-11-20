@@ -13,16 +13,17 @@ import dev.foliate.core.module.ModuleSkippedException;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
 import dev.foliate.core.profile.ProfileSummary;
 import dev.foliate.core.storage.Database;
+import java.net.InetAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -189,6 +190,25 @@ class ProfileModuleTest {
         assertEquals("the profile of Alex is not loaded", profiles.problemWith(player, 1));
     }
 
+    /** Letting a player in without their profile would mean guessing it: they are told why. */
+    @Test
+    void playerWhoseProfileCannotBeLoadedIsRefusedWithTheProfileMessage() throws Exception {
+        database.disable();
+        UUID id = UUID.randomUUID();
+        AsyncPlayerPreLoginEvent login = new AsyncPlayerPreLoginEvent("Alex", InetAddress.getLoopbackAddress(), id, false);
+
+        // An asynchronous event is called off the main thread, as the server does.
+        java.util.concurrent.CompletableFuture.runAsync(() -> server.getPluginManager().callEvent(login)).get();
+
+        assertEquals(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, login.getLoginResult());
+        assertEquals(messages.render(Locale.ROOT, "profile.load-failed"), login.kickMessage());
+        assertTrue(plain(login.kickMessage()).contains("could not be loaded"));
+    }
+
+    private static String plain(net.kyori.adventure.text.Component component) {
+        return net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(component);
+    }
+
     @Test
     void joinsPlaceholderReadsTheCachedProfile() {
         PlayerMock player = server.addPlayer("Alex");
@@ -226,20 +246,6 @@ class ProfileModuleTest {
 
     private Optional<PlayerProfile> stored(UUID id) throws Exception {
         return database.call(connection -> repository.find(connection, id));
-    }
-
-    /** Keeps the single storage thread busy, so that what follows piles up behind it. */
-    private CountDownLatch holdStorageThread() {
-        CountDownLatch release = new CountDownLatch(1);
-        database.submit(connection -> {
-            try {
-                release.await(10, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            return null;
-        });
-        return release;
     }
 
     private static final class TestClock extends Clock {

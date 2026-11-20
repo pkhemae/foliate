@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
@@ -88,6 +89,8 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      */
     private final Object sessions = new Object();
 
+    private final AtomicBoolean enabled = new AtomicBoolean();
+
     /** The last database operation queued for each player; the next one is chained after it. */
     private final Map<UUID, CompletableFuture<?>> queues = new ConcurrentHashMap<>();
 
@@ -115,8 +118,16 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         this.clock = clock;
     }
 
-    /** Starts listening to the logins, joins and quits. */
+    /**
+     * Starts listening to the logins, joins and quits.
+     *
+     * @throws IllegalStateException when it is already enabled: a second registration would count
+     *     every join twice, and one store belongs to one module
+     */
     public void enable() {
+        if (!enabled.compareAndSet(false, true)) {
+            throw new IllegalStateException("The " + subject + " store is already enabled");
+        }
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
     }
 
@@ -126,10 +137,11 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      * still accept work at this point, unlike the server's schedulers.
      */
     public void disable() {
+        enabled.set(false);
         HandlerList.unregisterAll(this);
         long now = clock.millis();
         synchronized (sessions) {
-            online.values().forEach(value -> write(lifecycle.left(value, now)));
+            online.forEach((id, value) -> write(id, applyLeft(id, value, now)));
             online.clear();
             loggingIn.clear();
             pendingJoins.clear();
@@ -169,7 +181,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                 throw new IllegalArgumentException("a change must keep the id of the " + subject + " it changes");
             }
             online.put(id, changed);
-            write(changed);
+            write(id, changed);
             return Optional.of(changed);
         }
     }
@@ -244,7 +256,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         }
         try {
             beginLogin(event.getUniqueId(), event.getName());
-        } catch (ExecutionException | TimeoutException e) {
+        } catch (ExecutionException | TimeoutException | RuntimeException e) {
             logger.error("Could not load the {} of {}", subject, event.getName(), e);
             // Letting the player in without their data would mean guessing it.
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, loadFailed.get());
@@ -270,7 +282,8 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         T current = online.get(id);
         T value = current != null
                 ? current
-                : read(id).get(LOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS).orElseGet(() -> lifecycle.create(id, name, clock.millis()));
+                : read(id).get(LOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                        .orElseGet(() -> keepingId(id, lifecycle.create(id, name, clock.millis()), "create"));
         long now = clock.millis();
         // Logins that never became a join leave nothing else to tell us: forget them here.
         loggingIn.values().removeIf(pending -> now - pending.at() > LOGIN_TTL_MILLIS);
@@ -286,12 +299,12 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         long now = clock.millis();
         PendingLogin<T> pending = loggingIn.remove(id);
         if (pending != null && now - pending.at() <= LOGIN_TTL_MILLIS) {
-            T joined = lifecycle.joined(pending.value(), name, now);
+            T joined = applyJoined(id, pending.value(), name, now);
             // Under the lock `update` uses: a change made between the two lines would otherwise be
             // saved before this older value, and the database would end up with the older one.
             synchronized (sessions) {
                 online.put(id, joined);
-                write(joined);
+                write(id, joined);
             }
             return;
         }
@@ -300,7 +313,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         // simply have no value.
         pendingJoins.add(id);
         read(id).thenAccept(stored -> {
-                    T joined = lifecycle.joined(stored.orElseGet(() -> lifecycle.create(id, name, now)), name, now);
+                    T joined = applyJoined(id, stored.orElseGet(() -> keepingId(id, lifecycle.create(id, name, now), "create")), name, now);
                     synchronized (sessions) {
                         // Gone while the value was loading: nobody to cache it for.
                         if (pendingJoins.remove(id)) {
@@ -308,10 +321,11 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                         }
                         // Queued under the same lock as the quit's save, so the two reach the
                         // database in the order the player's session went.
-                        write(joined);
+                        write(id, joined);
                     }
                 })
                 .exceptionally(error -> {
+                    pendingJoins.remove(id);
                     logger.error("Could not load the {} of {}", subject, name, error);
                     return null;
                 });
@@ -322,7 +336,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             pendingJoins.remove(id);
             T value = online.remove(id);
             if (value != null) {
-                write(lifecycle.left(value, clock.millis()));
+                write(id, applyLeft(id, value, clock.millis()));
             }
         }
     }
@@ -336,15 +350,49 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         return enqueue(id, connection -> repository.find(connection, id));
     }
 
-    private void write(T value) {
-        enqueue(value.id(), connection -> {
+    /** Queues the save of a value under the player's own queue: {@code id} is the key, whatever the value says. */
+    private void write(UUID id, T value) {
+        enqueue(id, connection -> {
                     repository.save(connection, value);
                     return null;
                 })
                 .exceptionally(error -> {
-                    logger.error("Could not save the {} of {}", subject, value.id(), error);
+                    logger.error("Could not save the {} of {}", subject, id, error);
                     return null;
                 });
+    }
+
+    /**
+     * What the feature's lifecycle made of a join. A lifecycle that throws or returns another
+     * player's value must not cost the player their data: it is logged, and the value stays as it
+     * was.
+     */
+    private T applyJoined(UUID id, T stored, String name, long now) {
+        try {
+            return keepingId(id, lifecycle.joined(stored, name, now), "joined");
+        } catch (RuntimeException e) {
+            logger.error("Could not apply the join to the {} of {}: keeping it as it is", subject, name, e);
+            return stored;
+        }
+    }
+
+    /** What the feature's lifecycle made of a quit, with the same fallback as {@link #applyJoined}. */
+    private T applyLeft(UUID id, T value, long now) {
+        try {
+            return keepingId(id, lifecycle.left(value, now), "left");
+        } catch (RuntimeException e) {
+            logger.error("Could not apply the quit to the {} of {}: saving it as it is", subject, id, e);
+            return value;
+        }
+    }
+
+    /** A value must belong to the player whose queue and row it goes to. */
+    private T keepingId(UUID id, T value, String step) {
+        Objects.requireNonNull(value, "the lifecycle gave no " + subject + " in " + step);
+        if (!value.id().equals(id)) {
+            throw new IllegalStateException("The " + subject + " lifecycle changed the id in " + step);
+        }
+        return value;
     }
 
     /**

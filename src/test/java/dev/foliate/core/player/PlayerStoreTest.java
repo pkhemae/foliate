@@ -59,6 +59,7 @@ class PlayerStoreTest {
     private PlayerStore<Visit> store;
     private final TestClock clock = new TestClock(1_000);
     private final VisitRepository repository = new VisitRepository();
+    private final VisitLifecycle lifecycle = new VisitLifecycle();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -72,7 +73,7 @@ class PlayerStoreTest {
                 MockBukkit.createMockPlugin(),
                 database,
                 repository,
-                new VisitLifecycle(),
+                lifecycle,
                 () -> Component.text("could not load"),
                 NOPLogger.NOP_LOGGER,
                 clock);
@@ -422,6 +423,92 @@ class PlayerStoreTest {
         assertEquals(Component.text("could not load"), login.kickMessage());
     }
 
+    @Test
+    void lifecycleThatReturnsAnotherPlayersValueAtJoinKeepsTheValueAsItWas() throws Exception {
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        UUID other = UUID.randomUUID();
+        lifecycle.joinedValue = visit -> new Visit(other, visit.name(), visit.firstSeen(), visit.lastSeen(), 99);
+
+        store.beginLogin(id, "Alex");
+        store.join(id, "Alex");
+        flush();
+
+        assertEquals(4, store.find(id).orElseThrow().visits());
+        assertTrue(stored(other).isEmpty(), "a row was written for the other player");
+    }
+
+    @Test
+    void lifecycleThatThrowsAtQuitStillSavesThePlayerAndDoesNotStopTheShutdown() throws Exception {
+        PlayerMock broken = server.addPlayer("Broken");
+        PlayerMock fine = server.addPlayer("Fine");
+        lifecycle.leftFails = broken.getUniqueId();
+        clock.set(9_000);
+
+        store.disable();
+
+        assertEquals(1_000, stored(broken.getUniqueId()).orElseThrow().lastSeen(), "saved as it was");
+        assertEquals(9_000, stored(fine.getUniqueId()).orElseThrow().lastSeen(), "the others were still saved");
+        assertTrue(store.find(broken.getUniqueId()).isEmpty());
+    }
+
+    @Test
+    void aStoreCannotBeEnabledTwice() {
+        assertThrows(IllegalStateException.class, store::enable);
+    }
+
+    /**
+     * The join, the quit and the late load take the lock that `update` holds while it computes and
+     * queues its save: that is what makes the saves reach the database in the order of the changes.
+     * A change in progress holds the lock, and each of them must wait for it.
+     */
+    @Test
+    void joinQuitAndLateLoadWaitForAChangeInProgress() throws Exception {
+        UUID busy = server.addPlayer("Busy").getUniqueId();
+        UUID loggingIn = UUID.randomUUID();
+        store.beginLogin(loggingIn, "Login");
+        UUID leaving = server.addPlayer("Leaving").getUniqueId();
+        UUID lateJoin = UUID.randomUUID();
+
+        CountDownLatch inChange = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        Thread change = new Thread(() -> store.update(busy, visit -> {
+            inChange.countDown();
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return visit;
+        }));
+        change.start();
+        assertTrue(inChange.await(10, TimeUnit.SECONDS));
+
+        ExecutorService others = Executors.newFixedThreadPool(3);
+        try {
+            Future<?> join = others.submit(() -> store.join(loggingIn, "Login"));
+            Future<?> quit = others.submit(() -> store.quit(leaving));
+            Future<?> late = others.submit(() -> store.join(lateJoin, "Late"));
+            Thread.sleep(500);
+            assertTrue(store.find(loggingIn).isEmpty(), "the join did not wait for the change");
+            assertTrue(store.find(leaving).isPresent(), "the quit did not wait for the change");
+            // The late join's load is done by now, but its value is cached under the lock too.
+            assertTrue(store.find(lateJoin).isEmpty(), "the late load did not wait for the change");
+
+            release.countDown();
+            change.join();
+            join.get(10, TimeUnit.SECONDS);
+            quit.get(10, TimeUnit.SECONDS);
+            late.get(10, TimeUnit.SECONDS);
+        } finally {
+            others.shutdownNow();
+        }
+        flush();
+
+        assertTrue(store.find(loggingIn).isPresent());
+        assertTrue(store.find(leaving).isEmpty());
+        assertTrue(store.find(lateJoin).isPresent());
+    }
+
     private static Visit withVisits(Visit visit, int visits) {
         return new Visit(visit.id(), visit.name(), visit.firstSeen(), visit.lastSeen(), visits);
     }
@@ -459,6 +546,12 @@ class PlayerStoreTest {
 
     private static final class VisitLifecycle implements PlayerLifecycle<Visit> {
 
+        /** Replaces what a join makes, to play a lifecycle that gets it wrong. */
+        volatile java.util.function.UnaryOperator<Visit> joinedValue = visit -> visit;
+
+        /** A player whose quit makes the lifecycle throw. */
+        volatile UUID leftFails;
+
         @Override
         public Visit create(UUID id, String name, long now) {
             return new Visit(id, name, now, now, 0);
@@ -466,11 +559,14 @@ class PlayerStoreTest {
 
         @Override
         public Visit joined(Visit stored, String name, long now) {
-            return new Visit(stored.id(), name, stored.firstSeen(), now, stored.visits() + 1);
+            return joinedValue.apply(new Visit(stored.id(), name, stored.firstSeen(), now, stored.visits() + 1));
         }
 
         @Override
         public Visit left(Visit session, long now) {
+            if (session.id().equals(leftFails)) {
+                throw new IllegalStateException("broken lifecycle");
+            }
             return new Visit(session.id(), session.name(), session.firstSeen(), now, session.visits());
         }
     }

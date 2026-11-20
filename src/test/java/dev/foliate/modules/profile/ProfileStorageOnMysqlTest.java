@@ -15,9 +15,14 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -164,6 +169,55 @@ class ProfileStorageOnMysqlTest {
 
         PlayerProfile stored = database.call(connection -> repository.find(connection, id)).orElseThrow();
         assertEquals(2, stored.joins());
+        profiles.disable();
+    }
+
+    /**
+     * On SQLite the storage has one thread, so the order in which saves are submitted is the order
+     * in which they land. Here the pool has several connections: only the per-player queue keeps
+     * the saves of one player in order, and the database must end with the last change made. Many
+     * players change at once, so that a save landing late is certain to show.
+     */
+    @Test
+    void changesToEachPlayerLandInOrderOnARealPool() throws Exception {
+        ServerMock server = MockBukkit.mock();
+        MessageService messages = new MessageService(
+                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        messages.enable();
+        ProfileModule profiles = new ProfileModule(
+                MockBukkit.createMockPlugin(), database, messages, new PlaceholderRegistry(), NOPLogger.NOP_LOGGER, Clock.systemUTC());
+        profiles.enable();
+        int players = 40;
+        int changes = 100;
+        List<UUID> ids = new ArrayList<>();
+        for (int i = 0; i < players; i++) {
+            UUID id = UUID.randomUUID();
+            ids.add(id);
+            server.addPlayer(new PlayerMock(server, "Player" + i, id));
+        }
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        try {
+            List<Future<?>> done = new ArrayList<>();
+            for (UUID id : ids) {
+                done.add(pool.submit(() -> {
+                    for (int i = 0; i < changes; i++) {
+                        profiles.update(id, profile ->
+                                new PlayerProfile(profile.id(), profile.name(), profile.firstSeen(), profile.lastSeen(), profile.joins() + 1));
+                    }
+                }));
+            }
+            for (Future<?> future : done) {
+                future.get(60, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertTrue(profiles.awaitWrites(60));
+
+        for (UUID id : ids) {
+            assertEquals(1 + changes, profiles.find(id).orElseThrow().joins());
+            assertEquals(1 + changes, database.call(connection -> repository.find(connection, id)).orElseThrow().joins());
+        }
         profiles.disable();
     }
 
