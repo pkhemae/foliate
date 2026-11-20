@@ -144,6 +144,8 @@ tasks.register("renameTemplate") {
             buildFile.readLines()
                 .filterNot { "rename.gradle.kts" in it || "renameTemplate" in it }
                 .joinToString("\n", postfix = "\n")
+                // The line was followed by a blank one: do not leave two in a row.
+                .replace("\n\n\n", "\n\n")
         )
         File(root, "gradle/rename.gradle.kts").delete()
 

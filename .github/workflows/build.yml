@@ -74,8 +74,8 @@ jobs:
   # The smoke test connects nobody. This one joins the test server with a real Minecraft client,
   # run headlessly by HeadlessMC (https://github.com/headlesshq/headlessmc, MIT) with an offline
   # account, which is only allowed in CI. The plugin's self-test then checks what the player got:
-  # a scoreboard, a saved profile, an open menu, a connection that holds, a player who comes back, and
-  # the messages of their language.
+  # what each module did for them, that the connection holds, that a player can come back, and that
+  # the messages are in their language.
   client-test:
     name: Folia test with a connected client (hooks ${{ matrix.hooks }}, typed ${{ matrix.typed }})
     runs-on: ubuntu-latest

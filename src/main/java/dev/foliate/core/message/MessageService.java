@@ -208,8 +208,8 @@ public final class MessageService implements Module, PlayerCheck {
     }
 
     /**
-     * Renders a message written as a list, one component per entry: what item lore and scoreboard
-     * lines need. A message written as a single text gives a single line.
+     * Renders a message written as a list, one component per entry: what item lore and other
+     * multi-line text need. A message written as a single text gives a single line.
      */
     public List<Component> renderLines(Pointered viewer, String key, TagResolver... arguments) {
         Catalog current = catalog;

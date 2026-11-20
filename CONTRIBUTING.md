@@ -31,4 +31,4 @@ Thank you for helping. This page is the short version; the [wiki](https://github
 - No `BukkitScheduler`, no blocking call on a tick thread, no entity or block touched outside the region that owns it.
 - Shared state that is safe to read from several threads.
 - An entry under "Unreleased" in `CHANGELOG.md` when the change is visible to users.
-- An update to the wiki page it affects, mentioned in the pull request.
+- An update to the documentation it affects (the developer guide, which for the template is its wiki), mentioned in the pull request.
