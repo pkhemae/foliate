@@ -122,3 +122,33 @@ jobs:
             client-run/crash-reports
             HeadlessMC/headlessmc.log
           if-no-files-found: ignore
+
+  # The template's promise is that renaming it gives a plugin that builds and passes its tests.
+  rename-check:
+    name: Rename the template
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Rename it
+        run: ./gradlew renameTemplate -PnewName=Skylands -PnewGroup=com.example.skylands -PnewRepository=acme/skylands
+
+      - name: Nothing of the template's name is left
+        run: |
+          if grep -rIil "foliate" . --exclude-dir=.git --exclude-dir=.gradle --exclude-dir=build; then
+            echo "These files still mention the template's name"
+            exit 1
+          fi
+
+      - name: Build and test the renamed plugin
+        run: ./gradlew build
