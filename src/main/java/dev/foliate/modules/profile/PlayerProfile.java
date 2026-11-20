@@ -8,7 +8,8 @@ import java.util.UUID;
  * lets any thread read the cached one without locking.
  *
  * @param firstSeen epoch milliseconds
- * @param lastSeen epoch milliseconds
+ * @param lastSeen epoch milliseconds: the time of the current join while the player is online,
+ *     the time they left after
  */
 public record PlayerProfile(UUID id, String name, long firstSeen, long lastSeen, int joins) implements PlayerData {
 

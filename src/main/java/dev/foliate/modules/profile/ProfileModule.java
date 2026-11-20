@@ -108,6 +108,11 @@ public final class ProfileModule implements Module, ProfileLookup {
         return store;
     }
 
+    /**
+     * {@inheritDoc} The summary's {@code onlineSince} is the profile's {@code lastSeen}: while the
+     * player is online it holds the time of this join, until the quit moves it to the time they
+     * left. A change made through {@link #update} must keep it so.
+     */
     @Override
     public Optional<ProfileSummary> lookup(UUID id) {
         return find(id).map(profile ->
