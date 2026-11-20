@@ -33,15 +33,16 @@ import org.slf4j.helpers.NOPLogger;
  * The storage of profiles on a real MySQL or MariaDB server, through the same {@link Database} and
  * migrations as the plugin. It runs only where such a server is given by the environment: CI
  * starts both, and {@code FOLIATE_TEST_MYSQL_PORT} is what turns it on. The other variables
- * default to a local server whose root account has no password. The tables are dropped first, so
- * point it at a throwaway database.
+ * default to a local server whose root account has no password, and to a database named
+ * {@code foliate_test}. The plugin's tables are dropped from that database first: point it at a
+ * throwaway one, never at the data of a real server.
  */
 @EnabledIfEnvironmentVariable(named = "FOLIATE_TEST_MYSQL_PORT", matches = "\\d+")
 class ProfileStorageOnMysqlTest {
 
     private static final String HOST = env("FOLIATE_TEST_MYSQL_HOST", "127.0.0.1");
     private static final String PORT = env("FOLIATE_TEST_MYSQL_PORT", "3306");
-    private static final String DATABASE = env("FOLIATE_TEST_MYSQL_DATABASE", "foliate");
+    private static final String DATABASE = env("FOLIATE_TEST_MYSQL_DATABASE", "foliate_test");
     private static final String USER = env("FOLIATE_TEST_MYSQL_USER", "root");
     private static final String PASSWORD = env("FOLIATE_TEST_MYSQL_PASSWORD", "");
 
@@ -77,7 +78,9 @@ class ProfileStorageOnMysqlTest {
 
     @AfterEach
     void tearDown() {
-        database.disable();
+        if (database != null) {
+            database.disable();
+        }
         MockBukkit.unmock();
     }
 

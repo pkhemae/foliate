@@ -135,6 +135,11 @@ tasks {
         // ArchitectureTest reads the source files: without this, Gradle would call the test up to
         // date after a change that does not alter the bytecode, such as an import.
         inputs.dir("src/main/java").withPropertyName("sources").withPathSensitivity(PathSensitivity.RELATIVE)
+        // The tests that need a MySQL or MariaDB server run only when the environment points at one:
+        // without declaring it, Gradle would reuse a run (or a cached one) made without a server.
+        for (name in listOf("PORT", "HOST", "DATABASE", "USER")) {
+            inputs.property("mysql$name", providers.environmentVariable("FOLIATE_TEST_MYSQL_$name").orElse(""))
+        }
     }
 
     jar {
