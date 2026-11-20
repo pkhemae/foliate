@@ -33,7 +33,13 @@ printf 'onboardAccessibility:false\npauseOnLostFocus:false\n' > client-run/optio
 
 client_pid=""
 server_pid=""
+show_logs() {
+  echo "::group::What the server logged about the player and the self-test"
+  grep -E "logged in with entity|joined the game|lost connection|left the game|SELF-TEST|Foliate\]" "$SERVER_LOG" 2>/dev/null | tail -n 40 || true
+  echo "::endgroup::"
+}
 cleanup() {
+  show_logs
   [ -n "$client_pid" ] && kill "$client_pid" 2>/dev/null || true
   [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
 }
