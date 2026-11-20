@@ -13,6 +13,7 @@ import org.jspecify.annotations.Nullable;
  */
 public final class PlayerStoreChecks {
 
+    /** As long as the store gives its last saves when it shuts down. */
     private static final long FLUSH_TIMEOUT_SECONDS = 15;
 
     private PlayerStoreChecks() {}

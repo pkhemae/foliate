@@ -1,4 +1,4 @@
-import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+import java.util.zip.ZipFile
 import xyz.jpenilla.resourcefactory.bukkit.Permission
 import xyz.jpenilla.runpaper.task.RunServer
 import xyz.jpenilla.runtask.pluginsapi.DownloadPluginsSpec
@@ -68,7 +68,7 @@ java {
 
 // The self-test and its checks: compiled against the plugin, never part of its jar. The checks of
 // a module sit in the module's package, so that they can use what it keeps package-private.
-val selftest: SourceSet by sourceSets.creating {
+val selftest: SourceSet = sourceSets.create("selftest") {
     compileClasspath += sourceSets.main.get().output
     runtimeClasspath += sourceSets.main.get().output
 }
@@ -194,23 +194,41 @@ tasks {
     }
 }
 
-// The plugin with the self-test: the same classes and bundled libraries as the plugin jar, plus the
-// selftest source set, and a plugin.yml whose main class is SelfTestPlugin. Only the test servers
-// get it, and never next to the plugin jar. Built in its own folder, away from the jars to install.
-val selfTestJar by tasks.registering(ShadowJar::class) {
-    description = "Builds the plugin with its self-test, for the smoke test."
+// The plugin with the self-test: the plugin jar itself, entry for entry, plus the selftest source
+// set, and a plugin.yml whose main class is SelfTestPlugin. So the smoke test runs what is
+// released. Only the test servers get it, never next to the plugin jar; it is built in its own
+// folder, away from the jars to install. The self-test's classes are not relocated: they may use
+// the plugin and the server's API, not a bundled library directly.
+val selfTestJar = tasks.register<Jar>("selfTestJar") {
+    description = "Builds the plugin jar with its self-test, for the smoke test."
     archiveClassifier = "selftest"
     destinationDirectory = layout.buildDirectory.dir("selftest")
-    from(sourceSets.main.get().output, selftest.output)
-    sourceSetsClassesDirs.from(sourceSets.main.get().output.classesDirs, selftest.output.classesDirs)
-    configurations = listOf(project.configurations.runtimeClasspath.get())
-    enableAutoRelocation = true
-    relocationPrefix = "$basePackage.libs"
-    // What the plugin's shadowJar task leaves out by default.
-    exclude("META-INF/INDEX.LIST", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "module-info.class", "META-INF/versions/*/module-info.class")
-    filesMatching("plugin.yml") {
-        filter { line -> if (line.startsWith("main:")) "main: $basePackage.selftest.SelfTestPlugin" else line }
+    from(zipTree(tasks.shadowJar.flatMap { it.archiveFile })) {
+        exclude("META-INF/MANIFEST.MF")
     }
+    from(selftest.output)
+    // A class of the self-test must not hide one of the plugin, nor the other way round.
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    manifest.attributes("Multi-Release" to "true")
+    val mainLine = "main: $basePackage.selftest.SelfTestPlugin"
+    filesMatching("plugin.yml") {
+        filter { line -> if (line.startsWith("main:")) mainLine else line }
+    }
+    // Without its main class the self-test would not start, and the smoke test would only end at
+    // its timeout.
+    doLast {
+        ZipFile(archiveFile.get().asFile).use { zip ->
+            val pluginYml = zip.getInputStream(zip.getEntry("plugin.yml")).reader().readText()
+            if (mainLine !in pluginYml.lines()) {
+                throw GradleException("The self-test jar's plugin.yml does not say '$mainLine'")
+            }
+        }
+    }
+}
+
+tasks.check {
+    // So that the build, and a renamed template, always package the self-test.
+    dependsOn(selfTestJar)
 }
 
 // The test servers get the jar named here, not whatever jar run-paper would find on its own.
