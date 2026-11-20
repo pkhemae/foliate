@@ -37,6 +37,14 @@ public final class PlaceholderApiHook implements Module {
     private final PluginMeta meta;
     private final PlaceholderRegistry registry;
     private final MessageService messages;
+    /** {@code &} codes, with both hexadecimal notations: {@code &#rrggbb} and {@code &x&r&r&g&g&b&b}. */
+    private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.builder()
+            .character('&')
+            .hexCharacter('#')
+            .hexColors()
+            .useUnusualXRepeatedCharacterHexFormat()
+            .build();
+
     private final TagResolver papiTag = TagResolver.resolver("papi", (arguments, context) -> {
         // MiniMessage splits tag arguments on ':', which a placeholder may contain
         // (%server_time_HH:mm%): put the pieces back together.
@@ -69,7 +77,7 @@ public final class PlaceholderApiHook implements Module {
      * An {@code &} followed by anything else ({@code "Tom & Jerry"}) stays as text.
      */
     static Component toComponent(String value) {
-        return LegacyComponentSerializer.legacyAmpersand().deserialize(value.replace('\u00A7', '&'));
+        return LEGACY.deserialize(value.replace('\u00A7', '&'));
     }
 
     @Override

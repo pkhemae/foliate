@@ -252,8 +252,9 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     /**
      * HIGHEST, not MONITOR: this may refuse the login, and a MONITOR listener must never change
      * an event's outcome. It runs after the other plugins' decisions at lower priorities, so data
-     * is mostly loaded only for logins that are allowed; one refused later anyway is forgotten when
-     * its entry expires. The event cannot be cancelled, so there is no {@code ignoreCancelled}.
+     * is mostly loaded only for logins that are allowed; a login refused after us anyway leaves a
+     * pending entry that the next login sweeps once it has expired. The event cannot be cancelled,
+     * so there is no {@code ignoreCancelled}.
      */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPreLogin(AsyncPlayerPreLoginEvent event) {
@@ -284,12 +285,28 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     /** Loads the value of a player who is logging in. Blocks: never call from a tick thread. */
     void beginLogin(UUID id, String name) throws ExecutionException, TimeoutException, InterruptedException {
         // Someone logging in while already online (the old session is about to be kicked) has a
-        // fresher value in memory than in the database.
-        T current = online.get(id);
-        T value = current != null
-                ? current
-                : read(id).get(LOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                        .orElseGet(() -> keepingId(id, lifecycle.create(id, name, clock.millis()), "create"));
+        // fresher value in memory than in the database. Taken and recorded under the lock the quit
+        // uses: a quit in between would otherwise not see this pending login, and the new session
+        // would start from a copy older than what the quit saved.
+        synchronized (sessions) {
+            T current = online.get(id);
+            if (current != null) {
+                remember(id, current);
+                return;
+            }
+        }
+        // Not online: wait for the database, without holding the lock.
+        T loaded = read(id).get(LOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .orElseGet(() -> keepingId(id, lifecycle.create(id, name, clock.millis()), "create"));
+        synchronized (sessions) {
+            // A session that joined while we were reading is fresher than what we read.
+            T current = online.get(id);
+            remember(id, current != null ? current : loaded);
+        }
+    }
+
+    /** Records a pending login. Called under the lock. */
+    private void remember(UUID id, T value) {
         long now = clock.millis();
         // Logins that never became a join leave nothing else to tell us: forget them here.
         loggingIn.values().removeIf(pending -> now - pending.at() > LOGIN_TTL_MILLIS);
@@ -316,7 +333,10 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         }
         // No usable pre-login: the plugin was enabled while the player connected, or the login
         // took longer than anyone should wait. Load without blocking the tick; until then they
-        // simply have no value.
+        // simply have no value. Known limit: a second login of the same player while this load
+        // is still running reads the database before this join is saved, so the new session
+        // does not count this join. It needs a re-login within the moment the load takes, right
+        // after the plugin was enabled; it loses that one join, nothing else.
         pendingJoins.add(id);
         read(id).thenAccept(stored -> {
                     T joined = applyJoined(id, stored.orElseGet(() -> keepingId(id, lifecycle.create(id, name, now), "create")), name, now);
