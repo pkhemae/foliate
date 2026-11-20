@@ -248,6 +248,41 @@ class MessageServiceTest {
     }
 
     @Test
+    void brokenFileOfTheDefaultLocaleDoesNotStopTheServerFromStarting() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "greeting: [unclosed\n");
+        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+
+        fresh.enable();
+
+        // The built-in text stands in for the file until it is fixed.
+        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render(Locale.ENGLISH, "greeting", Placeholder.unparsed("player", "Alex"))));
+        assertThrows(MessageException.class, fresh::reload);
+    }
+
+    @Test
+    void brokenFileOfAnotherBundledLocaleUsedAsDefaultFallsBackToo() throws Exception {
+        Files.writeString(directory.resolve("lang/fr.yml"), "greeting: [unclosed\n");
+        Files.writeString(directory.resolve("config.yml"), "default-locale: fr\n");
+        config.reload();
+        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+
+        fresh.enable();
+
+        assertEquals("[P] Bonjour Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render(Locale.JAPANESE, "greeting", Placeholder.unparsed("player", "Alex"))));
+    }
+
+    @Test
+    void deletedFileOfTheDefaultLocaleFallsBackToItsBuiltInText() throws Exception {
+        Files.delete(directory.resolve("lang/en.yml"));
+
+        messages.reload();
+
+        assertEquals("[P] Hello Alex", plain(Locale.JAPANESE, "greeting", "Alex"));
+    }
+
+    @Test
     void titleIsNotShownWhenBothPartsAreEmpty() {
         RecordingAudience viewer = new RecordingAudience(Locale.US);
 

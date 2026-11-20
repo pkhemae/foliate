@@ -50,9 +50,6 @@ public final class PluginConfig implements ConfigRoot {
     @Comment({"Internal version of this file, used to migrate it when the plugin updates.", "Do not edit."})
     private int configVersion = VERSION;
 
-    @Comment("Logs extra details that help when reporting a problem.")
-    private boolean debug = false;
-
     @Comment({
         "Language of the console, and of players whose game language has no file in the lang folder.",
         "Must be the name of a file in that folder, without the extension."
@@ -90,10 +87,6 @@ public final class PluginConfig implements ConfigRoot {
     @Override
     public int configVersion() {
         return configVersion;
-    }
-
-    public boolean debug() {
-        return debug;
     }
 
     public String defaultLocale() {

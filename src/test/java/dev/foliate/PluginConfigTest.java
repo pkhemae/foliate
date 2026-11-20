@@ -2,6 +2,9 @@ package dev.foliate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import dev.foliate.core.config.ConfigService;
+import dev.foliate.core.storage.StorageSettings;
+
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -29,5 +32,27 @@ class PluginConfigTest {
             expected = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
         assertEquals(expected, Files.readString(directory.resolve("config.yml")));
+    }
+
+    /** A key left empty in YAML is a null: the library keeps the default instead of failing later. */
+    @Test
+    void settingsLeftEmptyKeepTheirDefault() throws Exception {
+        for (String empty : new String[] {
+            "default-locale:\n",
+            "sidebar:\n  title:\n",
+            "sidebar:\n  lines:\n",
+            "storage:\n  type:\n",
+            "sidebar:\n",
+        }) {
+            Files.writeString(directory.resolve("config.yml"), empty);
+            ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
+
+            service.enable();
+
+            assertEquals("en", service.get().defaultLocale(), empty);
+            assertEquals("<aqua><bold>Foliate", service.get().sidebar().title(), empty);
+            assertEquals(4, service.get().sidebar().lines().size(), empty);
+            assertEquals(StorageSettings.Type.SQLITE, service.get().storage().type(), empty);
+        }
     }
 }
