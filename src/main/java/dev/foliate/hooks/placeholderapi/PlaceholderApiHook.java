@@ -37,6 +37,14 @@ public final class PlaceholderApiHook implements Module {
     private final PluginMeta meta;
     private final PlaceholderRegistry registry;
     private final MessageService messages;
+    /** {@code &} codes, with both hexadecimal notations: {@code &#rrggbb} and {@code &x&r&r&g&g&b&b}. */
+    private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.builder()
+            .character('&')
+            .hexCharacter('#')
+            .hexColors()
+            .useUnusualXRepeatedCharacterHexFormat()
+            .build();
+
     private final TagResolver papiTag = TagResolver.resolver("papi", (arguments, context) -> {
         // MiniMessage splits tag arguments on ':', which a placeholder may contain
         // (%server_time_HH:mm%): put the pieces back together.
@@ -57,12 +65,19 @@ public final class PlaceholderApiHook implements Module {
     }
 
     /**
-     * Turns what PlaceholderAPI returned into a component. Expansions answer with legacy colour
-     * codes, written with either {@code &} or the section sign; the text is never parsed as
-     * MiniMessage, so a value cannot inject tags.
+     * Turns what PlaceholderAPI returned into a component. The text is never parsed as MiniMessage,
+     * so a value cannot inject tags.
+     *
+     * <p>Legacy colour codes are honoured with the section sign and with {@code &}: PlaceholderAPI
+     * returns values as the expansion gives them, without translating anything, and the most common
+     * coloured values (a rank prefix from a permissions plugin, through {@code %vault_prefix%} or
+     * {@code %luckperms_prefix%}) are stored and returned with {@code &} codes. The price is the
+     * one every Bukkit plugin pays with {@code translateAlternateColorCodes('&', ...)}: an {@code &}
+     * followed by a code character is a code, so {@code "R&D"} loses its {@code D} to light purple.
+     * An {@code &} followed by anything else ({@code "Tom & Jerry"}) stays as text.
      */
     static Component toComponent(String value) {
-        return LegacyComponentSerializer.legacyAmpersand().deserialize(value.replace('\u00A7', '&'));
+        return LEGACY.deserialize(value.replace('\u00A7', '&'));
     }
 
     @Override

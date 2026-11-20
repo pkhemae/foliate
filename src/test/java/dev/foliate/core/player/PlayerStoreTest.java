@@ -149,6 +149,26 @@ class PlayerStoreTest {
         assertEquals(6, stored(id).orElseThrow().visits());
     }
 
+    /**
+     * A second login while online copies the session's value at pre-login; a change made after that
+     * and before the old session is kicked must reach the new session, and the database.
+     */
+    @Test
+    void changeMadeBetweenASecondLoginAndTheKickIsKept() throws Exception {
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        store.beginLogin(id, "Alex");
+        store.join(id, "Alex"); // 5
+
+        store.beginLogin(id, "Alex"); // a second client logs in: the session's value is copied
+        store.update(id, visit -> withVisits(visit, visit.visits() + 100)); // 105, on the old session
+        store.quit(id); // the old session is kicked and saves 105
+        store.join(id, "Alex"); // the new session
+        flush();
+
+        assertEquals(106, store.find(id).orElseThrow().visits());
+        assertEquals(106, stored(id).orElseThrow().visits());
+    }
+
     /** A login must read behind the saves still queued for the player, not ahead of them. */
     @Test
     void loginWhileEarlierSavesAreStillQueuedSeesThem() throws Exception {
