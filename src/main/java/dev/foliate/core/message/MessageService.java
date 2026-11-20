@@ -282,6 +282,11 @@ public final class MessageService implements Module {
             Locale defaultLocale = LOCALE_NAME.matcher(configured).matches()
                     ? Translator.parseLocale(configured.replace('-', '_'))
                     : null;
+            if (defaultLocale != null && !languages.containsKey(defaultLocale) && builtIn.containsKey(defaultLocale)) {
+                // Deleted: the built-in text is the same safety net as for a file that is broken.
+                logger.warn("lang/{}{} is missing: using its built-in text", configured, EXTENSION);
+                languages.put(defaultLocale, Map.copyOf(builtIn.get(defaultLocale)));
+            }
             if (defaultLocale == null || !languages.containsKey(defaultLocale)) {
                 throw new MessageException(
                         "default-locale '" + configured + "' has no usable file in the lang folder");

@@ -74,6 +74,28 @@ class ConfigServiceTest {
         public void validate() {}
     }
 
+    /** Version 2 again, but one that refuses a setting the file can express: validation fails. */
+    @Configuration
+    static final class StrictSettings implements ConfigRoot {
+
+        private int configVersion = 2;
+        private boolean debug = false;
+
+        private StrictSettings() {}
+
+        @Override
+        public int configVersion() {
+            return configVersion;
+        }
+
+        @Override
+        public void validate() throws ConfigException {
+            if (debug) {
+                throw new ConfigException("debug is not allowed here");
+            }
+        }
+    }
+
     private static final String HEADER = "Test configuration.";
     private static final List<Consumer<Map<String, Object>>> NO_MIGRATIONS = List.of();
 
@@ -232,6 +254,21 @@ class ConfigServiceTest {
                 SettingsV2::new,
                 List.of(yaml -> ConfigMigrator.rename(yaml, "verbose", "debug")));
         String old = "config-version: 1\nverbose: [not, a, boolean]\n";
+        Files.writeString(file, old);
+
+        assertThrows(ConfigException.class, migrating::enable);
+
+        assertEquals(old, Files.readString(file));
+        assertFalse(Files.exists(directory.resolve("config.yml.v1.bak")));
+    }
+
+    @Test
+    void migrationThatFailsValidationLeavesNoBackupAndTheFileUntouched() throws Exception {
+        ConfigService<StrictSettings> migrating = serviceOf(
+                StrictSettings.class,
+                StrictSettings::new,
+                List.of(yaml -> ConfigMigrator.rename(yaml, "verbose", "debug")));
+        String old = "config-version: 1\nverbose: true\n";
         Files.writeString(file, old);
 
         assertThrows(ConfigException.class, migrating::enable);
