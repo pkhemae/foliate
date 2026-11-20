@@ -249,7 +249,13 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         return find(id).isPresent() ? "the " + subject + " of " + name + " stayed in memory after the player left" : null;
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    /**
+     * HIGHEST, not MONITOR: this may refuse the login, and a MONITOR listener must never change
+     * an event's outcome. It runs after the other plugins' decisions at lower priorities, so data
+     * is mostly loaded only for logins that are allowed; one refused later anyway is forgotten when
+     * its entry expires. The event cannot be cancelled, so there is no {@code ignoreCancelled}.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onPreLogin(AsyncPlayerPreLoginEvent event) {
         if (event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) {
             return;
@@ -336,7 +342,12 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             pendingJoins.remove(id);
             T value = online.remove(id);
             if (value != null) {
-                write(id, applyLeft(id, value, clock.millis()));
+                T saved = applyLeft(id, value, clock.millis());
+                write(id, saved);
+                // A second login while this session was online took a copy of its value at
+                // pre-login, and the new session will start from it. What this session changed
+                // since then is in what we just saved: start the new session from that instead.
+                loggingIn.computeIfPresent(id, (key, pending) -> new PendingLogin<>(saved, pending.at()));
             }
         }
     }

@@ -60,6 +60,12 @@ class PlaceholderApiHookTest {
         assertEquals(NamedTextColor.RED, PlaceholderApiHook.toComponent("§cAdmin").color());
     }
 
+    /** Only an & followed by a colour or format character is a code: the convention of Bukkit. */
+    @Test
+    void ampersandThatIsNotACodeStaysText() {
+        assertEquals("Tom & Jerry", PlainTextComponentSerializer.plainText().serialize(PlaceholderApiHook.toComponent("Tom & Jerry")));
+    }
+
     @Test
     void valueIsNeverParsedAsMiniMessage() {
         Component component = PlaceholderApiHook.toComponent("<click:run_command:/op me>click</click>");
