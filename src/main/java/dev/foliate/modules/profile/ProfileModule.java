@@ -271,13 +271,23 @@ public final class ProfileModule implements Module, PlayerCheck, Listener {
         return queues.size();
     }
 
-    /** Waits until everything queued so far has reached the database. */
+    /**
+     * Waits until everything queued so far has reached the database, including what the callbacks
+     * of that work queued in turn (a profile loaded in the background is saved by its callback).
+     */
     boolean awaitWrites(long timeoutSeconds) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
         try {
-            CompletableFuture.allOf(queues.values().toArray(CompletableFuture[]::new))
-                    .handle((done, error) -> null)
-                    .get(timeoutSeconds, TimeUnit.SECONDS);
-            return true;
+            while (true) {
+                CompletableFuture<?>[] pending =
+                        queues.values().stream().filter(tail -> !tail.isDone()).toArray(CompletableFuture[]::new);
+                if (pending.length == 0) {
+                    return true;
+                }
+                CompletableFuture.allOf(pending)
+                        .handle((done, error) -> null)
+                        .get(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
+            }
         } catch (TimeoutException | ExecutionException e) {
             return false;
         } catch (InterruptedException e) {

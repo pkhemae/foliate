@@ -31,7 +31,7 @@ first. The same jar runs on Paper.
 | **Commands** | One class per subcommand, on Paper's native command API, with declared permissions |
 | **Storage** | SQLite out of the box, MySQL or MariaDB by configuration, with schema migrations |
 | **Player data** | Loaded before login, cached, saved in order, flushed on shutdown |
-| **Sidebar** | A per-player scoreboard drawn with packets, since Bukkit scoreboards do not work on Folia |
+| **Scoreboard** | A per-player scoreboard on the side of the screen, drawn with packets because the Bukkit scoreboard API does not work on Folia |
 | **Integrations** | PlaceholderAPI and zMenu, both optional |
 | **Tests** | Unit tests, and a smoke test that boots a real Folia server in CI |
 | **Tooling** | One command to rename the template, GitHub releases on tag, Renovate, update check |
@@ -66,7 +66,7 @@ The [wiki](https://github.com/pkhemae/foliate/wiki) has one page per topic.
 | Start here | Guides |
 | --- | --- |
 | [Getting started](https://github.com/pkhemae/foliate/wiki/Getting-started) | [Modules](https://github.com/pkhemae/foliate/wiki/Modules) · [Configuration](https://github.com/pkhemae/foliate/wiki/Configuration) · [Messages](https://github.com/pkhemae/foliate/wiki/Messages) · [Commands](https://github.com/pkhemae/foliate/wiki/Commands) |
-| [Scheduling](https://github.com/pkhemae/foliate/wiki/Scheduling) | [Placeholders](https://github.com/pkhemae/foliate/wiki/Placeholders) · [Menus](https://github.com/pkhemae/foliate/wiki/Menus) · [Scoreboard sidebar](https://github.com/pkhemae/foliate/wiki/Scoreboard-sidebar) · [Storage and player data](https://github.com/pkhemae/foliate/wiki/Storage-and-player-data) |
+| [Scheduling](https://github.com/pkhemae/foliate/wiki/Scheduling) | [Placeholders](https://github.com/pkhemae/foliate/wiki/Placeholders) · [Menus](https://github.com/pkhemae/foliate/wiki/Menus) · [Scoreboard](https://github.com/pkhemae/foliate/wiki/Scoreboard) · [Storage and player data](https://github.com/pkhemae/foliate/wiki/Storage-and-player-data) |
 | [Making it yours](https://github.com/pkhemae/foliate/wiki/Making-it-yours) | [Optional integrations](https://github.com/pkhemae/foliate/wiki/Optional-integrations) · [Testing](https://github.com/pkhemae/foliate/wiki/Testing) · [Releasing](https://github.com/pkhemae/foliate/wiki/Releasing) |
 
 ## Requirements
@@ -82,7 +82,7 @@ The [wiki](https://github.com/pkhemae/foliate/wiki) has one page per topic.
 Foliate is at version 0.1.0-SNAPSHOT and has no release yet. It is verified by its unit tests and
 by a smoke test that CI runs on a real Folia 26.2 server; the same smoke test was run by hand on
 Paper 26.2. A second CI job joins that server with a real Minecraft client, run headlessly: the
-sidebar is created and refreshed without error, the profile is loaded and saved, the example menu
+scoreboard is created and refreshed without error, the profile is loaded and saved, the example menu
 opens and the connection holds, and once the player is kicked no module keeps anything of them. A
 headless client draws nothing, so what the screen shows is not checked; commands are run as the
 player rather than typed by one, and a second join of the same player is not exercised. MySQL and MariaDB have not
@@ -97,8 +97,3 @@ Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Changes are l
 
 [MIT](LICENSE). PlaceholderAPI and zMenu are separate plugins under their own licenses and are not
 bundled.
-
-The leaf in the logo is the "leaf" glyph of [Material Design Icons](https://pictogrammers.com/library/mdi/)
-(Apache 2.0), the icon papermc.io uses for Folia. Foliate is an independent template, not
-affiliated with or endorsed by PaperMC. If you build your own plugin from it, replace
-`assets/logo.svg` with your own.

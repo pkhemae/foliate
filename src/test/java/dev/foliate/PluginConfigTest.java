@@ -39,10 +39,10 @@ class PluginConfigTest {
     void settingsLeftEmptyKeepTheirDefault() throws Exception {
         for (String empty : new String[] {
             "default-locale:\n",
-            "sidebar:\n  title:\n",
-            "sidebar:\n  lines:\n",
+            "scoreboard:\n  title:\n",
+            "scoreboard:\n  lines:\n",
             "storage:\n  type:\n",
-            "sidebar:\n",
+            "scoreboard:\n",
         }) {
             Files.writeString(directory.resolve("config.yml"), empty);
             ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
@@ -50,8 +50,8 @@ class PluginConfigTest {
             service.enable();
 
             assertEquals("en", service.get().defaultLocale(), empty);
-            assertEquals("<aqua><bold>Foliate", service.get().sidebar().title(), empty);
-            assertEquals(4, service.get().sidebar().lines().size(), empty);
+            assertEquals("<aqua><bold>Foliate", service.get().scoreboard().title(), empty);
+            assertEquals(4, service.get().scoreboard().lines().size(), empty);
             assertEquals(StorageSettings.Type.SQLITE, service.get().storage().type(), empty);
         }
     }

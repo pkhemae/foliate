@@ -26,7 +26,7 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
 - **Shared state is thread-safe.** Events and commands run in parallel on region threads: use
   immutable snapshots or concurrent collections, never plain mutable fields.
 - `core` is reusable infrastructure and knows nothing of the plugin's features. A module owns its
-  settings class and receives a supplier of it (`() -> config.get().sidebar()`), so a reload takes
+  settings class and receives a supplier of it (`() -> config.get().scoreboard()`), so a reload takes
   effect; `PluginConfig` only composes the sections into the single `config.yml`.
 - `FoliatePlugin` is the composition root. Dependencies are passed through constructors: no static
   singletons, no DI container.

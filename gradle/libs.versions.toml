@@ -14,6 +14,8 @@ fastboard = "2.2.2"
 hikaricp = "7.1.0"
 # Only for tests: the server ships its own SQLite and MySQL drivers.
 sqlite-jdbc = "3.49.1.0"
+# Only for tests, like sqlite-jdbc: the driver of the MySQL and MariaDB servers the CI starts.
+mysql-connector = "26.10.0"
 placeholderapi = "2.12.3"
 zmenu = "1.1.2.1"
 
@@ -36,6 +38,7 @@ fastboard = { module = "fr.mrmicky:fastboard", version.ref = "fastboard" }
 bstats = { module = "org.bstats:bstats-bukkit", version.ref = "bstats" }
 hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
+mysql-connector = { module = "com.mysql:mysql-connector-j", version.ref = "mysql-connector" }
 
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }

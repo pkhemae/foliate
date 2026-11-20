@@ -24,11 +24,14 @@ import org.junit.jupiter.api.Test;
  */
 class ArchitectureTest {
 
-    private static final Path MAIN = Path.of("src/main/java/dev/foliate");
-    /** Any mention of a plugin class or package: an import (wildcard or static) or a qualified name. */
-    private static final Pattern REFERENCE = Pattern.compile("\\bdev\\.foliate\\.([\\w.]*[\\w*])");
+    /** The base package: taken from here, so that renaming the template cannot leave this test looking for the old one. */
+    private static final String BASE = ArchitectureTest.class.getPackageName();
 
-    /** Parents whose children are independent of one another: {@code modules.sidebar}, ... */
+    private static final Path MAIN = Path.of("src/main/java", BASE.split("\\."));
+    /** Any mention of a plugin class or package: an import (wildcard or static) or a qualified name. */
+    private static final Pattern REFERENCE = Pattern.compile("\\b" + Pattern.quote(BASE) + "\\.([\\w.]*[\\w*])");
+
+    /** Parents whose children are independent of one another: {@code modules.scoreboard}, ... */
     private static final Set<String> GROUPS = Set.of("modules", "hooks");
 
     @Test
@@ -51,7 +54,7 @@ class ArchitectureTest {
     @Test
     void theRuleCatchesEveryWayToReachAnotherPart() {
         String source = """
-                package dev.foliate.modules.sidebar;
+                package dev.foliate.modules.scoreboard;
 
                 import dev.foliate.core.message.MessageService;
                 import dev.foliate.modules.profile.*;
@@ -71,7 +74,7 @@ class ArchitectureTest {
                         "PluginConfig",
                         "commands.FoliateCommand",
                         "modules"),
-                foreignReferences("modules.sidebar", source));
+                foreignReferences("modules.scoreboard", source));
     }
 
     @Test

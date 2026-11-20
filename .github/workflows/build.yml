@@ -74,7 +74,7 @@ jobs:
   # The smoke test connects nobody. This one joins the test server with a real Minecraft client,
   # run headlessly by HeadlessMC (https://github.com/headlesshq/headlessmc, MIT) with an offline
   # account, which is only allowed in CI. The plugin's self-test then checks what the player got:
-  # a sidebar, a saved profile, an open menu, a connection that holds, a player who comes back, and
+  # a scoreboard, a saved profile, an open menu, a connection that holds, a player who comes back, and
   # the messages of their language.
   client-test:
     name: Folia test with a connected client (hooks ${{ matrix.hooks }})
@@ -124,3 +124,86 @@ jobs:
             client-run/crash-reports
             HeadlessMC/headlessmc.log
           if-no-files-found: ignore
+
+  # SQLite is what the unit tests use. This runs the profile storage on the servers it is meant to
+  # work with, through the same Database and migrations as the plugin.
+  database-test:
+    name: Storage on ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["mysql:8.4", "mariadb:11.4"]
+    services:
+      database:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: throwaway
+          MYSQL_DATABASE: foliate_test
+        ports:
+          - 3306:3306
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Wait for the database to accept logins
+        run: |
+          for _ in $(seq 1 60); do
+            if mysql -h 127.0.0.1 -P 3306 -u root -pthrowaway -e "SELECT 1" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "The database never accepted a login"
+          exit 1
+
+      - name: Run the storage tests
+        env:
+          FOLIATE_TEST_MYSQL_PORT: 3306
+          FOLIATE_TEST_MYSQL_PASSWORD: throwaway
+        run: ./gradlew test --tests '*ProfileStorageOnMysqlTest'
+
+      # A skipped class would still be a green build: the five tests must have run.
+      - name: The tests were not skipped
+        run: |
+          report=build/test-results/test/TEST-dev.foliate.modules.profile.ProfileStorageOnMysqlTest.xml
+          grep -q 'tests="5" skipped="0" failures="0" errors="0"' "$report"
+
+  # The template's promise is that renaming it gives a plugin that builds and passes its tests.
+  rename-check:
+    name: Rename the template
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Rename it
+        run: ./gradlew renameTemplate -PnewName=Skylands -PnewGroup=com.example.skylands -PnewRepository=acme/skylands
+
+      - name: Nothing of the template's name is left
+        run: |
+          if grep -rIil "foliate" . --exclude-dir=.git --exclude-dir=.gradle --exclude-dir=build; then
+            echo "These files still mention the template's name"
+            exit 1
+          fi
+
+      - name: Build and test the renamed plugin
+        run: ./gradlew build
