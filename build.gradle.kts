@@ -93,6 +93,7 @@ dependencies {
     testImplementation(libs.zmenu.api) { isTransitive = false }
     testRuntimeOnly(libs.junit.platform.launcher)
     testRuntimeOnly(libs.sqlite.jdbc)
+    testRuntimeOnly(libs.mysql.connector)
 }
 
 // Generates plugin.yml at build time, so the plugin metadata lives in one place.
