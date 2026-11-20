@@ -24,6 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -304,6 +305,26 @@ class ProfileModuleTest {
         profiles.quit(player.getUniqueId());
 
         assertEquals("the profile of Alex is not loaded", profiles.problemWith(player, 1));
+    }
+
+    /**
+     * The save a callback queues is queued behind the work already there: waiting for the writes
+     * must wait for it too, and not return once the read that led to it is done.
+     */
+    @Test
+    void awaitingTheWritesWaitsForTheSaveOfALateLoadedProfile() throws Exception {
+        UUID id = UUID.randomUUID();
+        CountDownLatch releaseRead = holdStorageThread();
+        profiles.join(id, "Alex"); // no pre-login: the read is queued behind the hold
+        CountDownLatch releaseSave = holdStorageThread(); // and this one behind the read
+        CompletableFuture<Boolean> awaited = CompletableFuture.supplyAsync(() -> profiles.awaitWrites(10));
+
+        releaseRead.countDown(); // the read completes, its callback queues the save behind the second hold
+
+        assertThrows(TimeoutException.class, () -> awaited.get(1, TimeUnit.SECONDS));
+        releaseSave.countDown();
+        assertTrue(awaited.get(10, TimeUnit.SECONDS));
+        assertEquals(1, stored(id).orElseThrow().joins());
     }
 
     @Test
