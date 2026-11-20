@@ -261,6 +261,44 @@ class ProfileModuleTest {
     }
 
     @Test
+    void checkPassesForAPlayerWhoseProfileWasSaved() {
+        PlayerMock player = server.addPlayer("Alex");
+
+        assertEquals(null, profiles.problemWith(player));
+    }
+
+    @Test
+    void checkReportsAProfileThatIsMissingFromTheDatabase() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        flush();
+        database.call(connection -> {
+            connection.createStatement().executeUpdate("DELETE FROM foliate_profiles");
+            return null;
+        });
+
+        assertEquals("the profile of Alex was not saved", profiles.problemWith(player));
+    }
+
+    @Test
+    void checkAfterTheQuitReportsAProfileThatStayedInMemory() {
+        PlayerMock player = server.addPlayer("Alex");
+
+        assertEquals(
+                "the profile of Alex stayed in memory after the player left",
+                profiles.problemAfterQuit(player.getUniqueId(), "Alex"));
+        profiles.quit(player.getUniqueId());
+        assertEquals(null, profiles.problemAfterQuit(player.getUniqueId(), "Alex"));
+    }
+
+    @Test
+    void checkReportsAProfileThatIsNotLoaded() {
+        PlayerMock player = server.addPlayer("Alex");
+        profiles.quit(player.getUniqueId());
+
+        assertEquals("the profile of Alex is not loaded", profiles.problemWith(player));
+    }
+
+    @Test
     void joinsPlaceholderReadsTheCachedProfile() {
         PlayerMock player = server.addPlayer("Alex");
 

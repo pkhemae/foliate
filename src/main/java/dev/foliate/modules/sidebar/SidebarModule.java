@@ -2,6 +2,7 @@ package dev.foliate.modules.sidebar;
 
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
+import dev.foliate.core.module.PlayerCheck;
 import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.core.scheduler.TaskHandle;
@@ -22,6 +23,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Shows each player a sidebar whose title and lines come from {@code config.yml}.
@@ -30,7 +32,7 @@ import org.bukkit.plugin.Plugin;
  * scheduler. Join and quit events already run there; reloads and enabling hop to it. The map of
  * boards is the only state shared between threads.
  */
-public final class SidebarModule implements Module, Listener {
+public final class SidebarModule implements Module, PlayerCheck, Listener {
 
     private final Plugin plugin;
     private final Schedulers schedulers;
@@ -83,6 +85,19 @@ public final class SidebarModule implements Module, Listener {
         // is safe from here.
         entries.values().forEach(Entry::remove);
         entries.clear();
+    }
+
+    @Override
+    public @Nullable String problemWith(Player player) {
+        if (!settings.get().enabled() || entries.containsKey(player.getUniqueId())) {
+            return null;
+        }
+        return "no sidebar was created for " + player.getName();
+    }
+
+    @Override
+    public @Nullable String problemAfterQuit(UUID id, String name) {
+        return entries.containsKey(id) ? "the sidebar of " + name + " was kept after the player left" : null;
     }
 
     @EventHandler

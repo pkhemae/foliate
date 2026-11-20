@@ -17,5 +17,5 @@ All notable changes to this project are listed here. The format follows
 - Per-player scoreboard sidebar.
 - SQL storage (SQLite, MySQL, MariaDB) with schema migrations, and per-player profiles.
 - Optional bStats metrics and update check.
-- Unit tests and a Folia smoke test run by CI.
+- Unit tests and a Folia smoke test run by CI, and a CI job that joins the test server with a real Minecraft client.
 - `renameTemplate` task, GitHub release workflow, Renovate configuration.

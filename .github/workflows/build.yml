@@ -70,3 +70,55 @@ jobs:
         with:
           name: server-log-hooks-${{ matrix.hooks }}
           path: run/logs/latest.log
+
+  # The smoke test connects nobody. This one joins the test server with a real Minecraft client,
+  # run headlessly by HeadlessMC (https://github.com/headlesshq/headlessmc, MIT) with an offline
+  # account, which is only allowed in CI. The plugin's self-test then checks what the player got:
+  # a sidebar, a saved profile, an open menu, a connection that holds.
+  client-test:
+    name: Folia test with a connected client (hooks ${{ matrix.hooks }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        hooks: [true, false]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.minecraft
+          # The client downloaded for the Minecraft version of the build.
+          key: minecraft-client-${{ hashFiles('gradle/libs.versions.toml') }}
+
+      # Downloads the Minecraft client from Mojang and runs the server with -PacceptEula=true:
+      # both are subject to the Minecraft EULA (https://aka.ms/MinecraftEULA). Remove this job if
+      # you do not agree to it.
+      - name: Join the test server with a client
+        timeout-minutes: 15
+        env:
+          HOOKS: ${{ matrix.hooks }}
+        run: .github/scripts/client-test.sh
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure() || cancelled()
+        with:
+          name: client-test-logs-hooks-${{ matrix.hooks }}
+          path: |
+            run/logs/latest.log
+            server.out
+            client.out
+            client-run/logs/latest.log
+            client-run/crash-reports
+            HeadlessMC/headlessmc.log
+          if-no-files-found: ignore
