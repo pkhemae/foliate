@@ -217,14 +217,21 @@ jobs:
       - name: Nothing of the template's name is left
         if: steps.template.outputs.still == 'true'
         run: |
-          # grep exits 1 when it finds nothing and 2 when it fails: only the first is good news.
+          # grep exits 1 when it finds nothing and 2 when it fails.
           status=0
-          grep -rIil "foliate" . --exclude-dir=.git --exclude-dir=.gradle --exclude-dir=build || status=$?
-          if [ "$status" -eq 0 ]; then
-            echo "These files still mention the template's name"
-            exit 1
-          elif [ "$status" -ne 1 ]; then
+          matches=$(grep -rIin "foliate" . --exclude-dir=.git --exclude-dir=.gradle --exclude-dir=build) || status=$?
+          if [ "$status" -gt 1 ]; then
             echo "grep failed with $status"
+            exit 1
+          fi
+          # Only README.md, CONTRIBUTING.md and CLAUDE.md may name the template (its repository and guide), and
+          # the licence its own copyright notice: anywhere else it is a rename that missed.
+          leftovers=$(printf '%s\n' "$matches" \
+            | grep -vE '^\./(README|CONTRIBUTING|CLAUDE)\.md:[0-9]+:.*pkhemae/foliate' \
+            | grep -vE '^\./LICENSE:[0-9]+:Copyright \(c\) [0-9]+ Foliate contributors$' || true)
+          if [ -n "$leftovers" ]; then
+            echo "These lines still mention the template's name:"
+            echo "$leftovers"
             exit 1
           fi
           if find . -iname '*foliate*' -not -path './.git/*' -not -path './.gradle/*' -not -path './build/*' | grep .; then
