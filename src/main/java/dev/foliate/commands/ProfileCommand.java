@@ -125,7 +125,7 @@ public final class ProfileCommand implements Subcommand {
                 "command.profile.show",
                 Placeholder.unparsed("player", summary.name()),
                 Placeholder.unparsed("first-seen", DATE_TIME.format(Instant.ofEpochMilli(summary.firstSeen()))),
-                Placeholder.unparsed("since", DATE_TIME.format(Instant.ofEpochMilli(summary.lastSeen()))),
+                Placeholder.unparsed("since", DATE_TIME.format(Instant.ofEpochMilli(summary.onlineSince()))),
                 Placeholder.unparsed("joins", String.valueOf(summary.joins())));
     }
 }

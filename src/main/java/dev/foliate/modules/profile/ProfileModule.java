@@ -111,6 +111,8 @@ public final class ProfileModule implements Module, ProfileLookup {
     @Override
     public Optional<ProfileSummary> lookup(UUID id) {
         return find(id).map(profile ->
+                // While the player is online, lastSeen is the time of this join: set when they
+                // joined, and moved to the time they leave when they quit.
                 new ProfileSummary(profile.name(), profile.firstSeen(), profile.lastSeen(), profile.joins()));
     }
 
