@@ -225,6 +225,21 @@ class ConfigServiceTest {
         assertEquals(old, Files.readString(directory.resolve("config.yml.v1.bak")));
     }
 
+    @Test
+    void migrationThatLeadsToAnInvalidFileLeavesNoBackupAndTheFileUntouched() throws Exception {
+        ConfigService<SettingsV2> migrating = serviceOf(
+                SettingsV2.class,
+                SettingsV2::new,
+                List.of(yaml -> ConfigMigrator.rename(yaml, "verbose", "debug")));
+        String old = "config-version: 1\nverbose: [not, a, boolean]\n";
+        Files.writeString(file, old);
+
+        assertThrows(ConfigException.class, migrating::enable);
+
+        assertEquals(old, Files.readString(file));
+        assertFalse(Files.exists(directory.resolve("config.yml.v1.bak")));
+    }
+
     /** Adding a migration step without bumping the settings class would run it again at every load. */
     @Test
     void settingsClassThatDoesNotMatchTheMigrationsIsAProgrammingError() {

@@ -116,10 +116,9 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             Map<String, Object> content = onDisk == null ? Map.of() : Yaml.parse(onDisk);
 
             Optional<Map<String, Object>> migrated = migrator.migrate(content);
+            Path backup = null;
             if (migrated.isPresent() && onDisk != null) {
-                Path backup = file.resolveSibling(FILE_NAME + ".v" + content.get(ConfigMigrator.VERSION_KEY) + ".bak");
-                Files.writeString(backup, onDisk);
-                logger.info("{} was written by an older version: migrated, previous file kept as {}", FILE_NAME, backup.getFileName());
+                backup = file.resolveSibling(FILE_NAME + ".v" + content.get(ConfigMigrator.VERSION_KEY) + ".bak");
                 content = migrated.get();
             }
 
@@ -137,6 +136,10 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             }
             config.validate();
 
+            if (backup != null) {
+                Files.writeString(backup, onDisk);
+                logger.info("{} was written by an older version: migrated, previous file kept as {}", FILE_NAME, backup.getFileName());
+            }
             String rendered = render(config);
             if (!rendered.equals(onDisk)) {
                 reportUnknownSettings(content, rendered);

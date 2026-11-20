@@ -248,6 +248,19 @@ class MessageServiceTest {
     }
 
     @Test
+    void brokenFileOfTheDefaultLocaleDoesNotStopTheServerFromStarting() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "greeting: [unclosed\n");
+        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+
+        fresh.enable();
+
+        // The built-in text stands in for the file until it is fixed.
+        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render(Locale.ENGLISH, "greeting", Placeholder.unparsed("player", "Alex"))));
+        assertThrows(MessageException.class, fresh::reload);
+    }
+
+    @Test
     void titleIsNotShownWhenBothPartsAreEmpty() {
         RecordingAudience viewer = new RecordingAudience(Locale.US);
 

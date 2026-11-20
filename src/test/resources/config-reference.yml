@@ -7,8 +7,6 @@
 # Internal version of this file, used to migrate it when the plugin updates.
 # Do not edit.
 config-version: 1
-# Logs extra details that help when reporting a problem.
-debug: false
 # Language of the console, and of players whose game language has no file in the lang folder.
 # Must be the name of a file in that folder, without the extension.
 default-locale: en

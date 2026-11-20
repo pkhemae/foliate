@@ -261,7 +261,15 @@ public final class MessageService implements Module {
                         if (strict) {
                             throw e;
                         }
-                        logger.error("Ignoring {}: fix the file and reload", e.getMessage());
+                        // The built-in text stands in until the file is fixed, so a typo in the
+                        // default language cannot stop the server from starting.
+                        Map<String, List<String>> builtInOfLocale = builtIn.get(locale);
+                        if (builtInOfLocale == null) {
+                            logger.error("Ignoring {}: fix the file and reload", e.getMessage());
+                            continue;
+                        }
+                        logger.error("{}: using the built-in text of this language until the file is fixed and reloaded", e.getMessage());
+                        languages.put(locale, Map.copyOf(builtInOfLocale));
                         continue;
                     }
                     Map<String, List<String>> messages = new HashMap<>(builtIn.getOrDefault(locale, Map.of()));
