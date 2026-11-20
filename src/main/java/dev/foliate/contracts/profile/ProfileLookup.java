@@ -1,4 +1,4 @@
-package dev.foliate.core.profile;
+package dev.foliate.contracts.profile;
 
 import java.util.Optional;
 import java.util.UUID;

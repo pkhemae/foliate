@@ -7,11 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.foliate.PluginConfig;
+import dev.foliate.contracts.profile.ProfileSummary;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleSkippedException;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
-import dev.foliate.core.profile.ProfileSummary;
 import dev.foliate.core.storage.Database;
 import java.net.InetAddress;
 import java.nio.file.Files;

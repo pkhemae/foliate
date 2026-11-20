@@ -1,6 +1,6 @@
 package dev.foliate.selftest;
 
-import dev.foliate.core.menu.Menus;
+import dev.foliate.contracts.menu.Menus;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;

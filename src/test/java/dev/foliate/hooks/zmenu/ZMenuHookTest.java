@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.foliate.PluginConfig;
+import dev.foliate.contracts.menu.MenuException;
 import dev.foliate.core.config.ConfigService;
-import dev.foliate.core.menu.MenuException;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.scheduler.FoliaSchedulers;
 import dev.foliate.core.scheduler.ManualSchedulers;

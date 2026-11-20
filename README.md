@@ -36,7 +36,7 @@ first. The same jar runs on Paper.
 | **Tests** | Unit tests, and a smoke test that boots a real Folia server in CI |
 | **Tooling** | One command to rename the template, GitHub releases on tag, Renovate |
 
-What you keep is `core/`, the plugin class and one command. Everything under `modules/` and `hooks/` is example code that you can delete: the [developer guide](https://github.com/pkhemae/foliate/wiki/Making-it-yours) lists what each removal takes with it.
+What you keep is `core/`, the plugin class and the `info` and `reload` commands. Everything under `modules/` and `hooks/`, the `contracts/` they offer each other and the commands that use them are example code that you can delete: the [developer guide](https://github.com/pkhemae/foliate/wiki/Making-it-yours) lists what each removal takes with it.
 
 ## Quick start
 
