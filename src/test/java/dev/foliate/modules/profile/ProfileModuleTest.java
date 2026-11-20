@@ -182,6 +182,8 @@ class ProfileModuleTest {
     void loginThatWaitedTooLongIsNotTrustedAtJoinButTheProfileIsStillLoaded() throws Exception {
         UUID id = store(new PlayerProfile(UUID.randomUUID(), "Alex", 10, 20, 4));
         profiles.beginLogin(id, "Alex");
+        // The row changes while the login waits: only a fresh load can see it.
+        store(new PlayerProfile(id, "Alex", 10, 20, 9));
 
         clock.set(1_000 + 6 * 60_000);
         profiles.join(id, "Alex");
@@ -190,7 +192,7 @@ class ProfileModuleTest {
             Thread.sleep(10);
         }
 
-        assertEquals(5, profiles.find(id).orElseThrow().joins());
+        assertEquals(10, profiles.find(id).orElseThrow().joins());
         assertEquals(0, profiles.pendingLogins());
     }
 
@@ -250,12 +252,10 @@ class ProfileModuleTest {
         profiles.join(id, "Alex"); // no pre-login: the load happens in the background
         profiles.quit(id); // and the player quits before it is done
         release.countDown();
-        // The callback that caches the profile also saves it, counting the second join.
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while ((stored(id).isEmpty() || stored(id).get().joins() < 2) && System.nanoTime() < deadline) {
-            Thread.sleep(10);
-        }
-        assertEquals(2, stored(id).orElseThrow().joins(), "the load callback did not run");
+        // The callback that caches the profile also saves it, counting the second join: waiting
+        // for the writes, as the shutdown does, must wait for that save too.
+        flush();
+        assertEquals(2, stored(id).orElseThrow().joins(), "the load callback's save was not awaited");
 
         assertTrue(profiles.find(id).isEmpty());
     }

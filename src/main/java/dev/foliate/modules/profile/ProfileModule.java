@@ -209,8 +209,10 @@ public final class ProfileModule implements Module, Listener {
                         if (pendingJoins.remove(id)) {
                             online.put(id, joined);
                         }
+                        // Queued under the same lock as the quit's save, so the two reach the
+                        // database in the order the player's session went.
+                        write(joined);
                     }
-                    write(joined);
                 })
                 .exceptionally(error -> {
                     logger.error("Could not load the profile of {}", name, error);
@@ -219,13 +221,12 @@ public final class ProfileModule implements Module, Listener {
     }
 
     void quit(UUID id) {
-        PlayerProfile profile;
         synchronized (lifecycle) {
             pendingJoins.remove(id);
-            profile = online.remove(id);
-        }
-        if (profile != null) {
-            write(profile.seen(clock.millis()));
+            PlayerProfile profile = online.remove(id);
+            if (profile != null) {
+                write(profile.seen(clock.millis()));
+            }
         }
     }
 
@@ -273,25 +274,28 @@ public final class ProfileModule implements Module, Listener {
      */
     private <T> CompletableFuture<T> enqueue(UUID id, SqlFunction<T> work) {
         CompletableFuture<T> result = new CompletableFuture<>();
+        // What the queue holds is not the database work itself but a gate that opens once the
+        // callbacks of its result have run: a callback that queues more work (the late join does)
+        // has then queued it before anyone waiting for the queue is released.
+        CompletableFuture<Void> gate = new CompletableFuture<>();
         AtomicReference<CompletableFuture<T>> chained = new AtomicReference<>();
         queues.compute(id, (key, tail) -> {
             CompletableFuture<?> previous = tail == null ? CompletableFuture.completedFuture(null) : tail;
-            CompletableFuture<T> next = previous.handle((done, error) -> null).thenCompose(ignored -> database.submit(work));
-            chained.set(next);
-            return next;
+            chained.set(previous.handle((done, error) -> null).thenCompose(ignored -> database.submit(work)));
+            return gate;
         });
-        CompletableFuture<T> next = chained.get();
         // Registered outside compute(): a future that is already complete would run this at once,
-        // and removing from the map inside one of its own updates is not allowed.
-        next.whenComplete((value, error) -> {
-            // Drop the queue once this is its last operation, or the map would keep one entry per
-            // player ever seen. If a later operation chained after this one, the entry is theirs.
-            queues.remove(id, next);
+        // and updating the map from inside one of its own updates is not allowed.
+        chained.get().whenComplete((value, error) -> {
             if (error == null) {
                 result.complete(value);
             } else {
                 result.completeExceptionally(error.getCause() != null ? error.getCause() : error);
             }
+            gate.complete(null);
+            // Drop the queue once this is its last operation, or the map would keep one entry per
+            // player ever seen. If a later operation chained after this one, the entry is theirs.
+            queues.remove(id, gate);
         });
         return result;
     }
