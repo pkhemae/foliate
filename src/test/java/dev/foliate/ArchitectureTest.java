@@ -24,9 +24,12 @@ import org.junit.jupiter.api.Test;
  */
 class ArchitectureTest {
 
-    private static final Path MAIN = Path.of("src/main/java/dev/foliate");
+    /** The base package: taken from here, so that renaming the template cannot leave this test looking for the old one. */
+    private static final String BASE = ArchitectureTest.class.getPackageName();
+
+    private static final Path MAIN = Path.of("src/main/java", BASE.split("\\."));
     /** Any mention of a plugin class or package: an import (wildcard or static) or a qualified name. */
-    private static final Pattern REFERENCE = Pattern.compile("\\bdev\\.foliate\\.([\\w.]*[\\w*])");
+    private static final Pattern REFERENCE = Pattern.compile("\\b" + Pattern.quote(BASE) + "\\.([\\w.]*[\\w*])");
 
     /** Parents whose children are independent of one another: {@code modules.sidebar}, ... */
     private static final Set<String> GROUPS = Set.of("modules", "hooks");
