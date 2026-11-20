@@ -18,10 +18,11 @@ LANGUAGES="${LANGUAGES:-en_us,fr_fr}"
 # With TYPED=true the client is a Fabric client with the mod hmc-specifics, which lets this script
 # make it type a command; without it the client is the vanilla one and only joins.
 TYPED="${TYPED:-false}"
-TYPED_COMMAND="foliate info"
+# Opens the example menu: the self-test proves the command was typed by the menu opening.
+TYPED_COMMAND="foliate menu"
 # The mod for the Minecraft version of the build, pinned: change both with that version.
-SPECIFICS_VERSION="${SPECIFICS_VERSION:-3.0.1}"
-SPECIFICS_SHA256="${SPECIFICS_SHA256:-7f0e13aee05184520c80cde986d6510f11cfb62c00a5ebc17b2f16f416468b92}"
+SPECIFICS_VERSION="3.0.1"
+SPECIFICS_SHA256="7f0e13aee05184520c80cde986d6510f11cfb62c00a5ebc17b2f16f416468b92"
 SERVER_LOG=run/logs/latest.log
 # Logged by the self-test (SelfTest.WAITING) when it waits for a player.
 WAITING="SELF-TEST WAITING FOR A PLAYER"
@@ -108,7 +109,10 @@ rm -f "$SERVER_LOG"
   < /dev/null > server.out 2>&1 &
 server_pid=$!
 
-count() { grep -c "$1" "$SERVER_LOG" 2>/dev/null || true; }
+count() {
+  [ -f "$SERVER_LOG" ] || { echo 0; return; }
+  grep -c "$1" "$SERVER_LOG" || true
+}
 
 echo "Waiting for the server to be ready for a player"
 for _ in $(seq 1 120); do
@@ -187,4 +191,9 @@ status=0
 wait "$server_pid" || status=$?
 server_pid=""
 echo "Server task exited with $status"
+# An expectation that silently switched off would be a green job that tested nothing.
+if [ "$status" -eq 0 ] && [ "$TYPED" = true ] && [ "$(count "Typed by the client")" -ne "$visit" ]; then
+  echo "The client was expected to type the command in each of the $visit visits"
+  exit 1
+fi
 exit "$status"

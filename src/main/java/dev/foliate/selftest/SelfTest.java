@@ -84,10 +84,12 @@ public final class SelfTest {
     private final AtomicReference<CompletableFuture<Player>> nextPlayer =
             new AtomicReference<>(new CompletableFuture<>());
     private final boolean withClient = Boolean.getBoolean(CLIENT_PROPERTY);
-    /** A command the client is made to type once it has joined, without the slash; empty for none. */
+    /** A command the client is made to type once it has joined, without the slash; empty for none. It must open the menu. */
     private final String typedCommand = System.getProperty(TYPED_PROPERTY, "").strip();
     /** Commands players typed, as the server saw them (with the slash), in order. */
-    private final List<String> typedByPlayers = new CopyOnWriteArrayList<>();
+    private final List<Typed> typedByPlayers = new CopyOnWriteArrayList<>();
+
+    private record Typed(UUID player, String command) {}
     /** The language each visit's client is set to, in order: one visit per entry, one at least. */
     private final List<String> visitLanguages = Arrays.stream(System.getProperty(LANGUAGES_PROPERTY, "").split(","))
             .map(String::strip)
@@ -131,7 +133,7 @@ public final class SelfTest {
 
                 @EventHandler
                 public void onCommand(PlayerCommandPreprocessEvent event) {
-                    typedByPlayers.add(event.getMessage());
+                    typedByPlayers.add(new Typed(event.getPlayer().getUniqueId(), event.getMessage()));
                 }
             }, plugin);
         }
@@ -182,10 +184,12 @@ public final class SelfTest {
         logger.info("{} (visit {} of {})", WAITING, number, total);
         String language = number <= visitLanguages.size() ? visitLanguages.get(number - 1) : "";
         return nextPlayer.get()
-                .thenCompose(player -> after(SETTLE)
+                .thenCompose(player -> {
+                    // What the player types from now on belongs to this visit.
+                    int typedBefore = typedByPlayers.size();
+                    return after(SETTLE)
                         .thenCompose(ignored -> eventually(() -> schedulers.async().supply(() -> servedProblem(player, number, language))))
-                        .thenCompose(ignored -> menuOpens(player))
-                        .thenCompose(ignored -> commandIsTyped())
+                        .thenCompose(ignored -> menuOpens(player, typedBefore))
                         .thenCompose(ignored -> after(SETTLE))
                         .thenCompose(ignored -> schedulers.entity(player)
                                 .run(() -> check(player.isOnline(), "the client was disconnected")))
@@ -193,7 +197,8 @@ public final class SelfTest {
                             // Ready before the player is sent away, so that the next client is not missed.
                             nextPlayer.set(new CompletableFuture<>());
                             return quitIsCleanedUp(player);
-                        }))
+                        });
+                })
                 .thenCompose(ignored -> number < total ? visit(number + 1, total) : CompletableFuture.completedFuture(null))
                 // A client that drops while a check runs on its scheduler shows up as a retired entity.
                 .exceptionallyCompose(error -> {
@@ -228,17 +233,15 @@ public final class SelfTest {
         return null;
     }
 
-    /** Waits for the client to type the command it was asked to: what a player's own keystrokes reach. */
-    private CompletableFuture<Void> commandIsTyped() {
-        if (typedCommand.isEmpty()) {
-            return CompletableFuture.completedFuture(null);
-        }
-        int before = typedByPlayers.size();
+    /** Waits for this player to type the command the client was asked to, after {@code before} typed commands. */
+    private CompletableFuture<Void> commandIsTyped(Player player, int before) {
+        UUID id = player.getUniqueId();
+        String expected = "/" + typedCommand;
         return eventually(() -> CompletableFuture.completedFuture(
-                        typedByPlayers.stream().skip(before).anyMatch(("/" + typedCommand)::equals)
+                        typedByPlayers.stream().skip(before).anyMatch(typed -> typed.player().equals(id) && typed.command().equals(expected))
                                 ? null
-                                : "the client did not type /" + typedCommand))
-                .thenRun(() -> logger.info("Typed by the client: /{}", typedCommand));
+                                : "the client did not type " + expected))
+                .thenRun(() -> logger.info("Typed by the client: {}", expected));
     }
 
     /** Kicks the player and checks that no module kept anything of them. */
@@ -261,17 +264,26 @@ public final class SelfTest {
                 })));
     }
 
-    /** Runs the menu command as the player and sees whether the menu opens on their screen. */
-    private CompletableFuture<Void> menuOpens(Player player) {
+    /**
+     * Has the menu command run as the player, by the server or, when the client was asked to type
+     * it, by the client itself, and sees whether the menu opens on their screen. Typing a command
+     * is only proven by its effect: the server hears of it before it checks the permission.
+     */
+    private CompletableFuture<Void> menuOpens(Player player, int typedBefore) {
+        boolean typed = !typedCommand.isEmpty();
         if (!modules.enabledNames().contains("zmenu")) {
-            return CompletableFuture.completedFuture(null);
+            return typed
+                    ? CompletableFuture.failedFuture(new IllegalStateException("a typed command needs the menu plugin"))
+                    : CompletableFuture.completedFuture(null);
         }
-        return schedulers.entity(player)
-                .run(() -> check(server.dispatchCommand(player, "foliate menu"), "'foliate menu' did not run as the player"))
-                .thenCompose(ignored -> eventually(() -> schedulers.entity(player).supply(() ->
-                        player.getOpenInventory().getTopInventory().getType() != InventoryType.CRAFTING
-                                ? null
-                                : "the menu did not open on the player's screen")));
+        CompletableFuture<Void> command = typed
+                ? commandIsTyped(player, typedBefore)
+                : schedulers.entity(player).run(() ->
+                        check(server.dispatchCommand(player, "foliate menu"), "'foliate menu' did not run as the player"));
+        return command.thenCompose(ignored -> eventually(() -> schedulers.entity(player).supply(() ->
+                player.getOpenInventory().getTopInventory().getType() != InventoryType.CRAFTING
+                        ? null
+                        : "the menu did not open on the player's screen")));
     }
 
     /** Tries again every few seconds until the attempt reports no problem, so a slow runner is not a failure. */

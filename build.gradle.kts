@@ -50,7 +50,7 @@ val clientTest: Boolean = providers.gradleProperty("clientTest").map(String::toB
 // client set to that language: a player who comes back, and the messages of their own language.
 val clientLanguages: String = providers.gradleProperty("clientLanguages").getOrElse("")
 
-// -PclientTyped="foliate info" makes each visit expect the client to type that command, which the
+// -PclientTyped="foliate menu" makes each visit expect the client to type that command, which the
 // CI job does through the client mod hmc-specifics.
 val clientTyped: String = providers.gradleProperty("clientTyped").getOrElse("")
 

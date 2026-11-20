@@ -105,7 +105,7 @@ jobs:
         with:
           path: ~/.minecraft
           # The client downloaded for the Minecraft version of the build.
-          key: minecraft-client-${{ hashFiles('gradle/libs.versions.toml') }}
+          key: minecraft-client-${{ matrix.typed }}-${{ hashFiles('gradle/libs.versions.toml') }}
 
       # Downloads the Minecraft client from Mojang and runs the server with -PacceptEula=true:
       # both are subject to the Minecraft EULA (https://aka.ms/MinecraftEULA). Remove this job if
