@@ -15,6 +15,15 @@ command:
     failure: "<prefix><red>Could not reload <white><module></white>: <error>"
     unexpected: "<prefix><red>Could not reload <white><module></white> because of an unexpected error. See the console."
     error: "<prefix><red>The reload failed unexpectedly. See the console."
+  profile:
+    show:
+      - "<prefix><white><player></white>"
+      - "<gray>First seen: <white><first-seen>"
+      - "<gray>Online since: <white><since>"
+      - "<gray>Joins: <white><joins>"
+    name-required: "<prefix><red>Name a player: <white>/foliate profile \\<player></white>"
+    unknown: "<prefix><red><white><player></white> is not online."
+    not-loaded: "<prefix><red>The profile of <white><player></white> is not loaded yet."
 
 menu:
   unknown: "<prefix><red>The menu <white><menu></white> does not exist."

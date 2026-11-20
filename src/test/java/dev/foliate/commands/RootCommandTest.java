@@ -16,16 +16,21 @@ import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleManager;
+import dev.foliate.core.profile.ProfileSummary;
 import dev.foliate.core.scheduler.FoliaSchedulers;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.TreeSet;
+import java.util.UUID;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Location;
@@ -53,6 +58,7 @@ class RootCommandTest {
     private CommandDispatcher<CommandSourceStack> dispatcher;
     private CommandDispatcher<CommandSourceStack> withoutMenus;
     private final List<String> opened = new ArrayList<>();
+    private final Map<UUID, ProfileSummary> profiles = new HashMap<>();
 
     @BeforeEach
     void setUp() {
@@ -92,6 +98,7 @@ class RootCommandTest {
                 new ReloadCommand(modules, messages, schedulers, NOPLogger.NOP_LOGGER));
         List<Subcommand> all = new ArrayList<>(administration);
         all.add(new MenuCommand((player, menu) -> opened.add(player.getName() + " " + menu)));
+        all.add(new ProfileCommand(id -> Optional.ofNullable(profiles.get(id)), messages, server));
         dispatcher = new CommandDispatcher<>();
         dispatcher.getRoot().addChild(new RootCommand("foliate", all).build());
         withoutMenus = new CommandDispatcher<>();
@@ -231,6 +238,113 @@ class RootCommandTest {
     }
 
     @Test
+    void playerSeesTheirOwnProfileWithoutAnyPermissionBeyondTheDefault() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        profiles.put(player.getUniqueId(), new ProfileSummary("Alex", 1_700_000_000_000L, 1_700_003_600_000L, 7));
+
+        dispatcher.execute("foliate profile", new Source(player));
+
+        String message = plain(player.nextComponentMessage());
+        assertEquals(
+                "[Foliate] Alex\nFirst seen: 2023-11-14 22:13 UTC\nOnline since: 2023-11-14 23:13 UTC\nJoins: 7",
+                message.replace("\r", ""));
+    }
+
+    @Test
+    void profileOfAnotherPlayerNeedsItsOwnPermission() throws Exception {
+        PlayerMock alex = server.addPlayer("Alex");
+        PlayerMock target = server.addPlayer("Target");
+        profiles.put(target.getUniqueId(), new ProfileSummary("Target", 10, 20, 3));
+
+        assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("foliate profile Target", new Source(alex)));
+
+        alex.addAttachment(plugin, Permissions.COMMAND_PROFILE_OTHERS, true);
+        dispatcher.execute("foliate profile Target", new Source(alex));
+        assertTrue(plain(alex.nextComponentMessage()).contains("Target"));
+    }
+
+    @Test
+    void profileOfAPlayerWhoIsNotOnlineIsReported() throws Exception {
+        PlayerMock player = operator();
+
+        dispatcher.execute("foliate profile Nobody", new Source(player));
+
+        assertEquals("[Foliate] Nobody is not online.", plain(player.nextComponentMessage()));
+    }
+
+    @Test
+    void onlinePlayerWithoutALoadedProfileIsReportedToo() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+
+        dispatcher.execute("foliate profile", new Source(player));
+
+        assertEquals("[Foliate] The profile of Alex is not loaded yet.", plain(player.nextComponentMessage()));
+    }
+
+    @Test
+    void runningTheCommandAsSomeoneElseNeedsThePermissionToSeeOthers() throws Exception {
+        PlayerMock alex = server.addPlayer("Alex");
+        PlayerMock target = server.addPlayer("Target");
+        profiles.put(target.getUniqueId(), new ProfileSummary("Target", 10, 20, 3));
+
+        // What "/execute as Target run foliate profile" typed by Alex looks like.
+        assertThrows(
+                CommandSyntaxException.class,
+                () -> dispatcher.execute("foliate profile", new Source(alex, target)));
+
+        alex.addAttachment(plugin, Permissions.COMMAND_PROFILE_OTHERS, true);
+        dispatcher.execute("foliate profile", new Source(alex, target));
+        assertTrue(plain(alex.nextComponentMessage()).contains("Joins: 3"));
+    }
+
+    @Test
+    void playerWithoutThePermissionToSeeOthersIsNotSuggestedAnyone() throws Exception {
+        PlayerMock alex = server.addPlayer("Alex");
+        server.addPlayer("Bob");
+
+        var suggestions = dispatcher
+                .getCompletionSuggestions(dispatcher.parse("foliate profile ", new Source(alex)))
+                .get();
+
+        assertTrue(suggestions.isEmpty());
+    }
+
+    @Test
+    void consoleMustNameAPlayer() throws Exception {
+        ConsoleCommandSenderMock console = server.getConsoleSender();
+
+        dispatcher.execute("foliate profile", new Source(console));
+
+        assertTrue(plain(console.nextComponentMessage()).contains("Name a player: /foliate profile <player>"));
+    }
+
+    @Test
+    void consoleCanShowAnOnlinePlayersProfile() throws Exception {
+        PlayerMock target = server.addPlayer("Target");
+        profiles.put(target.getUniqueId(), new ProfileSummary("Target", 10, 20, 3));
+        ConsoleCommandSenderMock console = server.getConsoleSender();
+
+        dispatcher.execute("foliate profile Target", new Source(console));
+
+        assertTrue(plain(console.nextComponentMessage()).contains("Joins: 3"));
+    }
+
+    @Test
+    void onlinePlayersAreSuggestedWhileTyping() throws Exception {
+        server.addPlayer("Alex");
+        server.addPlayer("Bob");
+        PlayerMock operator = operator();
+
+        var suggestions = dispatcher
+                .getCompletionSuggestions(dispatcher.parse("foliate profile a", new Source(operator)))
+                .get();
+
+        assertEquals(
+                List.of("Alex"),
+                suggestions.getList().stream().map(suggestion -> suggestion.getText()).toList());
+    }
+
+    @Test
     void menuSubcommandDoesNotExistWithoutAMenuPlugin() {
         PlayerMock player = operator();
 
@@ -278,7 +392,7 @@ class RootCommandTest {
 
     @Test
     void administrationPermissionsAreForOperatorsOnly() {
-        for (String node : List.of(Permissions.COMMAND_INFO, Permissions.COMMAND_RELOAD)) {
+        for (String node : List.of(Permissions.COMMAND_INFO, Permissions.COMMAND_RELOAD, Permissions.COMMAND_PROFILE_OTHERS)) {
             assertEquals(PermissionDefault.OP, server.getPluginManager().getPermission(node).getDefault(), node);
         }
     }

@@ -120,6 +120,14 @@ bukkitPluginYaml {
             description = "Allows /foliate info."
             default = Permission.Default.OP
         }
+        register("foliate.command.profile") {
+            description = "Allows /foliate profile, to see your own profile."
+            default = Permission.Default.TRUE
+        }
+        register("foliate.command.profile.others") {
+            description = "Allows /foliate profile <player>, to see the profile of another player."
+            default = Permission.Default.OP
+        }
         register("foliate.command.menu") {
             description = "Allows /foliate menu."
             default = Permission.Default.TRUE

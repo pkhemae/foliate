@@ -2,6 +2,7 @@ package dev.foliate;
 
 import dev.foliate.commands.InfoCommand;
 import dev.foliate.commands.MenuCommand;
+import dev.foliate.commands.ProfileCommand;
 import dev.foliate.commands.ReloadCommand;
 import dev.foliate.commands.RootCommand;
 import dev.foliate.commands.Subcommand;
@@ -71,8 +72,9 @@ public class FoliatePlugin extends JavaPlugin {
         Database database = new Database(
                 getDataPath(), () -> config.get().storage(), List.of(ProfileModule.MIGRATION), getSLF4JLogger());
         modules.register(database);
-        modules.register(new ProfileModule(
-                this, database, messages, placeholders, getSLF4JLogger(), Clock.systemUTC()));
+        ProfileModule profiles = new ProfileModule(
+                this, database, messages, placeholders, getSLF4JLogger(), Clock.systemUTC());
+        modules.register(profiles);
         modules.register(new ScoreboardModule(this, schedulers, () -> config.get().scoreboard(), messages));
         Menus menus = hook(modules, ZMenuHook.PLUGIN_NAME, () -> new ZMenuHook(this, schedulers, messages));
 
@@ -90,6 +92,9 @@ public class FoliatePlugin extends JavaPlugin {
         subcommands.add(new ReloadCommand(modules, messages, schedulers, getSLF4JLogger()));
         if (menus != null) {
             subcommands.add(new MenuCommand(menus));
+        }
+        if (modules.enabledNames().contains(profiles.name())) {
+            subcommands.add(new ProfileCommand(profiles, messages, getServer()));
         }
         RootCommand command = new RootCommand("foliate", subcommands);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> event.registrar()

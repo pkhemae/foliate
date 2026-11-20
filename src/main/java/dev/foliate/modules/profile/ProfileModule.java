@@ -5,6 +5,8 @@ import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
 import dev.foliate.core.module.PlayerCheck;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
+import dev.foliate.core.profile.ProfileLookup;
+import dev.foliate.core.profile.ProfileSummary;
 import dev.foliate.core.storage.Database;
 import dev.foliate.core.storage.SqlFunction;
 import java.sql.SQLException;
@@ -50,7 +52,7 @@ import org.slf4j.Logger;
  *       before the database closes.
  * </ol>
  */
-public final class ProfileModule implements Module, PlayerCheck, Listener {
+public final class ProfileModule implements Module, PlayerCheck, ProfileLookup, Listener {
 
     /** The SQL script that creates this module's table: to give to the {@code Database}. */
     public static final String MIGRATION = "001_create_profiles.sql";
@@ -166,6 +168,12 @@ public final class ProfileModule implements Module, PlayerCheck, Listener {
     @Override
     public @Nullable String problemAfterQuit(UUID id, String name) {
         return find(id).isPresent() ? "the profile of " + name + " stayed in memory after the player left" : null;
+    }
+
+    @Override
+    public Optional<ProfileSummary> lookup(UUID id) {
+        return find(id).map(profile ->
+                new ProfileSummary(profile.name(), profile.firstSeen(), profile.lastSeen(), profile.joins()));
     }
 
     /** The profile of an online player. Safe from any thread, never blocks. */

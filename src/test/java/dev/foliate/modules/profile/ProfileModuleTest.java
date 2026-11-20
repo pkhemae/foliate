@@ -11,6 +11,7 @@ import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleSkippedException;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
+import dev.foliate.core.profile.ProfileSummary;
 import dev.foliate.core.storage.Database;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -297,6 +298,19 @@ class ProfileModuleTest {
 
         assertEquals(
                 "the profile of Alex counts 1 joins after visit 2", profiles.problemWith(player, 2));
+    }
+
+    @Test
+    void lookupGivesTheCachedProfileFieldForField() throws Exception {
+        UUID id = store(new PlayerProfile(UUID.randomUUID(), "Alex", 10, 20, 4));
+        profiles.beginLogin(id, "Alex");
+        clock.set(500);
+        profiles.join(id, "Alex");
+
+        ProfileSummary summary = profiles.lookup(id).orElseThrow();
+
+        assertEquals(new ProfileSummary("Alex", 10, 500, 5), summary);
+        assertTrue(profiles.lookup(UUID.randomUUID()).isEmpty());
     }
 
     @Test
