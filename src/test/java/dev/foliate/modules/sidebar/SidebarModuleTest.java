@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,6 +73,16 @@ class SidebarModuleTest {
         assertTrue(board.lines.contains("Player: Alex"), board.lines.toString());
         assertTrue(board.lines.contains("Online: 1"), board.lines.toString());
         assertTrue(player.isOnline());
+    }
+
+    @Test
+    void checkReportsAPlayerWithoutABoard() {
+        PlayerMock player = server.addPlayer("Alex");
+        assertEquals(null, sidebar.problemWith(player));
+
+        server.getPluginManager().callEvent(new PlayerQuitEvent(player, Component.empty(), PlayerQuitEvent.QuitReason.DISCONNECTED));
+
+        assertEquals("no sidebar was created for Alex", sidebar.problemWith(player));
     }
 
     @Test

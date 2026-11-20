@@ -3,9 +3,11 @@ package dev.foliate.modules.profile;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
+import dev.foliate.core.module.PlayerCheck;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
 import dev.foliate.core.storage.Database;
 import dev.foliate.core.storage.SqlFunction;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.util.Locale;
 import java.util.Map;
@@ -18,6 +20,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
@@ -26,6 +29,7 @@ import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
@@ -46,7 +50,7 @@ import org.slf4j.Logger;
  *       before the database closes.
  * </ol>
  */
-public final class ProfileModule implements Module, Listener {
+public final class ProfileModule implements Module, PlayerCheck, Listener {
 
     /** The SQL script that creates this module's table: to give to the {@code Database}. */
     public static final String MIGRATION = "001_create_profiles.sql";
@@ -133,6 +137,23 @@ public final class ProfileModule implements Module, Listener {
         if (!awaitWrites(FLUSH_TIMEOUT_SECONDS)) {
             logger.warn("Some player profiles were not saved within {} seconds", FLUSH_TIMEOUT_SECONDS);
         }
+    }
+
+    @Override
+    public @Nullable String problemWith(Player player) {
+        UUID id = player.getUniqueId();
+        if (find(id).isEmpty()) {
+            return "the profile of " + player.getName() + " is not loaded";
+        }
+        awaitWrites(FLUSH_TIMEOUT_SECONDS);
+        try {
+            if (database.call(connection -> repository.find(connection, id)).isEmpty()) {
+                return "the profile of " + player.getName() + " was not saved";
+            }
+        } catch (SQLException e) {
+            return "the profile of " + player.getName() + " could not be read back: " + e.getMessage();
+        }
+        return null;
     }
 
     /** The profile of an online player. Safe from any thread, never blocks. */

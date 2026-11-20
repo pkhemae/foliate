@@ -1,6 +1,7 @@
 package dev.foliate.selftest;
 
 import dev.foliate.core.module.ModuleManager;
+import dev.foliate.core.module.PlayerCheck;
 import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.core.scheduler.TaskHandle;
@@ -20,6 +21,11 @@ import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Marker;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.InventoryType;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.Plugin;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -34,17 +40,27 @@ import org.slf4j.Logger;
  *
  * <p>Unit tests run everything on one thread, so they cannot catch what breaks on Folia: work on
  * the wrong region, a timer that survives its cancellation, a scheduler call that only fails on a
- * real server, a command that was never registered. This checks exactly those, once, against the real thing. It does not connect a
- * player: anything that needs one is out of its reach.
+ * real server, a command that was never registered. This checks exactly those, once, against the real thing.
+ *
+ * <p>With {@code -Dfoliate.selftest.client=true} ({@code -PclientTest=true}) it then waits for a
+ * real client to join, which the CI job starts, and checks what only a connected player shows: the
+ * modules' own checks ({@link PlayerCheck}), the example menu opening, and the client still being
+ * connected a few seconds later.
  */
 public final class SelfTest {
 
     public static final String PASSED = "FOLIATE SELF-TEST PASSED";
     public static final String FAILED = "FOLIATE SELF-TEST FAILED";
+    /** Logged when the checks that need no player are done: the CI job then starts its client. */
+    public static final String WAITING = "FOLIATE SELF-TEST WAITING FOR A PLAYER";
 
     private static final String PROPERTY = "foliate.selftest";
     private static final String EXPECTED_MODULES_PROPERTY = "foliate.selftest.expect";
+    private static final String CLIENT_PROPERTY = "foliate.selftest.client";
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
+    /** Starting a client takes much longer than starting the server. */
+    private static final Duration CLIENT_TIMEOUT = Duration.ofMinutes(6);
+    private static final Duration SETTLE = Duration.ofSeconds(3);
     private static final long CLEANUP_TIMEOUT_SECONDS = 5;
 
     private final Plugin plugin;
@@ -54,6 +70,8 @@ public final class SelfTest {
     private final Database database;
     private final Logger logger;
     private final AtomicBoolean finished = new AtomicBoolean();
+    private final CompletableFuture<Player> firstPlayer = new CompletableFuture<>();
+    private final boolean withClient = Boolean.getBoolean(CLIENT_PROPERTY);
     private volatile @Nullable Entity marker;
     private volatile @Nullable Runnable releaseChunk;
 
@@ -81,7 +99,16 @@ public final class SelfTest {
 
     /** Call from {@code onEnable}. The checks begin once the server has started ticking. */
     public void start() {
-        schedulers.async().runLater(TIMEOUT, () -> finish("timed out after " + TIMEOUT.toSeconds() + " seconds"));
+        Duration timeout = withClient ? CLIENT_TIMEOUT : TIMEOUT;
+        schedulers.async().runLater(timeout, () -> finish("timed out after " + timeout.toSeconds() + " seconds"));
+        if (withClient) {
+            plugin.getServer().getPluginManager().registerEvents(new Listener() {
+                @EventHandler
+                public void onJoin(PlayerJoinEvent event) {
+                    firstPlayer.complete(event.getPlayer());
+                }
+            }, plugin);
+        }
         schedulers.global().runLater(Ticks.duration(20), () -> run().whenComplete((ignored, error) -> {
             Throwable cause = error != null && error.getCause() != null ? error.getCause() : error;
             finish(cause == null ? null : String.valueOf(cause));
@@ -116,7 +143,45 @@ public final class SelfTest {
                 .thenCompose(ignored -> schedulers.global().run(this::commandsAreRegistered))
                 .thenCompose(ignored -> databaseAnswers())
                 .thenCompose(ignored -> schedulers.async().run(this::everyModuleReloads))
-                .thenRun(this::expectedModulesAreEnabled);
+                .thenRun(this::expectedModulesAreEnabled)
+                .thenCompose(ignored -> withClient ? connectedPlayerIsServed() : CompletableFuture.completedFuture(null));
+    }
+
+    /** Waits for a client to join, then checks what each part of the plugin did for it. */
+    private CompletableFuture<Void> connectedPlayerIsServed() {
+        logger.info(WAITING);
+        return firstPlayer.thenCompose(player -> after(SETTLE)
+                .thenCompose(ignored -> schedulers.async().run(() -> modulesHaveServed(player)))
+                .thenCompose(ignored -> menuOpens(player))
+                .thenCompose(ignored -> after(SETTLE))
+                .thenCompose(ignored ->
+                        schedulers.entity(player).run(() -> check(player.isOnline(), "the client was disconnected"))));
+    }
+
+    private void modulesHaveServed(Player player) {
+        for (PlayerCheck check : modules.enabledOf(PlayerCheck.class)) {
+            String problem = check.problemWith(player);
+            check(problem == null, String.valueOf(problem));
+        }
+    }
+
+    /** Runs the menu command as the player and sees whether the menu opens on their screen. */
+    private CompletableFuture<Void> menuOpens(Player player) {
+        if (!modules.enabledNames().contains("zmenu")) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return schedulers.entity(player)
+                .run(() -> check(server.dispatchCommand(player, "foliate menu"), "'foliate menu' did not run as the player"))
+                .thenCompose(ignored -> after(SETTLE))
+                .thenCompose(ignored -> schedulers.entity(player).run(() -> check(
+                        player.getOpenInventory().getTopInventory().getType() != InventoryType.CRAFTING,
+                        "the menu did not open on the player's screen")));
+    }
+
+    private CompletableFuture<Void> after(Duration delay) {
+        CompletableFuture<Void> done = new CompletableFuture<>();
+        schedulers.async().runLater(delay, () -> done.complete(null));
+        return done;
     }
 
     private CompletableFuture<Void> entityTimerStopsWhenCancelled(Entity marker) {

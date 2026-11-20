@@ -103,6 +103,11 @@ public final class ModuleManager {
         return enabledNames;
     }
 
+    /** The enabled modules that are of a given type, for instance a capability they implement. */
+    public synchronized <T> List<T> enabledOf(Class<T> type) {
+        return enabled.stream().filter(type::isInstance).map(type::cast).toList();
+    }
+
     private void disable(Module module) {
         try {
             module.disable();

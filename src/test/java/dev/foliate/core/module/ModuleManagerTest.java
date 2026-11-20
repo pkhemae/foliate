@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.bukkit.entity.Player;
 import org.junit.jupiter.api.Test;
 import org.slf4j.helpers.NOPLogger;
 
@@ -25,6 +26,28 @@ class ModuleManagerTest {
         manager.disableAll();
 
         assertEquals(List.of("enable a", "enable b", "disable b", "disable a"), events);
+    }
+
+    @Test
+    void enabledModulesCanBeAskedForACapability() {
+        PlayerCheck check = player -> null;
+        class Checking extends RecordingModule implements PlayerCheck {
+            Checking() {
+                super("checking");
+            }
+
+            @Override
+            public String problemWith(Player player) {
+                return check.problemWith(player);
+            }
+        }
+        manager.register(new RecordingModule("plain"));
+        manager.register(new Checking());
+        manager.register(new RecordingModule("broken").failingOn("enable"));
+        manager.enableAll();
+
+        assertEquals(1, manager.enabledOf(PlayerCheck.class).size());
+        assertEquals(2, manager.enabledOf(Module.class).size());
     }
 
     @Test
@@ -132,7 +155,7 @@ class ModuleManagerTest {
     }
 
     /** Records every lifecycle call, and can be told to throw from one of them. */
-    private final class RecordingModule implements Module {
+    private class RecordingModule implements Module {
 
         private final String name;
         private String failing = "";

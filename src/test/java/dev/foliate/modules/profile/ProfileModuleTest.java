@@ -261,6 +261,21 @@ class ProfileModuleTest {
     }
 
     @Test
+    void checkPassesForAPlayerWhoseProfileWasSaved() {
+        PlayerMock player = server.addPlayer("Alex");
+
+        assertEquals(null, profiles.problemWith(player));
+    }
+
+    @Test
+    void checkReportsAProfileThatIsNotLoaded() {
+        PlayerMock player = server.addPlayer("Alex");
+        profiles.quit(player.getUniqueId());
+
+        assertEquals("the profile of Alex is not loaded", profiles.problemWith(player));
+    }
+
+    @Test
     void joinsPlaceholderReadsTheCachedProfile() {
         PlayerMock player = server.addPlayer("Alex");
 

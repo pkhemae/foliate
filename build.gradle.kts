@@ -40,6 +40,12 @@ val acceptEula: Boolean = providers.gradleProperty("acceptEula").map(String::toB
 // test.
 val selfTest: Boolean = providers.gradleProperty("selfTest").map(String::toBoolean).getOrElse(false)
 
+// -PclientTest=true (with -PselfTest=true) makes the self-test wait for a real client to join and
+// check what the plugin did for it, before stopping the server. The server then runs in offline
+// mode so that a client without a Minecraft account can join: never for anything but CI. The CI
+// job starts the client once the log says the self-test is waiting.
+val clientTest: Boolean = providers.gradleProperty("clientTest").map(String::toBoolean).getOrElse(false)
+
 // The modules the self-test must find enabled. Without this, a hook that silently failed to load
 // (its plugin could not download its libraries, say) would still give a green run.
 val expectedModules: String =
@@ -165,6 +171,16 @@ tasks.withType<RunServer>().configureEach {
     }
     if (selfTest) {
         jvmArgs("-Dfoliate.selftest=true", "-Dfoliate.selftest.expect=$expectedModules")
+        if (clientTest) {
+            jvmArgs("-Dfoliate.selftest.client=true")
+            doFirst {
+                // The server completes the other settings on its first start.
+                runDirectory.file("server.properties").get().asFile.apply {
+                    parentFile.mkdirs()
+                    writeText("online-mode=false\nenforce-secure-profile=false\n")
+                }
+            }
+        }
         val log = runDirectory.file("logs/latest.log")
         doFirst {
             log.get().asFile.delete()
