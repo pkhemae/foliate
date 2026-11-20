@@ -1,14 +1,14 @@
-package dev.foliate.core.module;
+package dev.foliate.selftest;
 
 import java.util.UUID;
 import org.bukkit.entity.Player;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Implemented by a module that can tell whether it did its part for a connected player. The
- * self-test asks every enabled module that implements this once a real client has joined, and
- * again once it has left, which is how a server with a player is checked without the self-test
- * knowing what any module does.
+ * Tells whether a module did its part for a connected player. The self-test asks every check once
+ * a real client has joined, and again once it has left. {@link SelfTestPlugin} gives each enabled
+ * module its check; a check lives in the module's package, in this source set, so that it can
+ * read what the module keeps private to its package without the module publishing it.
  *
  * <p>Both methods are called off the tick threads, so they may block, and they must not touch the
  * world or anything of the player that is not safe to read from another thread (the name and the

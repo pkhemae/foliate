@@ -19,7 +19,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import net.kyori.adventure.text.Component;
-import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
@@ -28,7 +27,6 @@ import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
-import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
@@ -95,7 +93,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     private final Map<UUID, CompletableFuture<?>> queues = new ConcurrentHashMap<>();
 
     /**
-     * @param subject what the values are, in singular, for the logs and the checks ("profile")
+     * @param subject what the values are, in singular, for the logs ("profile")
      * @param loadFailed what a player is told when their data could not be loaded and they are
      *     refused: letting them in without it would mean guessing it
      */
@@ -188,10 +186,15 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
 
     /**
      * What is stored in the database for a player, whatever is cached. Blocks on the calling
-     * thread: for tests and for checks, after {@link #awaitWrites}, never on a tick thread.
+     * thread: for the tests and the self-test, after {@link #awaitWrites}, never on a tick thread.
      */
-    public Optional<T> stored(UUID id) throws SQLException {
+    Optional<T> stored(UUID id) throws SQLException {
         return database.call(connection -> repository.find(connection, id));
+    }
+
+    /** What the values are, in singular ("profile"), for the self-test's messages. */
+    String subject() {
+        return subject;
     }
 
     /**
@@ -217,36 +220,6 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             Thread.currentThread().interrupt();
             return false;
         }
-    }
-
-    /**
-     * For a check of what the store did for a connected player (see {@code PlayerCheck}): is the
-     * value loaded, and has it reached the database?
-     *
-     * @return what is wrong, naming the player, or null
-     */
-    public @Nullable String problemWith(Player player) {
-        UUID id = player.getUniqueId();
-        if (find(id).isEmpty()) {
-            return "the " + subject + " of " + player.getName() + " is not loaded";
-        }
-        if (!awaitWrites(FLUSH_TIMEOUT_SECONDS)) {
-            return "the " + subject + " of " + player.getName() + " was still being saved after "
-                    + FLUSH_TIMEOUT_SECONDS + " seconds";
-        }
-        try {
-            if (stored(id).isEmpty()) {
-                return "the " + subject + " of " + player.getName() + " was not saved";
-            }
-        } catch (SQLException e) {
-            return "the " + subject + " of " + player.getName() + " could not be read back: " + e.getMessage();
-        }
-        return null;
-    }
-
-    /** For a check after the player left: nothing of them stays in memory. */
-    public @Nullable String problemAfterQuit(UUID id, String name) {
-        return find(id).isPresent() ? "the " + subject + " of " + name + " stayed in memory after the player left" : null;
     }
 
     /**

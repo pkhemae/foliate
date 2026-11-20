@@ -2,7 +2,6 @@ package dev.foliate.modules.scoreboard;
 
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
-import dev.foliate.core.module.PlayerCheck;
 import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.core.scheduler.TaskHandle;
@@ -23,7 +22,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
-import org.jspecify.annotations.Nullable;
 
 /**
  * Shows each player a scoreboard whose title and lines come from {@code config.yml}.
@@ -32,7 +30,7 @@ import org.jspecify.annotations.Nullable;
  * scheduler. Join and quit events already run there; reloads and enabling hop to it. The map of
  * boards is the only state shared between threads.
  */
-public final class ScoreboardModule implements Module, PlayerCheck, Listener {
+public final class ScoreboardModule implements Module, Listener {
 
     private final Plugin plugin;
     private final Schedulers schedulers;
@@ -87,17 +85,14 @@ public final class ScoreboardModule implements Module, PlayerCheck, Listener {
         entries.clear();
     }
 
-    @Override
-    public @Nullable String problemWith(Player player, int visit) {
-        if (!settings.get().enabled() || entries.containsKey(player.getUniqueId())) {
-            return null;
-        }
-        return "no scoreboard was created for " + player.getName();
+    /** Whether the configuration asks for boards at all. For the self-test, which lives in this package. */
+    boolean showsBoards() {
+        return settings.get().enabled();
     }
 
-    @Override
-    public @Nullable String problemAfterQuit(UUID id, String name) {
-        return entries.containsKey(id) ? "the scoreboard of " + name + " was kept after the player left" : null;
+    /** Whether a player has a board right now. For the self-test, which lives in this package. */
+    boolean hasBoard(UUID id) {
+        return entries.containsKey(id);
     }
 
     @EventHandler

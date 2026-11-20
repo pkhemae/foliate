@@ -123,7 +123,7 @@ tasks.register("renameTemplate") {
                 Files.move(file.toPath(), file.resolveSibling(file.name.replace(templateName, name)).toPath())
                 moved++
             }
-        for (sources in listOf("src/main/java", "src/test/java")) {
+        for (sources in listOf("src/main/java", "src/selftest/java", "src/test/java")) {
             val from = File(root, "$sources/${templateGroup.replace('.', '/')}")
             val to = File(root, "$sources/${basePackage.replace('.', '/')}")
             if (from.isDirectory && from != to) {

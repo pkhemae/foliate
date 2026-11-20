@@ -405,17 +405,17 @@ class PlayerStoreTest {
     @Test
     void checksSayWhatIsWrongForAConnectedPlayer() throws Exception {
         PlayerMock player = server.addPlayer("Alex");
-        assertEquals(null, store.problemWith(player));
+        assertEquals(null, PlayerStoreChecks.problemWith(store, player));
 
         flush();
         database.call(connection -> {
             connection.createStatement().executeUpdate("DELETE FROM test_visits");
             return null;
         });
-        assertEquals("the visit of Alex was not saved", store.problemWith(player));
+        assertEquals("the visit of Alex was not saved", PlayerStoreChecks.problemWith(store, player));
 
         store.quit(player.getUniqueId());
-        assertEquals("the visit of Alex is not loaded", store.problemWith(player));
+        assertEquals("the visit of Alex is not loaded", PlayerStoreChecks.problemWith(store, player));
     }
 
     @Test
@@ -424,9 +424,9 @@ class PlayerStoreTest {
 
         assertEquals(
                 "the visit of Alex stayed in memory after the player left",
-                store.problemAfterQuit(player.getUniqueId(), "Alex"));
+                PlayerStoreChecks.problemAfterQuit(store, player.getUniqueId(), "Alex"));
         store.quit(player.getUniqueId());
-        assertEquals(null, store.problemAfterQuit(player.getUniqueId(), "Alex"));
+        assertEquals(null, PlayerStoreChecks.problemAfterQuit(store, player.getUniqueId(), "Alex"));
     }
 
     @Test

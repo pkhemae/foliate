@@ -1,7 +1,6 @@
 package dev.foliate.core.message;
 
 import dev.foliate.core.module.Module;
-import dev.foliate.core.module.PlayerCheck;
 import dev.foliate.core.yaml.Yaml;
 import dev.foliate.core.yaml.YamlException;
 import java.io.IOException;
@@ -27,10 +26,8 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
-import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import net.kyori.adventure.title.Title;
 import net.kyori.adventure.translation.Translator;
-import org.bukkit.entity.Player;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -53,14 +50,12 @@ import org.slf4j.Logger;
  * <p>Thread-safe. A reload swaps in a complete new set of messages, or keeps the old one when a
  * file is invalid.
  */
-public final class MessageService implements Module, PlayerCheck {
+public final class MessageService implements Module {
 
     /** Locales shipped in the jar under {@code lang/}. English must stay: it is the last resort. */
     private static final List<String> BUNDLED_LOCALES = List.of("en", "fr");
 
     private static final String PREFIX_KEY = "prefix";
-    /** A message every language file writes in its own words. */
-    private static final String LANGUAGE_CHECK_KEY = "command.reload.success";
     private static final String EXTENSION = ".yml";
 
     /** {@code en}, {@code pt_BR}, {@code fr-CA}: what a language file may be called. */
@@ -158,34 +153,22 @@ public final class MessageService implements Module, PlayerCheck {
     }
 
     /**
-     * A player is spoken to in the language their client reports. When that language has its own
-     * text for a message and it differs from the default language's, the text rendered for the
-     * player must be the one of their language: getting the default language's text means the
-     * language could not be read from the player.
+     * The lines a language has of its own for a message, from its file or, for a locale with a
+     * country, from the file of its language; null when it has none. Never those of the default
+     * language: this tells a language apart from the fallback. For the self-test, which lives in
+     * this package.
      */
-    @Override
-    public @Nullable String problemWith(Player player, int visit) {
-        Catalog current = catalog;
-        Locale locale = player.locale();
-        List<String> own = ownText(current, locale);
-        List<String> inDefault = current.languages().get(current.defaultLocale()).get(LANGUAGE_CHECK_KEY);
-        if (own == null || own.equals(inDefault)) {
-            return null; // nothing that would tell the two languages apart
+    @Nullable List<String> ownLines(Locale locale, String key) {
+        Map<String, List<String>> file = catalog.languages().get(locale);
+        if (file == null && !locale.getCountry().isEmpty()) {
+            file = catalog.languages().get(Locale.of(locale.getLanguage()));
         }
-        PlainTextComponentSerializer plain = PlainTextComponentSerializer.plainText();
-        String forPlayer = plain.serialize(render(player, LANGUAGE_CHECK_KEY));
-        String defaultText = plain.serialize(render(current.defaultLocale(), LANGUAGE_CHECK_KEY));
-        return forPlayer.equals(defaultText)
-                ? player.getName() + " is not spoken to in " + locale + ": got the default language's \"" + forPlayer + "\""
-                : null;
+        return file == null ? null : file.get(key);
     }
 
-    private static @Nullable List<String> ownText(Catalog current, Locale locale) {
-        Map<String, List<String>> file = current.languages().get(locale);
-        if (file == null && !locale.getCountry().isEmpty()) {
-            file = current.languages().get(Locale.of(locale.getLanguage()));
-        }
-        return file == null ? null : file.get(LANGUAGE_CHECK_KEY);
+    /** The language of the players whose own is not available. */
+    Locale defaultLocale() {
+        return catalog.defaultLocale();
     }
 
     /** Renders a message for a viewer, in the viewer's language. A list is joined with newlines. */

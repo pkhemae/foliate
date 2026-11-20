@@ -15,12 +15,16 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * The layout of the code is a rule, not a habit: {@code core} knows nothing of the plugin, and the
- * modules, hooks and commands depend on {@code core} only, never on each other. Only
+ * The layout of the code is a rule, not a habit: {@code core} knows nothing of the plugin;
+ * {@code contracts} holds what features offer each other, and depends on {@code core} and itself;
+ * the modules, hooks and commands depend on {@code core} and {@code contracts}, never on each other.
+ * Only
  * {@code FoliatePlugin} and {@code PluginConfig}, which compose everything, may know it all.
  *
  * <p>It reads every mention of the plugin's packages in the source files (imports, wildcard or
  * static, and qualified names), so a violation is reported with the file before it can spread.
+ * The self-test's source set is left out of that rule: it tests everything, and the plugin cannot
+ * depend on it, since it is not on the plugin's classpath.
  */
 class ArchitectureTest {
 
@@ -28,6 +32,7 @@ class ArchitectureTest {
     private static final String BASE = ArchitectureTest.class.getPackageName();
 
     private static final Path MAIN = Path.of("src/main/java", BASE.split("\\."));
+    private static final Path SELFTEST = Path.of("src/selftest/java", BASE.split("\\."));
     /** Any mention of a plugin class or package: an import (wildcard or static) or a qualified name. */
     private static final Pattern REFERENCE = Pattern.compile("\\b" + Pattern.quote(BASE) + "\\.([\\w.]*[\\w*])");
 
@@ -35,7 +40,7 @@ class ArchitectureTest {
     private static final Set<String> GROUPS = Set.of("modules", "hooks");
 
     @Test
-    void everyPartDependsOnCoreAndItselfOnly() throws IOException {
+    void everyPartDependsOnlyOnWhatTheLayoutAllows() throws IOException {
         List<String> violations = new ArrayList<>();
         try (Stream<Path> files = Files.walk(MAIN)) {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
@@ -51,23 +56,42 @@ class ArchitectureTest {
         assertEquals(List.of(), violations, "These imports break the layout, see the Architecture page of the wiki");
     }
 
+    /**
+     * In the self-test's source set, a package the plugin also has is covered by the plugin's
+     * package-info: a second one would be a second {@code package-info.class} in the same jar.
+     */
     @Test
     void everyPackageHasANullMarkedPackageInfo() throws IOException {
         List<String> missing = new ArrayList<>();
-        try (Stream<Path> files = Files.walk(MAIN)) {
-            List<Path> folders = files.filter(Files::isDirectory).toList();
-            for (Path folder : folders) {
-                try (Stream<Path> inside = Files.list(folder)) {
-                    boolean holdsClasses = inside.anyMatch(path -> path.toString().endsWith(".java")
-                            && !path.getFileName().toString().equals("package-info.java"));
-                    Path info = folder.resolve("package-info.java");
-                    if (holdsClasses && (!Files.exists(info) || !Files.readString(info).contains("@NullMarked"))) {
-                        missing.add(MAIN.getParent().relativize(folder).toString());
+        for (Path root : List.of(MAIN, SELFTEST)) {
+            try (Stream<Path> files = Files.walk(root)) {
+                for (Path folder : files.filter(Files::isDirectory).toList()) {
+                    try (Stream<Path> inside = Files.list(folder)) {
+                        boolean holdsClasses = inside.anyMatch(path -> path.toString().endsWith(".java")
+                                && !path.getFileName().toString().equals("package-info.java"));
+                        Path info = folder.resolve("package-info.java");
+                        if (root == SELFTEST && !Files.exists(info)) {
+                            info = MAIN.resolve(SELFTEST.relativize(folder)).resolve("package-info.java");
+                        }
+                        if (holdsClasses && (!Files.exists(info) || !Files.readString(info).contains("@NullMarked"))) {
+                            missing.add(root.getParent().relativize(folder).toString());
+                        }
                     }
                 }
             }
         }
         assertEquals(List.of(), missing, "These packages need a package-info.java annotated with @NullMarked");
+    }
+
+    @Test
+    void theSelfTestAddsNoPackageInfoToAPackageOfThePlugin() throws IOException {
+        try (Stream<Path> files = Files.walk(SELFTEST)) {
+            List<String> doubled = files.filter(path -> path.getFileName().toString().equals("package-info.java"))
+                    .filter(path -> Files.exists(MAIN.resolve(SELFTEST.relativize(path))))
+                    .map(path -> SELFTEST.relativize(path).toString())
+                    .toList();
+            assertEquals(List.of(), doubled, "The plugin already has these package-info files");
+        }
     }
 
     @Test
@@ -97,6 +121,20 @@ class ArchitectureTest {
     }
 
     @Test
+    void theContractsBetweenFeaturesAreOpenToAllButCore() {
+        String source = """
+                import dev.foliate.contracts.profile.ProfileLookup;
+                import dev.foliate.core.message.MessageService;
+                import dev.foliate.modules.profile.ProfileModule;
+                """;
+
+        assertEquals(List.of("modules.profile.ProfileModule"), foreignReferences("commands", source));
+        assertEquals(List.of("modules.profile.ProfileModule"), foreignReferences("contracts", source));
+        assertEquals(
+                List.of("contracts.profile.ProfileLookup", "modules.profile.ProfileModule"), foreignReferences("core", source));
+    }
+
+    @Test
     void theRuleSeesTheCodeItGuards() throws IOException {
         // A guard that scans nothing would pass forever.
         try (Stream<Path> files = Files.walk(MAIN.resolve("core"))) {
@@ -104,13 +142,17 @@ class ArchitectureTest {
         }
     }
 
-    /** What a source file of {@code unit} mentions of the plugin outside {@code core} and itself. */
+    /** What a source file of {@code unit} mentions of the plugin that it may not depend on. */
     private static List<String> foreignReferences(String unit, String source) {
         List<String> foreign = new ArrayList<>();
         Matcher references = REFERENCE.matcher(source);
         while (references.find()) {
             String target = unitOfImport(references.group(1));
-            if (!target.equals(unit) && !target.equals("core")) {
+            boolean allowed = target.equals(unit)
+                    || target.equals("core")
+                    // Everything but core may use the contracts between features.
+                    || (target.equals("contracts") && !unit.equals("core"));
+            if (!allowed) {
                 foreign.add(references.group(1));
             }
         }

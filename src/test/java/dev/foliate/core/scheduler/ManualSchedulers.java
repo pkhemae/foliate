@@ -24,7 +24,9 @@ import org.bukkit.entity.Player;
  * removed.
  *
  * <p>There are no regions here: every context runs on the same thread, so this proves nothing
- * about thread safety. {@link #contextsUsed()} tells which context work was given to.
+ * about thread safety. {@link #contextsUsed()} tells which context work was given to. A test may
+ * still have work scheduled from another thread, such as a reload that blocks while the test
+ * ticks: scheduling, ticking and the counters are synchronised for that.
  */
 public final class ManualSchedulers implements Schedulers {
 
@@ -46,7 +48,7 @@ public final class ManualSchedulers implements Schedulers {
     }
 
     /** Advances time by the given number of ticks, running the tasks that come due. */
-    public void tick(int ticks) {
+    public synchronized void tick(int ticks) {
         for (int i = 0; i < ticks; i++) {
             now++;
             // Copy: a task may schedule or cancel others while it runs.
@@ -63,12 +65,12 @@ public final class ManualSchedulers implements Schedulers {
      * The kind of context each piece of work was given to, in order: {@code async}, {@code global},
      * {@code region} or {@code entity}. The only way a test can tell the right one was chosen.
      */
-    public List<String> contextsUsed() {
+    public synchronized List<String> contextsUsed() {
         return List.copyOf(used);
     }
 
     /** Number of tasks still scheduled, repeating ones included. */
-    public int pendingTasks() {
+    public synchronized int pendingTasks() {
         return (int) tasks.stream().filter(Task::isLive).count();
     }
 
@@ -163,6 +165,12 @@ public final class ManualSchedulers implements Schedulers {
         }
 
         private Task schedule(Runnable runnable, Runnable whenRetired, long delay, long period) {
+            synchronized (ManualSchedulers.this) {
+                return add(runnable, whenRetired, delay, period);
+            }
+        }
+
+        private Task add(Runnable runnable, Runnable whenRetired, long delay, long period) {
             used.add(kind);
             Task task = new Task(runnable, whenRetired, retired, now + delay, period);
             if (retired.getAsBoolean()) {

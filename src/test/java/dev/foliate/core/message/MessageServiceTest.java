@@ -323,7 +323,7 @@ class MessageServiceTest {
 
             assertEquals(
                     "Alex is not spoken to in fr: got the default language's \"Not now\"",
-                    messages.problemWith(player, 1));
+                    new MessageCheck(messages).problemWith(player, 1));
         } finally {
             MockBukkit.unmock();
         }
@@ -335,7 +335,7 @@ class MessageServiceTest {
         try {
             player.setLocale(Locale.ENGLISH);
 
-            assertEquals(null, messages.problemWith(player, 1));
+            assertEquals(null, new MessageCheck(messages).problemWith(player, 1));
         } finally {
             MockBukkit.unmock();
         }

@@ -1,35 +1,32 @@
 package dev.foliate.modules.profile;
 
+import dev.foliate.contracts.profile.ProfileLookup;
+import dev.foliate.contracts.profile.ProfileSummary;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
-import dev.foliate.core.module.PlayerCheck;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
 import dev.foliate.core.player.PlayerLifecycle;
 import dev.foliate.core.player.PlayerStore;
-import dev.foliate.core.profile.ProfileLookup;
-import dev.foliate.core.profile.ProfileSummary;
 import dev.foliate.core.storage.Database;
-import java.sql.SQLException;
 import java.time.Clock;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
-import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
-import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
  * Keeps a {@link PlayerProfile} for every online player: what the plugin remembers about them
  * between sessions. It is the first use of {@link PlayerStore}, which does the loading, the cache,
  * the ordered saves and the flush on shutdown; what is left here is what belongs to the profile
- * (its fields, its SQL, its placeholder, its checks). To keep another kind of data per player,
+ * (its fields, its SQL, its placeholder; its self-test check is ProfileCheck, in the selftest
+ * source set). To keep another kind of data per player,
  * give a store its own repository and lifecycle, as this module does.
  */
-public final class ProfileModule implements Module, PlayerCheck, ProfileLookup {
+public final class ProfileModule implements Module, ProfileLookup {
 
     /**
      * The SQL scripts of this module, in the order they apply: to give to the {@code Database}. To
@@ -106,33 +103,15 @@ public final class ProfileModule implements Module, PlayerCheck, ProfileLookup {
         return store.awaitWrites(timeoutSeconds);
     }
 
+    /** The store behind the profiles, for the self-test, which lives in this package. */
+    PlayerStore<PlayerProfile> store() {
+        return store;
+    }
+
     @Override
     public Optional<ProfileSummary> lookup(UUID id) {
         return find(id).map(profile ->
                 new ProfileSummary(profile.name(), profile.firstSeen(), profile.lastSeen(), profile.joins()));
-    }
-
-    @Override
-    public @Nullable String problemWith(Player player, int visit) {
-        String problem = store.problemWith(player);
-        if (problem != null) {
-            return problem;
-        }
-        try {
-            // The profile is kept between sessions: a player who came back has been counted again.
-            int joins = store.stored(player.getUniqueId()).map(PlayerProfile::joins).orElse(0);
-            if (joins < visit) {
-                return "the profile of " + player.getName() + " counts " + joins + " joins after visit " + visit;
-            }
-        } catch (SQLException e) {
-            return "the profile of " + player.getName() + " could not be read back: " + e.getMessage();
-        }
-        return null;
-    }
-
-    @Override
-    public @Nullable String problemAfterQuit(UUID id, String name) {
-        return store.problemAfterQuit(id, name);
     }
 
     /** What happens to a profile when its player joins and leaves. */

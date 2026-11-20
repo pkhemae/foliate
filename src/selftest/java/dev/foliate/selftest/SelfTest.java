@@ -1,11 +1,12 @@
 package dev.foliate.selftest;
 
+import dev.foliate.contracts.menu.Menus;
 import dev.foliate.core.module.ModuleManager;
-import dev.foliate.core.module.PlayerCheck;
 import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.core.scheduler.TaskHandle;
 import dev.foliate.core.storage.Database;
+import dev.foliate.modules.profile.ProfileModule;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -36,11 +37,11 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
- * Exercises the plugin on a real server, then stops the server. Started only when the JVM runs
- * with {@code -Dfoliate.selftest=true}, which {@code ./gradlew runFolia -PselfTest=true} does; the
+ * Exercises the plugin on a real server, then stops the server. {@link SelfTestPlugin} starts it,
+ * in the jar that {@code ./gradlew runFolia -PselfTest=true} installs instead of the plugin's; the
  * build then fails unless the log contains {@link #PASSED}.
  *
- * <p>Never set that property on a production server: the self-test loads the spawn chunk, reloads
+ * <p>Never install that jar on a production server: the self-test loads the spawn chunk, reloads
  * every module and stops the server.
  *
  * <p>Unit tests run everything on one thread, so they cannot catch what breaks on Folia: work on
@@ -49,7 +50,7 @@ import org.slf4j.Logger;
  *
  * <p>With {@code -Dfoliate.selftest.client=true} ({@code -PclientTest=true}) it then waits for a
  * real client to join, which the CI job starts, and checks what only a connected player shows: the
- * modules' own checks ({@link PlayerCheck}), the example menu opening (it knows that one command),
+ * modules' checks ({@link PlayerCheck}), the example menu opening (it knows that one command),
  * and the client still being connected a few seconds later. It then kicks the client and checks
  * that no module kept anything of the player.
  */
@@ -60,7 +61,6 @@ public final class SelfTest {
     /** Logged when the checks that need no player are done: the CI job then starts its client. */
     public static final String WAITING = "FOLIATE SELF-TEST WAITING FOR A PLAYER";
 
-    private static final String PROPERTY = "foliate.selftest";
     private static final String EXPECTED_MODULES_PROPERTY = "foliate.selftest.expect";
     private static final String CLIENT_PROPERTY = "foliate.selftest.client";
     private static final String LANGUAGES_PROPERTY = "foliate.selftest.client.languages";
@@ -78,6 +78,7 @@ public final class SelfTest {
     private final Schedulers schedulers;
     private final ModuleManager modules;
     private final Database database;
+    private final List<PlayerCheck> checks;
     private final Logger logger;
     private final AtomicBoolean finished = new AtomicBoolean();
     /** The join the self-test is waiting for: replaced once a visit is over. */
@@ -98,30 +99,27 @@ public final class SelfTest {
     private volatile @Nullable Entity marker;
     private volatile @Nullable Runnable releaseChunk;
 
-    public SelfTest(Plugin plugin, Schedulers schedulers, ModuleManager modules, Database database) {
+    SelfTest(Plugin plugin, Schedulers schedulers, ModuleManager modules, Database database, List<PlayerCheck> checks) {
         this.plugin = plugin;
         this.server = plugin.getServer();
         this.schedulers = schedulers;
         this.modules = modules;
         this.database = database;
+        this.checks = checks;
         this.logger = plugin.getSLF4JLogger();
-    }
-
-    public static boolean requested() {
-        return Boolean.getBoolean(PROPERTY);
     }
 
     /**
      * Reports a failure that happened before the self-test could start, and stops the server so
      * the smoke test does not wait for a verdict that would never come.
      */
-    public static void abort(Plugin plugin, String failure) {
+    static void abort(Plugin plugin, String failure) {
         plugin.getSLF4JLogger().error("{}: {}", FAILED, failure);
         plugin.getServer().shutdown();
     }
 
     /** Call from {@code onEnable}. The checks begin once the server has started ticking. */
-    public void start() {
+    void start() {
         Duration timeout = withClient ? CLIENT_TIMEOUT : TIMEOUT;
         schedulers.async().runLater(timeout, () -> finish("timed out after " + timeout.toSeconds() + " seconds"));
         if (withClient) {
@@ -217,7 +215,6 @@ public final class SelfTest {
         if (!language.isEmpty() && !player.locale().getLanguage().equals(language)) {
             return player.getName() + " reports the language " + player.locale() + " instead of " + language;
         }
-        List<PlayerCheck> checks = modules.enabledOf(PlayerCheck.class);
         if (checks.isEmpty()) {
             return "no module has a check for a connected player";
         }
@@ -255,7 +252,7 @@ public final class SelfTest {
                     if (server.getPlayer(id) != null) {
                         return name + " is still listed as online";
                     }
-                    for (PlayerCheck check : modules.enabledOf(PlayerCheck.class)) {
+                    for (PlayerCheck check : checks) {
                         String problem = check.problemAfterQuit(id, name);
                         if (problem != null) {
                             return problem;
@@ -271,7 +268,7 @@ public final class SelfTest {
      * catches a command that fails to run, which the log check turns into a failure.
      */
     private CompletableFuture<Void> profileCommandRuns(Player player) {
-        if (!modules.enabledNames().contains("profiles")) {
+        if (!profilesEnabled()) {
             return CompletableFuture.completedFuture(null);
         }
         return schedulers.entity(player)
@@ -289,7 +286,7 @@ public final class SelfTest {
      */
     private CompletableFuture<Void> menuOpens(Player player, int typedBefore) {
         boolean typed = !typedCommand.isEmpty();
-        if (!modules.enabledNames().contains("zmenu")) {
+        if (modules.enabledOf(Menus.class).isEmpty()) {
             return typed
                     ? CompletableFuture.failedFuture(new IllegalStateException("a typed command needs the menu plugin"))
                     : CompletableFuture.completedFuture(null);
@@ -374,12 +371,16 @@ public final class SelfTest {
 
     /** Run from the console, on the global region, like a command typed in the server console. */
     private void commandsAreRegistered() {
-        List<String> registered = modules.enabledNames().contains("profiles")
+        List<String> registered = profilesEnabled()
                 ? List.of("foliate info", "foliate profile")
                 : List.of("foliate info");
         for (String command : registered) {
             check(server.dispatchCommand(server.getConsoleSender(), command), "'" + command + "' is not registered");
         }
+    }
+
+    private boolean profilesEnabled() {
+        return !modules.enabledOf(ProfileModule.class).isEmpty();
     }
 
     private CompletableFuture<Void> databaseAnswers() {
