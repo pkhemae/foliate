@@ -99,8 +99,9 @@ tasks.register("renameTemplate") {
         val files = root.walkTopDown()
             .onEnter { it == root || it.name !in skippedDirectories }
             .filter { it.isFile && (it.extension in textExtensions || it.name in textFileNames) }
-            // Not this script: it is deleted at the end, and must stay intact until then.
-            .filterNot { it.name == "rename.gradle.kts" }
+            // Not this script: it is deleted at the end, and must stay intact until then. Not the
+            // licence either: the template's copyright notice must stay in it (see below).
+            .filterNot { it.name == "rename.gradle.kts" || it.name == "LICENSE" }
             .toList()
         var rewritten = 0
         for (file in files) {
@@ -146,6 +147,31 @@ tasks.register("renameTemplate") {
         )
         File(root, "gradle/rename.gradle.kts").delete()
 
+        // The licence keeps the template's copyright notice, as the MIT licence requires, with the
+        // new plugin's above it.
+        val licence = File(root, "LICENSE")
+        if (licence.exists()) {
+            licence.writeText(
+                licence.readText().replaceFirst(
+                    Regex("(?m)^Copyright \\(c\\)"),
+                    "Copyright (c) ${java.time.Year.now()} $name contributors\n\nCopyright (c)",
+                )
+            )
+        }
+        // The guidance for assistants keeps its rules but not the template's introduction.
+        val assistant = File(root, "CLAUDE.md")
+        if (assistant.exists()) {
+            val rules = assistant.readText().substringAfter("## Development workflow", "")
+            if (rules.isNotEmpty()) {
+                assistant.writeText(
+                    "# $name\n\nA Folia plugin made from the [Foliate template](https://github.com/$templateRepository). " +
+                        "The code is the source of truth; this file only holds what the code cannot tell you. The\n" +
+                        "template's developer guide ($guideUrl) explains how the code is organised.\n\n" +
+                        "## Development workflow" + rules
+                )
+            }
+        }
+
         // The README and the changelog describe the template and its history, not this plugin:
         // leave honest ones to write in.
         File(root, "README.md").writeText(
@@ -160,7 +186,8 @@ tasks.register("renameTemplate") {
             |./gradlew build
             |```
             |
-            |The plugin jar is in `build/libs/`. `./gradlew runFolia` starts a Folia test server with it,
+            |The plugin jar is in `build/libs/` (the one without `-plain` in its name is the one to install).
+            |`./gradlew runFolia` starts a Folia test server with it,
             |and `./gradlew runFolia -PselfTest=true` runs the smoke test.
             |
             |## Developer guide
@@ -191,11 +218,13 @@ tasks.register("renameTemplate") {
         println("Renamed to $name ($basePackage): $rewritten files rewritten, $moved files renamed.")
         println("Next:")
         println("  1. ./gradlew build, then review the diff.")
-        println("  2. git remote set-url origin <your repository>: the clone still points to the template.")
+        println("  2. If you cloned the template: git remote set-url origin <your repository>, or the next push")
+        println("     goes to the template.")
         println("  3. Write your README.md (a skeleton was generated), and set the description in gradle.properties")
         println("     and the authors in build.gradle.kts.")
-        println("  4. LICENSE: the copyright holder is now \"$name contributors\". Replace the logo")
-        println("     assets/logo.svg or delete it, and the links to it.")
+        println("  4. LICENSE: your line was added above the template's copyright notice, which the MIT licence")
+        println("     requires you to keep. The logo assets/logo.svg is the template's: replace it or delete it.")
         println("  5. The developer guide stays in the template's wiki: $guideUrl")
+        println("  6. Commit the result.")
     }
 }

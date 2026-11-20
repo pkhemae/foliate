@@ -1,12 +1,12 @@
 ---
 name: Feature request
-about: Something the template should provide
+about: Something the project should provide
 labels: enhancement
 ---
 
 **The need**
 
-<!-- What a plugin built from the template cannot do today, or does with too much effort. -->
+<!-- What the project cannot do today, or does with too much effort. -->
 
 **What you propose**
 

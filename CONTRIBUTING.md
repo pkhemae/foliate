@@ -30,5 +30,5 @@ Thank you for helping. This page is the short version; the [wiki](https://github
 - Tests for the logic it adds. Code that schedules is tested with `ManualSchedulers`, see [Testing](https://github.com/pkhemae/foliate/wiki/Testing).
 - No `BukkitScheduler`, no blocking call on a tick thread, no entity or block touched outside the region that owns it.
 - Shared state that is safe to read from several threads.
-- An entry under "Unreleased" in `CHANGELOG.md` when the change is visible to users of the template.
+- An entry under "Unreleased" in `CHANGELOG.md` when the change is visible to users.
 - An update to the wiki page it affects, mentioned in the pull request.
