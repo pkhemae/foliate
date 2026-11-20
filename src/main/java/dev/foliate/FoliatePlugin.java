@@ -16,7 +16,6 @@ import dev.foliate.core.scheduler.FoliaSchedulers;
 import dev.foliate.core.storage.Database;
 import dev.foliate.hooks.placeholderapi.PlaceholderApiHook;
 import dev.foliate.hooks.zmenu.ZMenuHook;
-import dev.foliate.modules.metrics.MetricsModule;
 import dev.foliate.modules.profile.ProfileModule;
 import dev.foliate.selftest.SelfTest;
 import dev.foliate.modules.scoreboard.ScoreboardModule;
@@ -37,9 +36,6 @@ import org.jspecify.annotations.Nullable;
  * <p>Not final: MockBukkit subclasses the plugin class to load it in tests.
  */
 public class FoliatePlugin extends JavaPlugin {
-
-    /** The id bStats gave this plugin when it was registered on bstats.org, or 0 while it has none. */
-    private static final int BSTATS_PLUGIN_ID = 0;
 
     private @Nullable FoliaSchedulers schedulers;
     private @Nullable ModuleManager modules;
@@ -74,7 +70,6 @@ public class FoliatePlugin extends JavaPlugin {
         modules.register(config);
         modules.register(messages);
         hook(modules, PlaceholderApiHook.PLUGIN_NAME, () -> new PlaceholderApiHook(getPluginMeta(), placeholders, messages));
-        modules.register(new MetricsModule(this, () -> config.get().metrics(), BSTATS_PLUGIN_ID));
         modules.register(new UpdateCheckModule(
                 () -> config.get().updateCheck(), schedulers, getSLF4JLogger(), getPluginMeta().getVersion(), new GitHubReleases()));
         Database database = new Database(
