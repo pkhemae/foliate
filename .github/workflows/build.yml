@@ -201,15 +201,37 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
+      # The task removes itself when it has run, so a plugin made from the template has nothing to
+      # check here: its copy of this job then does nothing.
+      - name: Is this still the template?
+        id: template
+        run: |
+          if [ -f gradle/rename.gradle.kts ]; then
+            echo "still=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Rename it
+        if: steps.template.outputs.still == 'true'
         run: ./gradlew renameTemplate -PnewName=Skylands -PnewGroup=com.example.skylands -PnewRepository=acme/skylands
 
       - name: Nothing of the template's name is left
+        if: steps.template.outputs.still == 'true'
         run: |
-          if grep -rIil "foliate" . --exclude-dir=.git --exclude-dir=.gradle --exclude-dir=build; then
+          # grep exits 1 when it finds nothing and 2 when it fails: only the first is good news.
+          status=0
+          grep -rIil "foliate" . --exclude-dir=.git --exclude-dir=.gradle --exclude-dir=build || status=$?
+          if [ "$status" -eq 0 ]; then
             echo "These files still mention the template's name"
+            exit 1
+          elif [ "$status" -ne 1 ]; then
+            echo "grep failed with $status"
+            exit 1
+          fi
+          if find . -iname '*foliate*' -not -path './.git/*' -not -path './.gradle/*' -not -path './build/*' | grep .; then
+            echo "These files or folders are still named after the template"
             exit 1
           fi
 
       - name: Build and test the renamed plugin
+        if: steps.template.outputs.still == 'true'
         run: ./gradlew build
