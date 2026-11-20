@@ -93,9 +93,10 @@ public final class ZMenuHook implements Module, Menus {
         }
         // Loading a menu fires a zMenu event, which the server only accepts from a tick thread:
         // do the swap on the global region and wait for it here, off the tick threads. Whoever
-        // claims the swap first decides: the task, which then does it, or a timeout, which then
-        // means it never happens. Checking a flag instead would let a task that read it just
-        // before the timeout swap the menus after the reload was reported as failed.
+        // claims the swap first decides: the task, which then does it, or this thread giving up
+        // (timeout, interruption), which then means it never happens. Checking a flag instead
+        // would let a task that read it just before we gave up swap the menus after the reload
+        // was reported as failed.
         AtomicBoolean claimed = new AtomicBoolean();
         CompletableFuture<Void> swap = schedulers.global().run(() -> {
             if (claimed.compareAndSet(false, true)) {
@@ -109,11 +110,10 @@ public final class ZMenuHook implements Module, Menus {
                 if (claimed.compareAndSet(false, true)) {
                     throw new MenuException("the server was too busy to reload the menus, try again", e);
                 }
-                // The swap started in time and is running: its outcome is the reload's.
-                swap.get(reloadTimeout.toMillis(), TimeUnit.MILLISECONDS);
+                // The swap started in time and is running on a tick thread: its outcome is the
+                // reload's. It ends with its tick, so this cannot hang.
+                swap.get();
             }
-        } catch (TimeoutException e) {
-            throw new MenuException("the menus are still being reloaded: check them again in a moment", e);
         } catch (ExecutionException e) {
             if (e.getCause() instanceof MenuLoadFailure failure) {
                 throw failure.asMenuException();
@@ -121,7 +121,11 @@ public final class ZMenuHook implements Module, Menus {
             throw new IllegalStateException(e.getCause());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new MenuException("interrupted while reloading the menus", e);
+            throw new MenuException(
+                    claimed.compareAndSet(false, true)
+                            ? "interrupted before the menus were reloaded: nothing changed"
+                            : "interrupted while the menus were being reloaded: check them again in a moment",
+                    e);
         }
     }
 

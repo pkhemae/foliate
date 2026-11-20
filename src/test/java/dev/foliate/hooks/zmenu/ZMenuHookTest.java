@@ -164,7 +164,7 @@ class ZMenuHookTest {
         ZMenuHook slow = new ZMenuHook(plugin, schedulers, messages, this::fakeZMenu, Duration.ofSeconds(1));
         slow.enable();
         Inventory before = registered.getFirst();
-        // Longer than one timeout, shorter than two: the reload waits a second time.
+        // Longer than the timeout: the reload gives up waiting while the swap runs.
         loadTime = Duration.ofMillis(1500);
 
         CompletableFuture<Void> reload = CompletableFuture.runAsync(() -> {
@@ -184,6 +184,23 @@ class ZMenuHookTest {
         reload.get(10, TimeUnit.SECONDS);
         assertEquals(1, registered.size());
         assertTrue(registered.getFirst() != before);
+    }
+
+    /** An interrupted reload is a reload given up on: its task must not swap the menus later. */
+    @Test
+    void interruptedReloadNeverSwaps() throws Exception {
+        ManualSchedulers schedulers = new ManualSchedulers();
+        ZMenuHook slow = new ZMenuHook(plugin, schedulers, messages, this::fakeZMenu, Duration.ofSeconds(10));
+        slow.enable();
+        Inventory before = registered.getFirst();
+
+        Thread.currentThread().interrupt();
+        MenuException failure = assertThrows(MenuException.class, slow::reload);
+        assertTrue(Thread.interrupted(), "the interruption is kept for the caller");
+        schedulers.tick(1);
+
+        assertTrue(failure.getMessage().contains("nothing changed"), failure.getMessage());
+        assertEquals(List.of(before), registered);
     }
 
     private static String plain(PlayerMock player) {
