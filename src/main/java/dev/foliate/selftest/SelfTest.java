@@ -189,6 +189,7 @@ public final class SelfTest {
                     int typedBefore = typedByPlayers.size();
                     return after(SETTLE)
                         .thenCompose(ignored -> eventually(() -> schedulers.async().supply(() -> servedProblem(player, number, language))))
+                        .thenCompose(ignored -> profileCommandRuns(player))
                         .thenCompose(ignored -> menuOpens(player, typedBefore))
                         .thenCompose(ignored -> after(SETTLE))
                         .thenCompose(ignored -> schedulers.entity(player)
@@ -262,6 +263,23 @@ public final class SelfTest {
                     }
                     return null;
                 })));
+    }
+
+    /**
+     * Runs the profile command: as the player for their own, and from the console for a named
+     * player, since the player may not look at others. What it says is not visible from here: this
+     * catches a command that fails to run, which the log check turns into a failure.
+     */
+    private CompletableFuture<Void> profileCommandRuns(Player player) {
+        if (!modules.enabledNames().contains("profiles")) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return schedulers.entity(player)
+                .run(() -> check(
+                        server.dispatchCommand(player, "foliate profile"), "'foliate profile' did not run as the player"))
+                .thenCompose(ignored -> schedulers.global().run(() -> check(
+                        server.dispatchCommand(server.getConsoleSender(), "foliate profile " + player.getName()),
+                        "'foliate profile <player>' did not run from the console")));
     }
 
     /**
@@ -356,7 +374,7 @@ public final class SelfTest {
 
     /** Run from the console, on the global region, like a command typed in the server console. */
     private void commandsAreRegistered() {
-        for (String command : List.of("foliate info")) {
+        for (String command : List.of("foliate info", "foliate profile")) {
             check(server.dispatchCommand(server.getConsoleSender(), command), "'" + command + "' is not registered");
         }
     }

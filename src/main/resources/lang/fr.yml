@@ -15,6 +15,14 @@ command:
     failure: "<prefix><red>Impossible de recharger <white><module></white> : <error>"
     unexpected: "<prefix><red>Impossible de recharger <white><module></white> à cause d'une erreur inattendue. Consultez la console."
     error: "<prefix><red>Le rechargement a échoué de manière inattendue. Consultez la console."
+  profile:
+    show:
+      - "<prefix><white><player></white>"
+      - "<gray>Première connexion : <white><first-seen>"
+      - "<gray>Dernière connexion : <white><last-seen>"
+      - "<gray>Connexions : <white><joins>"
+    name-required: "<prefix><red>Indiquez un joueur : <white>/foliate profile \\<player></white>"
+    unknown: "<prefix><red>Aucun profil n'est chargé pour <white><player></white> : ce joueur n'est pas en ligne."
 
 menu:
   unknown: "<prefix><red>Le menu <white><menu></white> n'existe pas."
