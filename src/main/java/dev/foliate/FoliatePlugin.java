@@ -70,7 +70,7 @@ public class FoliatePlugin extends JavaPlugin {
         modules.register(messages);
         hook(modules, PlaceholderApiHook.PLUGIN_NAME, () -> new PlaceholderApiHook(getPluginMeta(), placeholders, messages));
         Database database = new Database(
-                getDataPath(), () -> config.get().storage(), List.of(ProfileModule.MIGRATION), getSLF4JLogger());
+                getDataPath(), () -> config.get().storage(), ProfileModule.MIGRATIONS, getSLF4JLogger());
         modules.register(database);
         ProfileModule profiles = new ProfileModule(
                 this, database, messages, placeholders, getSLF4JLogger(), Clock.systemUTC());

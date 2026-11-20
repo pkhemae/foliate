@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
-import dev.foliate.FoliatePlugin;
 import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
@@ -18,6 +17,8 @@ import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.profile.ProfileSummary;
 import dev.foliate.core.scheduler.FoliaSchedulers;
+import dev.foliate.testing.CommandSource;
+import dev.foliate.testing.PluginYml;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
@@ -33,11 +34,10 @@ import java.util.TreeSet;
 import java.util.UUID;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
-import org.bukkit.Location;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.permissions.PermissionDefault;
+import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,7 +54,7 @@ class RootCommandTest {
     Path directory;
 
     private ServerMock server;
-    private FoliatePlugin plugin;
+    private Plugin plugin;
     private CommandDispatcher<CommandSourceStack> dispatcher;
     private CommandDispatcher<CommandSourceStack> withoutMenus;
     private final List<String> opened = new ArrayList<>();
@@ -63,10 +63,11 @@ class RootCommandTest {
     @BeforeEach
     void setUp() {
         server = MockBukkit.mock();
-        // The real plugin is loaded for its plugin.yml, which declares the permissions. That it
-        // registers its commands with the server is checked by the self-test on a real server:
-        // MockBukkit cannot build Paper's native argument types.
-        plugin = MockBukkit.load(FoliatePlugin.class);
+        // The permissions come from the plugin.yml of the build, without starting the real plugin:
+        // its modules would listen to the players these tests add. That the plugin registers its
+        // commands with the server is checked by the self-test on a real server.
+        plugin = MockBukkit.createMockPlugin();
+        PluginYml.registerPermissions(server);
 
         ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         MessageService messages = new MessageService(
@@ -114,7 +115,7 @@ class RootCommandTest {
     void infoShowsVersionPlatformAndModules() throws Exception {
         PlayerMock player = operator();
 
-        dispatcher.execute("foliate info", new Source(player));
+        dispatcher.execute("foliate info", new CommandSource(player));
 
         String message = plain(player.nextComponentMessage());
         assertTrue(message.contains("1.2.3"), message);
@@ -126,7 +127,7 @@ class RootCommandTest {
     void reloadAnswersAtOnceThenReportsSuccessFromAnotherThread() throws Exception {
         PlayerMock player = operator();
 
-        dispatcher.execute("foliate reload", new Source(player));
+        dispatcher.execute("foliate reload", new CommandSource(player));
 
         assertTrue(plain(player.nextComponentMessage()).contains("Reloading"));
         assertNull(player.nextComponentMessage(), "the reload must not have finished on the calling thread");
@@ -140,7 +141,7 @@ class RootCommandTest {
         PlayerMock player = operator();
         Files.writeString(directory.resolve("config.yml"), "debug: [unclosed\n");
 
-        dispatcher.execute("foliate reload", new Source(player));
+        dispatcher.execute("foliate reload", new CommandSource(player));
         player.nextComponentMessage();
         runAsyncWork();
 
@@ -155,7 +156,7 @@ class RootCommandTest {
         PlayerMock player = operator();
         Files.createFile(directory.resolve("crash"));
 
-        dispatcher.execute("foliate reload", new Source(player));
+        dispatcher.execute("foliate reload", new CommandSource(player));
         player.nextComponentMessage();
         runAsyncWork();
 
@@ -169,7 +170,7 @@ class RootCommandTest {
     void consoleGetsTheReloadResultToo() throws Exception {
         ConsoleCommandSenderMock console = server.getConsoleSender();
 
-        dispatcher.execute("foliate reload", new Source(console));
+        dispatcher.execute("foliate reload", new CommandSource(console));
         console.nextComponentMessage();
         runAsyncWork();
 
@@ -185,7 +186,7 @@ class RootCommandTest {
         PlayerMock player = server.addPlayer();
         player.addAttachment(plugin, Permissions.COMMAND_INFO, true);
 
-        assertThrows(CommandSyntaxException.class, () -> commands.execute("foliate secret", new Source(player)));
+        assertThrows(CommandSyntaxException.class, () -> commands.execute("foliate secret", new CommandSource(player)));
     }
 
     @Test
@@ -196,7 +197,7 @@ class RootCommandTest {
 
         assertThrows(
                 CommandSyntaxException.class,
-                () -> commands.execute("foliate menu", new Source(server.getConsoleSender())));
+                () -> commands.execute("foliate menu", new CommandSource(server.getConsoleSender())));
     }
 
     @Test
@@ -215,7 +216,7 @@ class RootCommandTest {
         // No operator status needed: the menu permission is granted to everyone by default.
         PlayerMock player = server.addPlayer("Alex");
 
-        dispatcher.execute("foliate menu", new Source(player));
+        dispatcher.execute("foliate menu", new CommandSource(player));
 
         assertEquals(List.of("Alex example"), opened);
     }
@@ -225,7 +226,7 @@ class RootCommandTest {
         PlayerMock target = server.addPlayer("Target");
 
         // What "/execute as Target run foliate menu" typed in the console looks like.
-        dispatcher.execute("foliate menu", new Source(server.getConsoleSender(), target));
+        dispatcher.execute("foliate menu", new CommandSource(server.getConsoleSender(), target));
 
         assertEquals(List.of("Target example"), opened);
     }
@@ -234,7 +235,7 @@ class RootCommandTest {
     void consoleCannotOpenAMenuForItself() {
         assertThrows(
                 CommandSyntaxException.class,
-                () -> dispatcher.execute("foliate menu", new Source(server.getConsoleSender())));
+                () -> dispatcher.execute("foliate menu", new CommandSource(server.getConsoleSender())));
     }
 
     @Test
@@ -242,7 +243,7 @@ class RootCommandTest {
         PlayerMock player = server.addPlayer("Alex");
         profiles.put(player.getUniqueId(), new ProfileSummary("Alex", 1_700_000_000_000L, 1_700_003_600_000L, 7));
 
-        dispatcher.execute("foliate profile", new Source(player));
+        dispatcher.execute("foliate profile", new CommandSource(player));
 
         String message = plain(player.nextComponentMessage());
         assertEquals(
@@ -256,10 +257,10 @@ class RootCommandTest {
         PlayerMock target = server.addPlayer("Target");
         profiles.put(target.getUniqueId(), new ProfileSummary("Target", 10, 20, 3));
 
-        assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("foliate profile Target", new Source(alex)));
+        assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("foliate profile Target", new CommandSource(alex)));
 
         alex.addAttachment(plugin, Permissions.COMMAND_PROFILE_OTHERS, true);
-        dispatcher.execute("foliate profile Target", new Source(alex));
+        dispatcher.execute("foliate profile Target", new CommandSource(alex));
         assertTrue(plain(alex.nextComponentMessage()).contains("Target"));
     }
 
@@ -267,7 +268,7 @@ class RootCommandTest {
     void profileOfAPlayerWhoIsNotOnlineIsReported() throws Exception {
         PlayerMock player = operator();
 
-        dispatcher.execute("foliate profile Nobody", new Source(player));
+        dispatcher.execute("foliate profile Nobody", new CommandSource(player));
 
         assertEquals("[Foliate] Nobody is not online.", plain(player.nextComponentMessage()));
     }
@@ -276,7 +277,7 @@ class RootCommandTest {
     void onlinePlayerWithoutALoadedProfileIsReportedToo() throws Exception {
         PlayerMock player = server.addPlayer("Alex");
 
-        dispatcher.execute("foliate profile", new Source(player));
+        dispatcher.execute("foliate profile", new CommandSource(player));
 
         assertEquals("[Foliate] The profile of Alex is not loaded yet.", plain(player.nextComponentMessage()));
     }
@@ -290,10 +291,10 @@ class RootCommandTest {
         // What "/execute as Target run foliate profile" typed by Alex looks like.
         assertThrows(
                 CommandSyntaxException.class,
-                () -> dispatcher.execute("foliate profile", new Source(alex, target)));
+                () -> dispatcher.execute("foliate profile", new CommandSource(alex, target)));
 
         alex.addAttachment(plugin, Permissions.COMMAND_PROFILE_OTHERS, true);
-        dispatcher.execute("foliate profile", new Source(alex, target));
+        dispatcher.execute("foliate profile", new CommandSource(alex, target));
         assertTrue(plain(alex.nextComponentMessage()).contains("Joins: 3"));
     }
 
@@ -303,7 +304,7 @@ class RootCommandTest {
         server.addPlayer("Bob");
 
         var suggestions = dispatcher
-                .getCompletionSuggestions(dispatcher.parse("foliate profile ", new Source(alex)))
+                .getCompletionSuggestions(dispatcher.parse("foliate profile ", new CommandSource(alex)))
                 .get();
 
         assertTrue(suggestions.isEmpty());
@@ -313,7 +314,7 @@ class RootCommandTest {
     void consoleMustNameAPlayer() throws Exception {
         ConsoleCommandSenderMock console = server.getConsoleSender();
 
-        dispatcher.execute("foliate profile", new Source(console));
+        dispatcher.execute("foliate profile", new CommandSource(console));
 
         assertTrue(plain(console.nextComponentMessage()).contains("Name a player: /foliate profile <player>"));
     }
@@ -324,7 +325,7 @@ class RootCommandTest {
         profiles.put(target.getUniqueId(), new ProfileSummary("Target", 10, 20, 3));
         ConsoleCommandSenderMock console = server.getConsoleSender();
 
-        dispatcher.execute("foliate profile Target", new Source(console));
+        dispatcher.execute("foliate profile Target", new CommandSource(console));
 
         assertTrue(plain(console.nextComponentMessage()).contains("Joins: 3"));
     }
@@ -336,7 +337,7 @@ class RootCommandTest {
         PlayerMock operator = operator();
 
         var suggestions = dispatcher
-                .getCompletionSuggestions(dispatcher.parse("foliate profile a", new Source(operator)))
+                .getCompletionSuggestions(dispatcher.parse("foliate profile a", new CommandSource(operator)))
                 .get();
 
         assertEquals(
@@ -348,22 +349,22 @@ class RootCommandTest {
     void menuSubcommandDoesNotExistWithoutAMenuPlugin() {
         PlayerMock player = operator();
 
-        assertThrows(CommandSyntaxException.class, () -> withoutMenus.execute("foliate menu", new Source(player)));
+        assertThrows(CommandSyntaxException.class, () -> withoutMenus.execute("foliate menu", new CommandSource(player)));
     }
 
     @Test
     void playerWithOnlyTheMenuPermissionCannotUseAdministrationSubcommands() {
         PlayerMock player = server.addPlayer();
 
-        assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("foliate info", new Source(player)));
-        assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("foliate reload", new Source(player)));
+        assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("foliate info", new CommandSource(player)));
+        assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("foliate reload", new CommandSource(player)));
     }
 
     @Test
     void playerWithoutAnyPermissionCannotSeeTheCommand() {
         PlayerMock player = server.addPlayer();
 
-        assertThrows(CommandSyntaxException.class, () -> withoutMenus.execute("foliate info", new Source(player)));
+        assertThrows(CommandSyntaxException.class, () -> withoutMenus.execute("foliate info", new CommandSource(player)));
     }
 
     @Test
@@ -371,10 +372,10 @@ class RootCommandTest {
         PlayerMock player = server.addPlayer();
         player.addAttachment(plugin, Permissions.COMMAND_INFO, true);
 
-        dispatcher.execute("foliate info", new Source(player));
+        dispatcher.execute("foliate info", new CommandSource(player));
 
         assertNotNull(player.nextComponentMessage());
-        assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("foliate reload", new Source(player)));
+        assertThrows(CommandSyntaxException.class, () -> dispatcher.execute("foliate reload", new CommandSource(player)));
     }
 
     /** Both directions: a constant nobody declared, and a declared node nobody checks. */
@@ -385,7 +386,7 @@ class RootCommandTest {
             constants.add((String) field.get(null));
         }
         Set<String> declared = new TreeSet<>();
-        plugin.getPluginMeta().getPermissions().forEach(permission -> declared.add(permission.getName()));
+        declared.addAll(PluginYml.permissions());
 
         assertEquals(constants, declared);
     }
@@ -433,47 +434,5 @@ class RootCommandTest {
     private static String plain(Component component) {
         assertNotNull(component, "no message was sent");
         return PlainTextComponentSerializer.plainText().serialize(component);
-    }
-
-    private record Source(CommandSender sender, Entity executor) implements CommandSourceStack {
-
-        Source(CommandSender sender) {
-            this(sender, sender instanceof Entity entity ? entity : null);
-        }
-
-        @Override
-        public Location getLocation() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public CommandSender getSender() {
-            return sender;
-        }
-
-        @Override
-        public Entity getExecutor() {
-            return executor;
-        }
-
-        @Override
-        public Player getPlayerOrThrow() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Entity getEntityOrThrow() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public CommandSourceStack withLocation(Location location) {
-            return this;
-        }
-
-        @Override
-        public CommandSourceStack withExecutor(Entity executor) {
-            return this;
-        }
     }
 }
