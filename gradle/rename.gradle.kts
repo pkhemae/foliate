@@ -15,7 +15,7 @@ val templateRepository = "pkhemae/foliate"
 
 val skippedDirectories = setOf(".git", ".gradle", ".idea", ".kotlin", "build", "run", "out", "wrapper")
 val textExtensions =
-    setOf("java", "kts", "toml", "properties", "yml", "yaml", "md", "json", "sql", "txt", "gitignore", "editorconfig")
+    setOf("java", "kts", "toml", "properties", "yml", "yaml", "md", "json", "sql", "txt", "sh", "gitignore", "editorconfig")
 val textFileNames = setOf("LICENSE", ".gitignore", ".gitattributes", ".editorconfig")
 val javaKeywords = setOf(
     "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue",
