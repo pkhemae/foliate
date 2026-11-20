@@ -78,6 +78,10 @@ public final class Database implements Module {
             pool.setJdbcUrl("jdbc:mysql://" + mysql.host() + ":" + mysql.port() + "/" + mysql.database());
             pool.setUsername(mysql.username());
             pool.setPassword(mysql.password());
+            mysql.properties().forEach(pool::addDataSourceProperty);
+            // A save tells "no row to update" from the number of rows it changed: with affected
+            // rows instead of matched rows, saving an unchanged value would look like a new row.
+            pool.addDataSourceProperty("useAffectedRows", "false");
             threads = mysql.poolSize();
         }
         pool.setMaximumPoolSize(threads);
@@ -87,7 +91,7 @@ public final class Database implements Module {
         HikariDataSource source = new HikariDataSource(pool);
         dataSource = source;
         try (Connection connection = source.getConnection()) {
-            new Migrations(logger, migrations).apply(connection);
+            new Migrations(logger, migrations, settings.type() == StorageSettings.Type.MYSQL).apply(connection);
         }
 
         AtomicInteger counter = new AtomicInteger();

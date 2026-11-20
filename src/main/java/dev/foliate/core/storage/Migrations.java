@@ -26,20 +26,80 @@ import org.slf4j.Logger;
  *
  * <p>Keep each script to one change. MySQL commits schema statements as it runs them, so there a
  * script that fails halfway cannot be rolled back, and it is not recorded as applied either.
+ *
+ * <p>On MySQL and MariaDB, several servers of a network may share the database and start at the
+ * same time: the migrations run under a named lock of the database server, so that one server
+ * applies them while the others wait, then find them applied. SQLite is a file of one server.
  */
 final class Migrations {
 
     private static final String HISTORY_TABLE = "foliate_schema_history";
+    /** How long a server waits for another one to finish migrating the shared database. */
+    private static final int LOCK_TIMEOUT_SECONDS = 60;
+    /** Evaluated by the server: the history table and the current database, cut to MySQL's limit. */
+    private static final String LOCK_NAME = "LEFT(CONCAT('" + HISTORY_TABLE + ".', DATABASE()), 64)";
 
     private final Logger logger;
     private final List<String> scripts;
+    private final boolean sharedServer;
 
-    Migrations(Logger logger, List<String> scripts) {
+    /** @param sharedServer true on MySQL and MariaDB, whose database other servers may share */
+    Migrations(Logger logger, List<String> scripts, boolean sharedServer) {
         this.logger = logger;
         this.scripts = scripts;
+        this.sharedServer = sharedServer;
     }
 
     void apply(Connection connection) throws SQLException, IOException {
+        if (!sharedServer) {
+            applyAll(connection);
+            return;
+        }
+        // The lock belongs to the connection's session: taken and released on this connection.
+        // It is named after the database, on the server, so that plugins on other databases of
+        // the same MySQL server do not wait for each other; MySQL allows 64 characters.
+        try (PreparedStatement take = connection.prepareStatement("SELECT GET_LOCK(" + LOCK_NAME + ", ?)")) {
+            take.setInt(1, LOCK_TIMEOUT_SECONDS);
+            try (ResultSet result = take.executeQuery()) {
+                int taken = result.next() ? result.getInt(1) : 0;
+                if (result.wasNull()) {
+                    throw new SQLException("The database server could not lock the migrations");
+                }
+                if (taken != 1) {
+                    throw new SQLException("Another server kept the database migrations locked for more than "
+                            + LOCK_TIMEOUT_SECONDS + " seconds");
+                }
+            }
+        }
+        try {
+            applyAll(connection);
+        } catch (SQLException | IOException | RuntimeException e) {
+            // The migration's failure is the one to report, even when the connection is gone and
+            // the release fails too.
+            try {
+                release(connection);
+            } catch (SQLException releaseFailure) {
+                e.addSuppressed(releaseFailure);
+            }
+            throw e;
+        }
+        release(connection);
+    }
+
+    /**
+     * A failure here fails the start of the database, whose pool is then closed: closing the
+     * connection releases the lock anyway, so it never stays on a pooled connection.
+     */
+    private static void release(Connection connection) throws SQLException {
+        try (PreparedStatement release = connection.prepareStatement("SELECT RELEASE_LOCK(" + LOCK_NAME + ")");
+                ResultSet result = release.executeQuery()) {
+            if (!result.next() || result.getInt(1) != 1) {
+                throw new SQLException("The migrations lock was not held when it was released");
+            }
+        }
+    }
+
+    private void applyAll(Connection connection) throws SQLException, IOException {
         boolean autoCommit = connection.getAutoCommit();
         connection.setAutoCommit(false);
         try {
