@@ -15,8 +15,9 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * The layout of the code is a rule, not a habit: {@code core} knows nothing of the plugin, and the
- * modules, hooks and commands depend on {@code core} only, never on each other. Only
+ * The layout of the code is a rule, not a habit: {@code core} knows nothing of the plugin;
+ * {@code api} holds what features offer each other, and depends on {@code core} only; the modules,
+ * hooks and commands depend on {@code core} and {@code api}, never on each other. Only
  * {@code FoliatePlugin} and {@code PluginConfig}, which compose everything, may know it all.
  *
  * <p>It reads every mention of the plugin's packages in the source files (imports, wildcard or
@@ -119,6 +120,20 @@ class ArchitectureTest {
     }
 
     @Test
+    void theContractsBetweenFeaturesAreOpenToAllButCore() {
+        String source = """
+                import dev.foliate.api.profile.ProfileLookup;
+                import dev.foliate.core.message.MessageService;
+                import dev.foliate.modules.profile.ProfileModule;
+                """;
+
+        assertEquals(List.of("modules.profile.ProfileModule"), foreignReferences("commands", source));
+        assertEquals(List.of("modules.profile.ProfileModule"), foreignReferences("api", source));
+        assertEquals(
+                List.of("api.profile.ProfileLookup", "modules.profile.ProfileModule"), foreignReferences("core", source));
+    }
+
+    @Test
     void theRuleSeesTheCodeItGuards() throws IOException {
         // A guard that scans nothing would pass forever.
         try (Stream<Path> files = Files.walk(MAIN.resolve("core"))) {
@@ -126,13 +141,17 @@ class ArchitectureTest {
         }
     }
 
-    /** What a source file of {@code unit} mentions of the plugin outside {@code core} and itself. */
+    /** What a source file of {@code unit} mentions of the plugin that it may not depend on. */
     private static List<String> foreignReferences(String unit, String source) {
         List<String> foreign = new ArrayList<>();
         Matcher references = REFERENCE.matcher(source);
         while (references.find()) {
             String target = unitOfImport(references.group(1));
-            if (!target.equals(unit) && !target.equals("core")) {
+            boolean allowed = target.equals(unit)
+                    || target.equals("core")
+                    // Everything but core may use the contracts between features.
+                    || (target.equals("api") && !unit.equals("core"));
+            if (!allowed) {
                 foreign.add(references.group(1));
             }
         }

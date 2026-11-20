@@ -1,4 +1,4 @@
-package dev.foliate.core.profile;
+package dev.foliate.api.profile;
 
 /**
  * A player's profile as a command or another feature may show it.

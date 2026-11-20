@@ -1,13 +1,13 @@
 package dev.foliate.modules.profile;
 
+import dev.foliate.api.profile.ProfileLookup;
+import dev.foliate.api.profile.ProfileSummary;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
 import dev.foliate.core.player.PlayerLifecycle;
 import dev.foliate.core.player.PlayerStore;
-import dev.foliate.core.profile.ProfileLookup;
-import dev.foliate.core.profile.ProfileSummary;
 import dev.foliate.core.storage.Database;
 import java.time.Clock;
 import java.util.List;

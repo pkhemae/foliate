@@ -25,6 +25,8 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
   and only touch an entity or block from the region that owns it.
 - **Shared state is thread-safe.** Events and commands run in parallel on region threads: use
   immutable snapshots or concurrent collections, never plain mutable fields.
+- `api` holds the contracts features offer each other (`ProfileLookup`, `Menus`); modules, hooks and
+  commands depend on `core` and `api`, never on each other. `ArchitectureTest` enforces it.
 - `core` is reusable infrastructure and knows nothing of the plugin's features. A module owns its
   settings class and receives a supplier of it (`() -> config.get().scoreboard()`), so a reload takes
   effect; `PluginConfig` only composes the sections into the single `config.yml`.

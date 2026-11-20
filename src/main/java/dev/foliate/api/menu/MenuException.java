@@ -1,4 +1,4 @@
-package dev.foliate.core.menu;
+package dev.foliate.api.menu;
 
 import java.io.Serial;
 
