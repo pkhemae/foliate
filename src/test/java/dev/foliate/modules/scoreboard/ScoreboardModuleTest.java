@@ -78,11 +78,11 @@ class ScoreboardModuleTest {
     @Test
     void checkReportsAPlayerWithoutABoard() {
         PlayerMock player = server.addPlayer("Alex");
-        assertEquals(null, scoreboard.problemWith(player));
+        assertEquals(null, scoreboard.problemWith(player, 1));
 
         server.getPluginManager().callEvent(new PlayerQuitEvent(player, Component.empty(), PlayerQuitEvent.QuitReason.DISCONNECTED));
 
-        assertEquals("no scoreboard was created for Alex", scoreboard.problemWith(player));
+        assertEquals("no scoreboard was created for Alex", scoreboard.problemWith(player, 1));
         assertEquals(null, scoreboard.problemAfterQuit(player.getUniqueId(), "Alex"));
     }
 

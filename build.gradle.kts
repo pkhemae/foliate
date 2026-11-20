@@ -46,6 +46,10 @@ val selfTest: Boolean = providers.gradleProperty("selfTest").map(String::toBoole
 // job starts the client once the log says the self-test is waiting.
 val clientTest: Boolean = providers.gradleProperty("clientTest").map(String::toBoolean).getOrElse(false)
 
+// -PclientLanguages=en,fr makes the connected-client test expect one visit per entry, each by a
+// client set to that language: a player who comes back, and the messages of their own language.
+val clientLanguages: String = providers.gradleProperty("clientLanguages").getOrElse("")
+
 // The modules the self-test must find enabled. Without this, a hook that silently failed to load
 // (its plugin could not download its libraries, say) would still give a green run.
 val expectedModules: String =
@@ -178,7 +182,7 @@ tasks.withType<RunServer>().configureEach {
     if (selfTest) {
         jvmArgs("-Dfoliate.selftest=true", "-Dfoliate.selftest.expect=$expectedModules")
         if (clientTest) {
-            jvmArgs("-Dfoliate.selftest.client=true")
+            jvmArgs("-Dfoliate.selftest.client=true", "-Dfoliate.selftest.client.languages=$clientLanguages")
             doFirst {
                 // The server is switched to offline mode, which would stay on a developer's
                 // machine: this is for CI runners, which are thrown away.

@@ -61,9 +61,10 @@ public final class SelfTest {
     private static final String PROPERTY = "foliate.selftest";
     private static final String EXPECTED_MODULES_PROPERTY = "foliate.selftest.expect";
     private static final String CLIENT_PROPERTY = "foliate.selftest.client";
+    private static final String LANGUAGES_PROPERTY = "foliate.selftest.client.languages";
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
     /** Starting a client takes much longer than starting the server. */
-    private static final Duration CLIENT_TIMEOUT = Duration.ofMinutes(6);
+    private static final Duration CLIENT_TIMEOUT = Duration.ofMinutes(12);
     private static final Duration SETTLE = Duration.ofSeconds(3);
     private static final Duration RETRY = Duration.ofSeconds(2);
     private static final int ATTEMPTS = 10;
@@ -76,8 +77,15 @@ public final class SelfTest {
     private final Database database;
     private final Logger logger;
     private final AtomicBoolean finished = new AtomicBoolean();
-    private final CompletableFuture<Player> firstPlayer = new CompletableFuture<>();
+    /** The join the self-test is waiting for: replaced once a visit is over. */
+    private final AtomicReference<CompletableFuture<Player>> nextPlayer =
+            new AtomicReference<>(new CompletableFuture<>());
     private final boolean withClient = Boolean.getBoolean(CLIENT_PROPERTY);
+    /** The language each visit's client is set to, in order: one visit per entry, one at least. */
+    private final List<String> visitLanguages = Arrays.stream(System.getProperty(LANGUAGES_PROPERTY, "").split(","))
+            .map(String::strip)
+            .filter(language -> !language.isEmpty())
+            .toList();
     private volatile @Nullable Entity marker;
     private volatile @Nullable Runnable releaseChunk;
 
@@ -111,7 +119,7 @@ public final class SelfTest {
             plugin.getServer().getPluginManager().registerEvents(new Listener() {
                 @EventHandler
                 public void onJoin(PlayerJoinEvent event) {
-                    firstPlayer.complete(event.getPlayer());
+                    nextPlayer.get().complete(event.getPlayer());
                 }
             }, plugin);
         }
@@ -153,17 +161,27 @@ public final class SelfTest {
                 .thenCompose(ignored -> withClient ? connectedPlayerIsServed() : CompletableFuture.completedFuture(null));
     }
 
-    /** Waits for a client to join, checks what each part of the plugin did for it, then sends it away. */
+    /** One visit per language asked for, or one: each is a client that joins, is checked, and is kicked. */
     private CompletableFuture<Void> connectedPlayerIsServed() {
-        logger.info(WAITING);
-        return firstPlayer
+        return visit(1, Math.max(1, visitLanguages.size()));
+    }
+
+    private CompletableFuture<Void> visit(int number, int total) {
+        logger.info("{} (visit {} of {})", WAITING, number, total);
+        String language = number <= visitLanguages.size() ? visitLanguages.get(number - 1) : "";
+        return nextPlayer.get()
                 .thenCompose(player -> after(SETTLE)
-                        .thenCompose(ignored -> eventually(() -> schedulers.async().supply(() -> servedProblem(player))))
+                        .thenCompose(ignored -> eventually(() -> schedulers.async().supply(() -> servedProblem(player, number, language))))
                         .thenCompose(ignored -> menuOpens(player))
                         .thenCompose(ignored -> after(SETTLE))
                         .thenCompose(ignored -> schedulers.entity(player)
                                 .run(() -> check(player.isOnline(), "the client was disconnected")))
-                        .thenCompose(ignored -> quitIsCleanedUp(player)))
+                        .thenCompose(ignored -> {
+                            // Ready before the player is sent away, so that the next client is not missed.
+                            nextPlayer.set(new CompletableFuture<>());
+                            return quitIsCleanedUp(player);
+                        }))
+                .thenCompose(ignored -> number < total ? visit(number + 1, total) : CompletableFuture.completedFuture(null))
                 // A client that drops while a check runs on its scheduler shows up as a retired entity.
                 .exceptionallyCompose(error -> {
                     Throwable cause = error.getCause() != null ? error.getCause() : error;
@@ -173,21 +191,27 @@ public final class SelfTest {
                 });
     }
 
-    private @Nullable String servedProblem(Player player) {
+    private @Nullable String servedProblem(Player player, int visit, String language) {
         if (!player.isOnline()) {
             return "the client left before the checks were done";
+        }
+        if (!language.isEmpty() && !player.locale().getLanguage().equals(language)) {
+            return player.getName() + " reports the language " + player.locale() + " instead of " + language;
         }
         List<PlayerCheck> checks = modules.enabledOf(PlayerCheck.class);
         if (checks.isEmpty()) {
             return "no module has a check for a connected player";
         }
         for (PlayerCheck check : checks) {
-            String problem = check.problemWith(player);
+            String problem = check.problemWith(player, visit);
             if (problem != null) {
                 return problem;
             }
         }
-        logger.info("Checked for a connected player: {}", checks.stream().map(c -> c.getClass().getSimpleName()).toList());
+        logger.info(
+                "Checked for a connected player, visit {}: {}",
+                visit,
+                checks.stream().map(check -> check.getClass().getSimpleName()).toList());
         return null;
     }
 

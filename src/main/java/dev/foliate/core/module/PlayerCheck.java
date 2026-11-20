@@ -19,9 +19,10 @@ public interface PlayerCheck {
     /**
      * Called after the player joined, and again a little later when it returned a problem.
      *
+     * @param visit 1 for the first time the self-test sees the player, 2 when they come back
      * @return what is wrong, in a sentence that names the player, or null when all is well
      */
-    @Nullable String problemWith(Player player);
+    @Nullable String problemWith(Player player, int visit);
 
     /**
      * Called after the player left, and again a little later when it returned a problem.

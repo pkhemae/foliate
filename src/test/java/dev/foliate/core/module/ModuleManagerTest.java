@@ -30,15 +30,15 @@ class ModuleManagerTest {
 
     @Test
     void enabledModulesCanBeAskedForACapability() {
-        PlayerCheck check = player -> null;
+        PlayerCheck check = (player, visit) -> null;
         class Checking extends RecordingModule implements PlayerCheck {
             Checking() {
                 super("checking");
             }
 
             @Override
-            public String problemWith(Player player) {
-                return check.problemWith(player);
+            public String problemWith(Player player, int visit) {
+                return check.problemWith(player, visit);
             }
         }
         manager.register(new RecordingModule("plain"));
