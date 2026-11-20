@@ -19,11 +19,15 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
@@ -57,7 +61,7 @@ class ProfileModuleTest {
                 directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         database = new Database(
-                directory, () -> config.get().storage(), List.of(ProfileModule.MIGRATION), NOPLogger.NOP_LOGGER);
+                directory, () -> config.get().storage(), ProfileModule.MIGRATIONS, NOPLogger.NOP_LOGGER);
         database.enable();
         profiles = new ProfileModule(
                 MockBukkit.createMockPlugin(), database, messages, placeholders, NOPLogger.NOP_LOGGER, clock);
@@ -293,6 +297,62 @@ class ProfileModuleTest {
     }
 
     @Test
+    void updateChangesTheCachedProfileAndSavesIt() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+
+        PlayerProfile changed = profiles.update(id, profile -> withJoins(profile, profile.joins() + 10)).orElseThrow();
+        flush();
+
+        assertEquals(11, changed.joins());
+        assertEquals(changed, profiles.find(id).orElseThrow());
+        assertEquals(changed, stored(id).orElseThrow());
+    }
+
+    @Test
+    void changesMadeFromManyThreadsAtOnceAreAllKeptAndSavedInOrder() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        int threads = 8;
+        int each = 50;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        try {
+            List<Future<?>> done = new ArrayList<>();
+            for (int thread = 0; thread < threads; thread++) {
+                done.add(pool.submit(() -> {
+                    for (int i = 0; i < each; i++) {
+                        profiles.update(id, profile -> withJoins(profile, profile.joins() + 1));
+                    }
+                }));
+            }
+            for (Future<?> future : done) {
+                future.get(30, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        flush();
+
+        assertEquals(1 + threads * each, profiles.find(id).orElseThrow().joins());
+        // The last save to land is the last change made, whatever the number of storage threads.
+        assertEquals(1 + threads * each, stored(id).orElseThrow().joins());
+    }
+
+    @Test
+    void updateOfAPlayerWhoIsNotOnlineChangesNothing() throws Exception {
+        UUID id = UUID.randomUUID();
+
+        assertTrue(profiles.update(id, profile -> withJoins(profile, 99)).isEmpty());
+        flush();
+
+        assertTrue(stored(id).isEmpty());
+    }
+
+    private static PlayerProfile withJoins(PlayerProfile profile, int joins) {
+        return new PlayerProfile(profile.id(), profile.name(), profile.firstSeen(), profile.lastSeen(), joins);
+    }
+
+    @Test
     void checkReportsAPlayerWhoseReturnWasNotCounted() {
         PlayerMock player = server.addPlayer("Alex");
 
@@ -355,7 +415,7 @@ class ProfileModuleTest {
         ConfigService<PluginConfig> otherConfig = PluginConfig.service(other, NOPLogger.NOP_LOGGER);
         otherConfig.enable();
         Database stopped = new Database(
-                other, () -> otherConfig.get().storage(), List.of(ProfileModule.MIGRATION), NOPLogger.NOP_LOGGER);
+                other, () -> otherConfig.get().storage(), ProfileModule.MIGRATIONS, NOPLogger.NOP_LOGGER);
         ProfileModule module = new ProfileModule(
                 MockBukkit.createMockPlugin(), stopped, messages, placeholders, NOPLogger.NOP_LOGGER, clock);
 

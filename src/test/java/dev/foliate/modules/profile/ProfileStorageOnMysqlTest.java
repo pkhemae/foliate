@@ -166,7 +166,7 @@ class ProfileStorageOnMysqlTest {
     }
 
     private Database newDatabase() {
-        return new Database(directory, () -> config.get().storage(), List.of(ProfileModule.MIGRATION), NOPLogger.NOP_LOGGER);
+        return new Database(directory, () -> config.get().storage(), ProfileModule.MIGRATIONS, NOPLogger.NOP_LOGGER);
     }
 
     private int count(String table) throws SQLException {

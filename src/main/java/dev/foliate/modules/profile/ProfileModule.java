@@ -11,6 +11,7 @@ import dev.foliate.core.storage.Database;
 import dev.foliate.core.storage.SqlFunction;
 import java.sql.SQLException;
 import java.time.Clock;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -22,6 +23,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.UnaryOperator;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -54,8 +56,12 @@ import org.slf4j.Logger;
  */
 public final class ProfileModule implements Module, PlayerCheck, ProfileLookup, Listener {
 
-    /** The SQL script that creates this module's table: to give to the {@code Database}. */
-    public static final String MIGRATION = "001_create_profiles.sql";
+    /**
+     * The SQL scripts of this module, in the order they apply: to give to the {@code Database}. To
+     * change the table, append a script here and nowhere else: the plugin and the tests read this
+     * list.
+     */
+    public static final List<String> MIGRATIONS = List.of("001_create_profiles.sql");
 
     private static final long LOAD_TIMEOUT_SECONDS = 10;
 
@@ -179,6 +185,31 @@ public final class ProfileModule implements Module, PlayerCheck, ProfileLookup, 
     /** The profile of an online player. Safe from any thread, never blocks. */
     public Optional<PlayerProfile> find(UUID id) {
         return Optional.ofNullable(online.get(id));
+    }
+
+    /**
+     * Changes the profile of an online player, and saves it. Safe from any thread, never blocks.
+     *
+     * <p>Changing a profile is a read, a computation and a write, and two threads doing it at
+     * once must not lose either change: the new profile is computed from the one that is cached at
+     * that moment, under the lock the join and the quit use, and its save is queued under the same
+     * lock, so the saves reach the database in the order the changes were made. Keep {@code change}
+     * quick and free of side effects; it runs under that lock and may not run again.
+     *
+     * @param change gives the new profile from the current one, as {@code PlayerProfile#joined} does
+     * @return the new profile, or empty when the player is not online (nothing is changed or saved)
+     */
+    public Optional<PlayerProfile> update(UUID id, UnaryOperator<PlayerProfile> change) {
+        synchronized (lifecycle) {
+            PlayerProfile current = online.get(id);
+            if (current == null) {
+                return Optional.empty();
+            }
+            PlayerProfile changed = change.apply(current);
+            online.put(id, changed);
+            write(changed);
+            return Optional.of(changed);
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
