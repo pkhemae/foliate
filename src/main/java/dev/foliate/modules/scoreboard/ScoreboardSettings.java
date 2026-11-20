@@ -1,13 +1,13 @@
-package dev.foliate.modules.sidebar;
+package dev.foliate.modules.scoreboard;
 
 import de.exlll.configlib.Comment;
 import de.exlll.configlib.Configuration;
 import dev.foliate.core.config.ConfigException;
 import java.util.List;
 
-/** The {@code sidebar} section of {@code config.yml}. */
+/** The {@code scoreboard} section of {@code config.yml}. */
 @Configuration
-public final class SidebarSettings {
+public final class ScoreboardSettings {
 
     /** The client cannot display more lines than this. */
     private static final int MAX_LINES = 15;
@@ -28,7 +28,7 @@ public final class SidebarSettings {
 
     private List<String> lines = List.of("", "<gray>Player: <white><player>", "<gray>Online: <white><online>", "");
 
-    public SidebarSettings() {}
+    public ScoreboardSettings() {}
 
     public boolean enabled() {
         return enabled;
@@ -53,16 +53,16 @@ public final class SidebarSettings {
      */
     public void validate() throws ConfigException {
         if (refreshTicks < 1) {
-            throw new ConfigException("sidebar.refresh-ticks must be at least 1");
+            throw new ConfigException("scoreboard.refresh-ticks must be at least 1");
         }
         if (lines.size() > MAX_LINES) {
-            throw new ConfigException("sidebar.lines cannot have more than " + MAX_LINES + " lines");
+            throw new ConfigException("scoreboard.lines cannot have more than " + MAX_LINES + " lines");
         }
         // MiniMessage refuses legacy codes outright: caught here, it is one clear message at
         // load time instead of an error on every refresh for every player.
         if (title.indexOf(LEGACY_CODE) >= 0 || lines.stream().anyMatch(line -> line.indexOf(LEGACY_CODE) >= 0)) {
             throw new ConfigException(
-                    "sidebar.title and sidebar.lines use the MiniMessage format: write <red> instead of legacy colour codes");
+                    "scoreboard.title and scoreboard.lines use the MiniMessage format: write <red> instead of legacy colour codes");
         }
     }
 }

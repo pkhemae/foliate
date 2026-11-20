@@ -1,4 +1,4 @@
-package dev.foliate.modules.sidebar;
+package dev.foliate.modules.scoreboard;
 
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
@@ -26,32 +26,32 @@ import org.bukkit.plugin.Plugin;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Shows each player a sidebar whose title and lines come from {@code config.yml}.
+ * Shows each player a scoreboard whose title and lines come from {@code config.yml}.
  *
  * <p>Threading: a player's board is created, refreshed and removed only from that player's own
  * scheduler. Join and quit events already run there; reloads and enabling hop to it. The map of
  * boards is the only state shared between threads.
  */
-public final class SidebarModule implements Module, PlayerCheck, Listener {
+public final class ScoreboardModule implements Module, PlayerCheck, Listener {
 
     private final Plugin plugin;
     private final Schedulers schedulers;
-    private final Supplier<SidebarSettings> settings;
+    private final Supplier<ScoreboardSettings> settings;
     private final MessageService messages;
-    private final Function<Player, SidebarBoard> boardFactory;
+    private final Function<Player, ScoreboardDisplay> boardFactory;
     private final SupportCheck supportCheck;
     private final Map<UUID, Entry> entries = new ConcurrentHashMap<>();
 
-    public SidebarModule(Plugin plugin, Schedulers schedulers, Supplier<SidebarSettings> settings, MessageService messages) {
-        this(plugin, schedulers, settings, messages, FastBoardSidebar::new, FastBoardSidebar::ensureSupported);
+    public ScoreboardModule(Plugin plugin, Schedulers schedulers, Supplier<ScoreboardSettings> settings, MessageService messages) {
+        this(plugin, schedulers, settings, messages, FastBoardScoreboard::new, FastBoardScoreboard::ensureSupported);
     }
 
-    SidebarModule(
+    ScoreboardModule(
             Plugin plugin,
             Schedulers schedulers,
-            Supplier<SidebarSettings> settings,
+            Supplier<ScoreboardSettings> settings,
             MessageService messages,
-            Function<Player, SidebarBoard> boardFactory,
+            Function<Player, ScoreboardDisplay> boardFactory,
             SupportCheck supportCheck) {
         this.plugin = plugin;
         this.schedulers = schedulers;
@@ -63,11 +63,11 @@ public final class SidebarModule implements Module, PlayerCheck, Listener {
 
     @Override
     public String name() {
-        return "sidebar";
+        return "scoreboard";
     }
 
     @Override
-    public void enable() throws SidebarUnavailableException {
+    public void enable() throws ScoreboardUnavailableException {
         supportCheck.run();
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
         refreshAll();
@@ -92,12 +92,12 @@ public final class SidebarModule implements Module, PlayerCheck, Listener {
         if (!settings.get().enabled() || entries.containsKey(player.getUniqueId())) {
             return null;
         }
-        return "no sidebar was created for " + player.getName();
+        return "no scoreboard was created for " + player.getName();
     }
 
     @Override
     public @Nullable String problemAfterQuit(UUID id, String name) {
-        return entries.containsKey(id) ? "the sidebar of " + name + " was kept after the player left" : null;
+        return entries.containsKey(id) ? "the scoreboard of " + name + " was kept after the player left" : null;
     }
 
     @EventHandler
@@ -126,11 +126,11 @@ public final class SidebarModule implements Module, PlayerCheck, Listener {
     }
 
     private void show(Player player) {
-        SidebarSettings settings = this.settings.get();
+        ScoreboardSettings settings = this.settings.get();
         if (!settings.enabled() || !player.isOnline()) {
             return;
         }
-        SidebarBoard board = boardFactory.apply(player);
+        ScoreboardDisplay board = boardFactory.apply(player);
         TaskHandle refresh = schedulers.entity(player)
                 .runTimer(Ticks.duration(1), Ticks.duration(settings.refreshTicks()), () -> draw(player, board));
         Entry previous = entries.put(player.getUniqueId(), new Entry(board, refresh));
@@ -146,9 +146,9 @@ public final class SidebarModule implements Module, PlayerCheck, Listener {
         }
     }
 
-    private void draw(Player player, SidebarBoard board) {
+    private void draw(Player player, ScoreboardDisplay board) {
         // Read on every refresh so a reload shows up without rebuilding the board.
-        SidebarSettings settings = this.settings.get();
+        ScoreboardSettings settings = this.settings.get();
         TagResolver[] values = {
             Placeholder.unparsed("player", player.getName()),
             Placeholder.unparsed("online", String.valueOf(plugin.getServer().getOnlinePlayers().size())),
@@ -160,13 +160,13 @@ public final class SidebarModule implements Module, PlayerCheck, Listener {
         board.update(title, lines);
     }
 
-    /** Fails when sidebars cannot work on this server. */
+    /** Fails when scoreboards cannot work on this server. */
     @FunctionalInterface
     interface SupportCheck {
-        void run() throws SidebarUnavailableException;
+        void run() throws ScoreboardUnavailableException;
     }
 
-    private record Entry(SidebarBoard board, TaskHandle refresh) {
+    private record Entry(ScoreboardDisplay board, TaskHandle refresh) {
 
         void remove() {
             refresh.cancel();

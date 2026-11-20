@@ -20,7 +20,7 @@ metrics: true
 # A change here applies after a server restart.
 update-check: true
 # Scoreboard shown on the right of each player's screen.
-sidebar:
+scoreboard:
   enabled: true
   # Ticks between two refreshes (20 ticks = 1 second).
   refresh-ticks: 20
