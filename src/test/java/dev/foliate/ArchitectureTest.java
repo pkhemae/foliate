@@ -52,6 +52,25 @@ class ArchitectureTest {
     }
 
     @Test
+    void everyPackageHasANullMarkedPackageInfo() throws IOException {
+        List<String> missing = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(MAIN)) {
+            List<Path> folders = files.filter(Files::isDirectory).toList();
+            for (Path folder : folders) {
+                try (Stream<Path> inside = Files.list(folder)) {
+                    boolean holdsClasses = inside.anyMatch(path -> path.toString().endsWith(".java")
+                            && !path.getFileName().toString().equals("package-info.java"));
+                    Path info = folder.resolve("package-info.java");
+                    if (holdsClasses && (!Files.exists(info) || !Files.readString(info).contains("@NullMarked"))) {
+                        missing.add(MAIN.getParent().relativize(folder).toString());
+                    }
+                }
+            }
+        }
+        assertEquals(List.of(), missing, "These packages need a package-info.java annotated with @NullMarked");
+    }
+
+    @Test
     void theRuleCatchesEveryWayToReachAnotherPart() {
         String source = """
                 package dev.foliate.modules.alpha;
