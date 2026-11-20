@@ -25,7 +25,8 @@ import org.junit.jupiter.api.Test;
 class ArchitectureTest {
 
     private static final Path MAIN = Path.of("src/main/java/dev/foliate");
-    private static final Pattern IMPORT = Pattern.compile("^import (?:static )?dev\\.foliate\\.([\\w.]+);", Pattern.MULTILINE);
+    /** Any mention of a plugin class or package: an import (wildcard or static) or a qualified name. */
+    private static final Pattern REFERENCE = Pattern.compile("\\bdev\\.foliate\\.([\\w.]*[\\w*])");
 
     /** Parents whose children are independent of one another: {@code modules.sidebar}, ... */
     private static final Set<String> GROUPS = Set.of("modules", "hooks");
@@ -39,16 +40,36 @@ class ArchitectureTest {
                 if (unit == null) {
                     continue; // the composition root
                 }
-                Matcher imports = IMPORT.matcher(Files.readString(file));
-                while (imports.find()) {
-                    String target = unitOfImport(imports.group(1));
-                    if (!target.equals(unit) && !target.equals("core")) {
-                        violations.add(file + " (" + unit + ") imports dev.foliate." + imports.group(1));
-                    }
+                for (String reference : foreignReferences(unit, Files.readString(file))) {
+                    violations.add(file + " (" + unit + ") refers to dev.foliate." + reference);
                 }
             }
         }
         assertEquals(List.of(), violations, "These imports break the layout, see the Architecture page of the wiki");
+    }
+
+    @Test
+    void theRuleCatchesEveryWayToReachAnotherPart() {
+        String source = """
+                package dev.foliate.modules.sidebar;
+
+                import dev.foliate.core.message.MessageService;
+                import dev.foliate.modules.profile.*;
+                import static dev.foliate.hooks.zmenu.ZMenuHook.NAME;
+                import dev.foliate.PluginConfig;
+
+                class Example {
+                    dev.foliate.commands.FoliateCommand command;
+                }
+                """;
+
+        assertEquals(
+                List.of(
+                        "modules.profile.*",
+                        "hooks.zmenu.ZMenuHook.NAME",
+                        "PluginConfig",
+                        "commands.FoliateCommand"),
+                foreignReferences("modules.sidebar", source));
     }
 
     @Test
@@ -57,6 +78,19 @@ class ArchitectureTest {
         try (Stream<Path> files = Files.walk(MAIN.resolve("core"))) {
             assertTrue(files.filter(path -> path.toString().endsWith(".java")).count() > 10);
         }
+    }
+
+    /** What a source file of {@code unit} mentions of the plugin outside {@code core} and itself. */
+    private static List<String> foreignReferences(String unit, String source) {
+        List<String> foreign = new ArrayList<>();
+        Matcher references = REFERENCE.matcher(source);
+        while (references.find()) {
+            String target = unitOfImport(references.group(1));
+            if (!target.equals(unit) && !target.equals("core")) {
+                foreign.add(references.group(1));
+            }
+        }
+        return foreign;
     }
 
     /** The unit a source file belongs to, or null for the classes of the root package. */
@@ -71,7 +105,7 @@ class ArchitectureTest {
     /** The unit an imported name belongs to; "root" for a class of the root package. */
     private static String unitOfImport(String name) {
         String[] parts = name.split("\\.");
-        if (Character.isUpperCase(parts[0].charAt(0))) {
+        if (Character.isUpperCase(parts[0].charAt(0)) || parts[0].equals("*")) {
             return "root";
         }
         return GROUPS.contains(parts[0]) ? parts[0] + "." + parts[1] : parts[0];

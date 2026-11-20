@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -286,7 +287,11 @@ public final class FoliaSchedulers implements Schedulers {
             // callback the task, and through it the entity, would stay referenced by the timer set
             // until shutdown.
             AtomicReference<@Nullable ScheduledTask> tracked = new AtomicReference<>();
+            // The callback can run before the task is tracked, and the task's state when it does is
+            // the server's business: remember it here instead of asking the task afterwards.
+            AtomicBoolean gone = new AtomicBoolean();
             Runnable retired = () -> {
+                gone.set(true);
                 ScheduledTask timer = tracked.get();
                 if (timer != null) {
                     timers.remove(timer);
@@ -299,7 +304,7 @@ public final class FoliaSchedulers implements Schedulers {
             }
             tracked.set(scheduled);
             TaskHandle handle = timer(scheduled);
-            if (scheduled.isCancelled()) {
+            if (gone.get() || scheduled.isCancelled()) {
                 // The entity was removed between scheduling and tracking.
                 timers.remove(scheduled);
             }
