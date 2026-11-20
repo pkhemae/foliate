@@ -60,7 +60,7 @@ public final class MessageService implements Module, PlayerCheck {
 
     private static final String PREFIX_KEY = "prefix";
     /** A message every language file writes in its own words. */
-    private static final String LANGUAGE_CHECK_KEY = "menu.unavailable";
+    private static final String LANGUAGE_CHECK_KEY = "command.reload.success";
     private static final String EXTENSION = ".yml";
 
     /** {@code en}, {@code pt_BR}, {@code fr-CA}: what a language file may be called. */
@@ -158,20 +158,34 @@ public final class MessageService implements Module, PlayerCheck {
     }
 
     /**
-     * A player is spoken to in the language their client reports: the text rendered for the player
-     * must be the text of that locale, and not, say, the default language's because the player's
-     * language could not be read from them.
+     * A player is spoken to in the language their client reports. When that language has its own
+     * text for a message and it differs from the default language's, the text rendered for the
+     * player must be the one of their language: getting the default language's text means the
+     * language could not be read from the player.
      */
     @Override
     public @Nullable String problemWith(Player player, int visit) {
+        Catalog current = catalog;
         Locale locale = player.locale();
+        List<String> own = ownText(current, locale);
+        List<String> inDefault = current.languages().get(current.defaultLocale()).get(LANGUAGE_CHECK_KEY);
+        if (own == null || own.equals(inDefault)) {
+            return null; // nothing that would tell the two languages apart
+        }
         PlainTextComponentSerializer plain = PlainTextComponentSerializer.plainText();
         String forPlayer = plain.serialize(render(player, LANGUAGE_CHECK_KEY));
-        String forLocale = plain.serialize(render(locale, LANGUAGE_CHECK_KEY));
-        return forPlayer.equals(forLocale)
-                ? null
-                : player.getName() + " is not spoken to in " + locale + ": got \"" + forPlayer + "\" instead of \""
-                        + forLocale + "\"";
+        String defaultText = plain.serialize(render(current.defaultLocale(), LANGUAGE_CHECK_KEY));
+        return forPlayer.equals(defaultText)
+                ? player.getName() + " is not spoken to in " + locale + ": got the default language's \"" + forPlayer + "\""
+                : null;
+    }
+
+    private static @Nullable List<String> ownText(Catalog current, Locale locale) {
+        Map<String, List<String>> file = current.languages().get(locale);
+        if (file == null && !locale.getCountry().isEmpty()) {
+            file = current.languages().get(Locale.of(locale.getLanguage()));
+        }
+        return file == null ? null : file.get(LANGUAGE_CHECK_KEY);
     }
 
     /** Renders a message for a viewer, in the viewer's language. A list is joined with newlines. */

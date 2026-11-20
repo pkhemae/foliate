@@ -106,7 +106,8 @@ jobs:
       # both are subject to the Minecraft EULA (https://aka.ms/MinecraftEULA). Remove this job if
       # you do not agree to it.
       - name: Join the test server with a client
-        timeout-minutes: 15
+        # Longer than the self-test's own timeout, which gives the verdict.
+        timeout-minutes: 20
         env:
           HOOKS: ${{ matrix.hooks }}
         run: .github/scripts/client-test.sh

@@ -314,15 +314,15 @@ class MessageServiceTest {
      */
     @Test
     void playerWhoseLanguageCannotBeReadIsReported() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "menu:\n  unavailable: \"Not now\"\n");
-        Files.writeString(directory.resolve("lang/fr.yml"), "menu:\n  unavailable: \"Pas maintenant\"\n");
+        Files.writeString(directory.resolve("lang/en.yml"), "command:\n  reload:\n    success: \"Not now\"\n");
+        Files.writeString(directory.resolve("lang/fr.yml"), "command:\n  reload:\n    success: \"Pas maintenant\"\n");
         messages.reload();
         PlayerMock player = MockBukkit.mock().addPlayer("Alex");
         try {
             player.setLocale(Locale.FRENCH);
 
             assertEquals(
-                    "Alex is not spoken to in fr: got \"Not now\" instead of \"Pas maintenant\"",
+                    "Alex is not spoken to in fr: got the default language's \"Not now\"",
                     messages.problemWith(player, 1));
         } finally {
             MockBukkit.unmock();
