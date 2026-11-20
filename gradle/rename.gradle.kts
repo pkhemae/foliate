@@ -81,7 +81,11 @@ tasks.register("renameTemplate") {
         // The repository is replaced first and parked behind a token: its second half is the
         // template's lowercase name, which the last replacement would otherwise rewrite.
         val repositoryToken = "\u0000repository\u0000"
+        // The developer guide stays where it is, in the template's wiki: its links are kept.
+        val guideUrl = "https://github.com/$templateRepository/wiki"
+        val guideToken = "\u0000guide\u0000"
         val replacements = listOf(
+            guideUrl to guideToken,
             templateRepository to repositoryToken,
             templateGroup to basePackage,
             templateGroup.replace('.', '/') to basePackage.replace('.', '/'),
@@ -89,6 +93,7 @@ tasks.register("renameTemplate") {
             templateName.uppercase() to name.uppercase(),
             templateName.lowercase() to name.lowercase(),
             repositoryToken to repository,
+            guideToken to guideUrl,
         )
 
         val files = root.walkTopDown()
@@ -141,7 +146,56 @@ tasks.register("renameTemplate") {
         )
         File(root, "gradle/rename.gradle.kts").delete()
 
+        // The README and the changelog describe the template and its history, not this plugin:
+        // leave honest ones to write in.
+        File(root, "README.md").writeText(
+            """
+            |# $name
+            |
+            |Describe your plugin here: what it does, who it is for, and how to install it.
+            |
+            |## Build
+            |
+            |```bash
+            |./gradlew build
+            |```
+            |
+            |The plugin jar is in `build/libs/`. `./gradlew runFolia` starts a Folia test server with it,
+            |and `./gradlew runFolia -PselfTest=true` runs the smoke test.
+            |
+            |## Developer guide
+            |
+            |$name started from the [Foliate template](https://github.com/$templateRepository). How the
+            |code is organised and how to extend it is in the template's
+            |[developer guide]($guideUrl).
+            |
+            |## License
+            |
+            |[MIT](LICENSE)
+            |
+            """.trimMargin()
+        )
+        File(root, "CHANGELOG.md").writeText(
+            """
+            |# Changelog
+            |
+            |All notable changes to this project are listed here. The format follows
+            |[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
+            |[Semantic Versioning](https://semver.org/).
+            |
+            |## [Unreleased]
+            |
+            """.trimMargin()
+        )
+
         println("Renamed to $name ($basePackage): $rewritten files rewritten, $moved files renamed.")
-        println("Next: ./gradlew build, then review the diff. The README still describes the template.")
+        println("Next:")
+        println("  1. ./gradlew build, then review the diff.")
+        println("  2. git remote set-url origin <your repository>: the clone still points to the template.")
+        println("  3. Write your README.md (a skeleton was generated), and set the description in gradle.properties")
+        println("     and the authors in build.gradle.kts.")
+        println("  4. LICENSE: the copyright holder is now \"$name contributors\". Replace the logo")
+        println("     assets/logo.svg or delete it, and the links to it.")
+        println("  5. The developer guide stays in the template's wiki: $guideUrl")
     }
 }
