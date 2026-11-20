@@ -151,10 +151,29 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         } catch (YamlException e) {
             throw new ConfigException(FILE_NAME + " is " + e.getMessage(), e);
         } catch (ConfigurationException e) {
-            throw new ConfigException(FILE_NAME + " has a setting with the wrong kind of value: " + e.getMessage(), e);
+            // Not chained: the library's messages print the values of the whole section, password
+            // included, and a stack trace would print every cause.
+            throw new ConfigException(FILE_NAME + " has a setting with the wrong kind of value: " + describe(e));
         } catch (IOException | UncheckedIOException e) {
             throw new ConfigException(FILE_NAME + " could not be read or written: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * The innermost explanation of the library, which is about the setting itself, or of one of
+     * the plugin's serializers ({@link IllegalArgumentException}), without the value it quotes (it
+     * may be a password) and with the setting's name instead of the Java field.
+     */
+    static String describe(ConfigurationException failure) {
+        Throwable explained = failure;
+        for (Throwable cause = failure.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConfigurationException || cause instanceof IllegalArgumentException) {
+                explained = cause;
+            }
+        }
+        return String.valueOf(explained.getMessage())
+                .replaceAll("(?s)value '.*' with type", "value with type")
+                .replaceAll("for field '[^']*?\\.([\\w]+)'", "for '$1'");
     }
 
     private String render(T config) {

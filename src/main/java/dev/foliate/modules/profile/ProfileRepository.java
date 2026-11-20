@@ -30,7 +30,8 @@ final class ProfileRepository implements PlayerRepository<PlayerProfile> {
     /**
      * Inserts or updates. Update first: "upsert" syntax differs between SQLite and MySQL. When
      * another server sharing the database inserted the row between the two, the insert fails on
-     * the key and the update is made again, so the save is not lost.
+     * the key and the update is made again, so the save is not lost; {@code first_seen} stays the
+     * one that server wrote.
      */
     @Override
     public void save(Connection connection, PlayerProfile profile) throws SQLException {
@@ -46,7 +47,17 @@ final class ProfileRepository implements PlayerRepository<PlayerProfile> {
             insert.setInt(5, profile.joins());
             insert.executeUpdate();
         } catch (SQLException e) {
-            if (!SqlErrors.isDuplicateKey(e) || !update(connection, profile)) {
+            if (!SqlErrors.isDuplicateKey(e)) {
+                throw e;
+            }
+            boolean updated;
+            try {
+                updated = update(connection, profile);
+            } catch (SQLException retry) {
+                retry.addSuppressed(e);
+                throw retry;
+            }
+            if (!updated) {
                 throw e;
             }
         }

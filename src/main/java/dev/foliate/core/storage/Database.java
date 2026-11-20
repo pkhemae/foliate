@@ -79,6 +79,9 @@ public final class Database implements Module {
             pool.setUsername(mysql.username());
             pool.setPassword(mysql.password());
             mysql.properties().forEach(pool::addDataSourceProperty);
+            // A save tells "no row to update" from the number of rows it changed: with affected
+            // rows instead of matched rows, saving an unchanged value would look like a new row.
+            pool.addDataSourceProperty("useAffectedRows", "false");
             threads = mysql.poolSize();
         }
         pool.setMaximumPoolSize(threads);

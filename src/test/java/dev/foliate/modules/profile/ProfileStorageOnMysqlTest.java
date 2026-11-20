@@ -69,7 +69,8 @@ class ProfileStorageOnMysqlTest {
             statement.execute("DROP TABLE IF EXISTS foliate_profiles");
             statement.execute("DROP TABLE IF EXISTS foliate_schema_history");
         }
-        // A session variable set through the driver properties, read back by a test below.
+        // A session variable set through the driver properties, read back by a test below, and an
+        // option the plugin must override (see savingAnUnchangedProfileAgainIsFine).
         Files.writeString(directory.resolve("config.yml"), """
                 storage:
                   type: MYSQL
@@ -81,6 +82,7 @@ class ProfileStorageOnMysqlTest {
                     password: "%s"
                     properties:
                       sessionVariables: "wait_timeout=4321"
+                      useAffectedRows: true
                 """.formatted(HOST, PORT, DATABASE, USER, PASSWORD));
         config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
@@ -134,10 +136,13 @@ class ProfileStorageOnMysqlTest {
                     future.get(60, TimeUnit.SECONDS);
                 }
             } finally {
-                starts.shutdownNow();
+                // Every start is over before any server stops, whatever happened; the first one is
+                // stopped by tearDown.
+                starts.shutdown();
+                starts.awaitTermination(60, TimeUnit.SECONDS);
+                database = servers.getFirst();
                 servers.subList(1, servers.size()).forEach(Database::disable);
             }
-            database = servers.getFirst();
             assertEquals(1, count("foliate_schema_history"));
         }
     }
@@ -146,7 +151,7 @@ class ProfileStorageOnMysqlTest {
     @Test
     void aRowInsertedByAnotherServerInTheMeantimeIsUpdatedInstead() throws Exception {
         UUID id = UUID.randomUUID();
-        PlayerProfile theirs = new PlayerProfile(id, "Alex", 10, 20, 1);
+        PlayerProfile theirs = new PlayerProfile(id, "Alex", 5, 20, 1);
         PlayerProfile ours = new PlayerProfile(id, "Alex", 10, 30, 2);
 
         database.call(connection -> {
@@ -154,7 +159,27 @@ class ProfileStorageOnMysqlTest {
             return null;
         });
 
-        assertEquals(ours, database.call(connection -> repository.find(connection, id)).orElseThrow());
+        // Ours, but first seen when the other server saw the player first.
+        assertEquals(
+                new PlayerProfile(id, "Alex", 5, 30, 2),
+                database.call(connection -> repository.find(connection, id)).orElseThrow());
+    }
+
+    /**
+     * With the driver counting the rows a statement changed rather than the rows it found, an
+     * update that changes nothing would look like a missing row, and the insert would fail.
+     */
+    @Test
+    void savingAnUnchangedProfileAgainIsFine() throws Exception {
+        PlayerProfile profile = new PlayerProfile(UUID.randomUUID(), "Alex", 10, 20, 1);
+
+        database.call(connection -> {
+            repository.save(connection, profile);
+            repository.save(connection, profile);
+            return null;
+        });
+
+        assertEquals(1, count("foliate_profiles"));
     }
 
     @Test

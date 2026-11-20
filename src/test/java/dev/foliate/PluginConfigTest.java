@@ -1,7 +1,11 @@
 package dev.foliate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.foliate.core.config.ConfigException;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.StorageSettings;
 
@@ -9,6 +13,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.helpers.NOPLogger;
@@ -41,15 +46,59 @@ class PluginConfigTest {
                   mysql:
                     properties:
                       sslMode: REQUIRED
-                      connectionTimeZone: UTC
+                      useSSL: false
+                      connectTimeout: 5000
                 """);
         ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
 
         service.enable();
 
         assertEquals(
-                java.util.Map.of("sslMode", "REQUIRED", "connectionTimeZone", "UTC"),
+                Map.of("sslMode", "REQUIRED", "useSSL", "false", "connectTimeout", "5000"),
                 service.get().storage().mysql().properties());
+    }
+
+    /** A wrong value names the setting, and never prints the section around it with its password. */
+    @Test
+    void aDriverPropertyThatIsNotAValueIsRefusedWithoutShowingThePassword() throws Exception {
+        Files.writeString(directory.resolve("config.yml"), """
+                storage:
+                  mysql:
+                    password: s3cret-pw
+                    properties:
+                      sessionVariables:
+                        - wait_timeout=10
+                """);
+        ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
+
+        ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+        String everything = describe(failure);
+        assertTrue(everything.contains("storage.mysql.properties.sessionVariables"), everything);
+        assertFalse(everything.contains("s3cret-pw"), everything);
+    }
+
+    @Test
+    void aWrongValueElsewhereDoesNotShowThePasswordEither() throws Exception {
+        Files.writeString(directory.resolve("config.yml"), """
+                storage:
+                  mysql:
+                    password: s3cret-pw
+                    port: abc
+                """);
+        ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
+
+        ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+        assertTrue(failure.getMessage().contains("'port'"), failure.getMessage());
+        assertFalse(describe(failure).contains("s3cret-pw"), describe(failure));
+    }
+
+    /** Every message and stack trace line the logs would show for this failure. */
+    private static String describe(Throwable failure) {
+        java.io.StringWriter out = new java.io.StringWriter();
+        failure.printStackTrace(new java.io.PrintWriter(out));
+        return out.toString();
     }
 
     /** A key left empty in YAML is a null: the library keeps the default instead of failing later. */
