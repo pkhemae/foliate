@@ -31,7 +31,7 @@ class ArchitectureTest {
     /** Any mention of a plugin class or package: an import (wildcard or static) or a qualified name. */
     private static final Pattern REFERENCE = Pattern.compile("\\b" + Pattern.quote(BASE) + "\\.([\\w.]*[\\w*])");
 
-    /** Parents whose children are independent of one another: {@code modules.scoreboard}, ... */
+    /** Parents whose children are independent of one another: {@code modules.alpha}, ... */
     private static final Set<String> GROUPS = Set.of("modules", "hooks");
 
     @Test
@@ -54,11 +54,11 @@ class ArchitectureTest {
     @Test
     void theRuleCatchesEveryWayToReachAnotherPart() {
         String source = """
-                package dev.foliate.modules.scoreboard;
+                package dev.foliate.modules.alpha;
 
                 import dev.foliate.core.message.MessageService;
-                import dev.foliate.modules.profile.*;
-                import static dev.foliate.hooks.zmenu.ZMenuHook.NAME;
+                import dev.foliate.modules.beta.*;
+                import static dev.foliate.hooks.gamma.GammaHook.NAME;
                 import dev.foliate.PluginConfig;
 
                 class Example {
@@ -69,12 +69,12 @@ class ArchitectureTest {
 
         assertEquals(
                 List.of(
-                        "modules.profile.*",
-                        "hooks.zmenu.ZMenuHook.NAME",
+                        "modules.beta.*",
+                        "hooks.gamma.GammaHook.NAME",
                         "PluginConfig",
                         "commands.FoliateCommand",
                         "modules"),
-                foreignReferences("modules.scoreboard", source));
+                foreignReferences("modules.alpha", source));
     }
 
     @Test
