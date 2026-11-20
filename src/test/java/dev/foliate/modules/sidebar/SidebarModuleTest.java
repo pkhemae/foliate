@@ -78,11 +78,11 @@ class SidebarModuleTest {
     @Test
     void checkReportsAPlayerWithoutABoard() {
         PlayerMock player = server.addPlayer("Alex");
-        assertEquals(null, sidebar.problemWith(player));
+        assertEquals(null, sidebar.problemWith(player, 1));
 
         server.getPluginManager().callEvent(new PlayerQuitEvent(player, Component.empty(), PlayerQuitEvent.QuitReason.DISCONNECTED));
 
-        assertEquals("no sidebar was created for Alex", sidebar.problemWith(player));
+        assertEquals("no sidebar was created for Alex", sidebar.problemWith(player, 1));
         assertEquals(null, sidebar.problemAfterQuit(player.getUniqueId(), "Alex"));
     }
 

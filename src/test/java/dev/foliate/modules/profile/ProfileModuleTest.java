@@ -264,7 +264,7 @@ class ProfileModuleTest {
     void checkPassesForAPlayerWhoseProfileWasSaved() {
         PlayerMock player = server.addPlayer("Alex");
 
-        assertEquals(null, profiles.problemWith(player));
+        assertEquals(null, profiles.problemWith(player, 1));
     }
 
     @Test
@@ -276,7 +276,7 @@ class ProfileModuleTest {
             return null;
         });
 
-        assertEquals("the profile of Alex was not saved", profiles.problemWith(player));
+        assertEquals("the profile of Alex was not saved", profiles.problemWith(player, 1));
     }
 
     @Test
@@ -291,11 +291,19 @@ class ProfileModuleTest {
     }
 
     @Test
+    void checkReportsAPlayerWhoseReturnWasNotCounted() {
+        PlayerMock player = server.addPlayer("Alex");
+
+        assertEquals(
+                "the profile of Alex counts 1 joins after visit 2", profiles.problemWith(player, 2));
+    }
+
+    @Test
     void checkReportsAProfileThatIsNotLoaded() {
         PlayerMock player = server.addPlayer("Alex");
         profiles.quit(player.getUniqueId());
 
-        assertEquals("the profile of Alex is not loaded", profiles.problemWith(player));
+        assertEquals("the profile of Alex is not loaded", profiles.problemWith(player, 1));
     }
 
     @Test

@@ -140,7 +140,7 @@ public final class ProfileModule implements Module, PlayerCheck, Listener {
     }
 
     @Override
-    public @Nullable String problemWith(Player player) {
+    public @Nullable String problemWith(Player player, int visit) {
         UUID id = player.getUniqueId();
         if (find(id).isEmpty()) {
             return "the profile of " + player.getName() + " is not loaded";
@@ -149,8 +149,13 @@ public final class ProfileModule implements Module, PlayerCheck, Listener {
             return "the profile of " + player.getName() + " was still being saved after " + FLUSH_TIMEOUT_SECONDS + " seconds";
         }
         try {
-            if (database.call(connection -> repository.find(connection, id)).isEmpty()) {
+            Optional<PlayerProfile> stored = database.call(connection -> repository.find(connection, id));
+            if (stored.isEmpty()) {
                 return "the profile of " + player.getName() + " was not saved";
+            }
+            // The profile is kept between sessions: a player who came back has been counted again.
+            if (stored.get().joins() < visit) {
+                return "the profile of " + player.getName() + " counts " + stored.get().joins() + " joins after visit " + visit;
             }
         } catch (SQLException e) {
             return "the profile of " + player.getName() + " could not be read back: " + e.getMessage();

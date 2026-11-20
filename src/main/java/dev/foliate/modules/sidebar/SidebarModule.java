@@ -88,7 +88,7 @@ public final class SidebarModule implements Module, PlayerCheck, Listener {
     }
 
     @Override
-    public @Nullable String problemWith(Player player) {
+    public @Nullable String problemWith(Player player, int visit) {
         if (!settings.get().enabled() || entries.containsKey(player.getUniqueId())) {
             return null;
         }

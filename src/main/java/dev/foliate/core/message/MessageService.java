@@ -1,6 +1,7 @@
 package dev.foliate.core.message;
 
 import dev.foliate.core.module.Module;
+import dev.foliate.core.module.PlayerCheck;
 import dev.foliate.core.yaml.Yaml;
 import dev.foliate.core.yaml.YamlException;
 import java.io.IOException;
@@ -26,8 +27,10 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import net.kyori.adventure.title.Title;
 import net.kyori.adventure.translation.Translator;
+import org.bukkit.entity.Player;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -50,12 +53,14 @@ import org.slf4j.Logger;
  * <p>Thread-safe. A reload swaps in a complete new set of messages, or keeps the old one when a
  * file is invalid.
  */
-public final class MessageService implements Module {
+public final class MessageService implements Module, PlayerCheck {
 
     /** Locales shipped in the jar under {@code lang/}. English must stay: it is the last resort. */
     private static final List<String> BUNDLED_LOCALES = List.of("en", "fr");
 
     private static final String PREFIX_KEY = "prefix";
+    /** A message every language file writes in its own words. */
+    private static final String LANGUAGE_CHECK_KEY = "menu.unavailable";
     private static final String EXTENSION = ".yml";
 
     /** {@code en}, {@code pt_BR}, {@code fr-CA}: what a language file may be called. */
@@ -150,6 +155,23 @@ public final class MessageService implements Module {
                 viewer.showTitle(Title.title(title, subtitle));
             }
         });
+    }
+
+    /**
+     * A player is spoken to in the language their client reports: the text rendered for the player
+     * must be the text of that locale, and not, say, the default language's because the player's
+     * language could not be read from them.
+     */
+    @Override
+    public @Nullable String problemWith(Player player, int visit) {
+        Locale locale = player.locale();
+        PlainTextComponentSerializer plain = PlainTextComponentSerializer.plainText();
+        String forPlayer = plain.serialize(render(player, LANGUAGE_CHECK_KEY));
+        String forLocale = plain.serialize(render(locale, LANGUAGE_CHECK_KEY));
+        return forPlayer.equals(forLocale)
+                ? null
+                : player.getName() + " is not spoken to in " + locale + ": got \"" + forPlayer + "\" instead of \""
+                        + forLocale + "\"";
     }
 
     /** Renders a message for a viewer, in the viewer's language. A list is joined with newlines. */

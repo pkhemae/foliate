@@ -27,6 +27,8 @@ import net.kyori.adventure.title.Title;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockbukkit.mockbukkit.MockBukkit;
+import org.mockbukkit.mockbukkit.entity.PlayerMock;
 import org.slf4j.helpers.NOPLogger;
 
 class MessageServiceTest {
@@ -303,6 +305,40 @@ class MessageServiceTest {
 
         assertEquals(List.of("[P] Bonjour Alex"), french.received);
         assertEquals(List.of("[P] Hello Alex"), english.received);
+    }
+
+    /**
+     * MockBukkit's players keep one locale in their pointers whatever {@code setLocale} says,
+     * which is what a server that cannot read its players' language would look like. The real
+     * thing is checked with a connected client in CI.
+     */
+    @Test
+    void playerWhoseLanguageCannotBeReadIsReported() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "menu:\n  unavailable: \"Not now\"\n");
+        Files.writeString(directory.resolve("lang/fr.yml"), "menu:\n  unavailable: \"Pas maintenant\"\n");
+        messages.reload();
+        PlayerMock player = MockBukkit.mock().addPlayer("Alex");
+        try {
+            player.setLocale(Locale.FRENCH);
+
+            assertEquals(
+                    "Alex is not spoken to in fr: got \"Not now\" instead of \"Pas maintenant\"",
+                    messages.problemWith(player, 1));
+        } finally {
+            MockBukkit.unmock();
+        }
+    }
+
+    @Test
+    void playerWhoseLanguageIsTheDefaultOneIsFine() throws Exception {
+        PlayerMock player = MockBukkit.mock().addPlayer("Alex");
+        try {
+            player.setLocale(Locale.ENGLISH);
+
+            assertEquals(null, messages.problemWith(player, 1));
+        } finally {
+            MockBukkit.unmock();
+        }
     }
 
     private void useDefaultLocale(String locale) throws Exception {
