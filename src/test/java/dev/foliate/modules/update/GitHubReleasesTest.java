@@ -2,6 +2,7 @@ package dev.foliate.modules.update;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
@@ -9,7 +10,9 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +21,7 @@ import org.junit.jupiter.api.Test;
 class GitHubReleasesTest {
 
     private HttpServer server;
+    private final CountDownLatch stalled = new CountDownLatch(1);
 
     @BeforeEach
     void setUp() throws IOException {
@@ -27,6 +31,7 @@ class GitHubReleasesTest {
 
     @AfterEach
     void tearDown() {
+        stalled.countDown();
         server.stop(0);
     }
 
@@ -78,6 +83,32 @@ class GitHubReleasesTest {
         IOException failure = assertThrows(IOException.class, source("/latest")::latest);
 
         assertTrue(failure.getMessage() != null && !failure.getMessage().isBlank(), failure.getMessage());
+    }
+
+    /**
+     * Closing an {@code HttpClient} waits for its requests: one stalled in the middle of its body
+     * must be cancelled, or the timeout would be reported only once the server finally gave up.
+     */
+    @Test
+    void answerThatStallsIsGivenUpOnWithoutWaitingForTheServer() {
+        server.createContext("/stall", exchange -> {
+            exchange.sendResponseHeaders(200, 1000);
+            exchange.getResponseBody().write('{');
+            exchange.getResponseBody().flush();
+            try {
+                stalled.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+        });
+        GitHubReleases impatient = new GitHubReleases(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/stall"), Duration.ofSeconds(1));
+
+        IOException failure = assertTimeoutPreemptively(
+                Duration.ofSeconds(8), () -> assertThrows(IOException.class, impatient::latest));
+
+        assertTrue(failure.getMessage().contains("in time"), failure.getMessage());
     }
 
     private GitHubReleases source(String path) {

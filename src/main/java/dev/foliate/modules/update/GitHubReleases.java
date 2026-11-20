@@ -23,18 +23,24 @@ public final class GitHubReleases implements ReleaseSource {
     private static final String REPOSITORY = "pkhemae/foliate";
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
-    private static final long TOTAL_TIMEOUT_SECONDS = 10;
+    private static final Duration TOTAL_TIMEOUT = Duration.ofSeconds(10);
     private static final int NOT_FOUND = 404;
     private static final int OK = 200;
 
     private final URI latestRelease;
+    private final Duration totalTimeout;
 
     public GitHubReleases() {
         this(URI.create("https://api.github.com/repos/" + REPOSITORY + "/releases/latest"));
     }
 
     GitHubReleases(URI latestRelease) {
+        this(latestRelease, TOTAL_TIMEOUT);
+    }
+
+    GitHubReleases(URI latestRelease, Duration totalTimeout) {
         this.latestRelease = latestRelease;
+        this.totalTimeout = totalTimeout;
     }
 
     @Override
@@ -44,13 +50,14 @@ public final class GitHubReleases implements ReleaseSource {
                 .timeout(CONNECT_TIMEOUT)
                 .build();
         // Redirects are followed: GitHub answers with one once a repository has been renamed.
-        try (HttpClient client = HttpClient.newBuilder()
+        HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(CONNECT_TIMEOUT)
                 .followRedirects(HttpClient.Redirect.NORMAL)
-                .build()) {
+                .build();
+        try {
             // The request timeout stops at the response headers; this one bounds the whole exchange.
             HttpResponse<String> response = client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                    .get(TOTAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    .get(totalTimeout.toMillis(), TimeUnit.MILLISECONDS);
             if (response.statusCode() == NOT_FOUND) {
                 // No release published yet.
                 return Optional.empty();
@@ -68,6 +75,10 @@ public final class GitHubReleases implements ReleaseSource {
         } catch (RuntimeException e) {
             // Gson reports an answer of the wrong shape with several unchecked exceptions.
             throw new IOException("GitHub's answer could not be understood", e);
+        } finally {
+            // close() alone waits for the requests still running, which defeats the timeout above.
+            client.shutdownNow();
+            client.close();
         }
     }
 
