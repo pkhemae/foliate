@@ -77,13 +77,18 @@ jobs:
   # a scoreboard, a saved profile, an open menu, a connection that holds, a player who comes back, and
   # the messages of their language.
   client-test:
-    name: Folia test with a connected client (hooks ${{ matrix.hooks }})
+    name: Folia test with a connected client (hooks ${{ matrix.hooks }}, typed ${{ matrix.typed }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         hooks: [true, false]
+        # typed: a Fabric client with hmc-specifics types a command, instead of only joining.
+        typed: [false, true]
+        exclude:
+          - hooks: false
+            typed: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -100,7 +105,7 @@ jobs:
         with:
           path: ~/.minecraft
           # The client downloaded for the Minecraft version of the build.
-          key: minecraft-client-${{ hashFiles('gradle/libs.versions.toml') }}
+          key: minecraft-client-${{ matrix.typed }}-${{ hashFiles('gradle/libs.versions.toml') }}
 
       # Downloads the Minecraft client from Mojang and runs the server with -PacceptEula=true:
       # both are subject to the Minecraft EULA (https://aka.ms/MinecraftEULA). Remove this job if
@@ -110,12 +115,13 @@ jobs:
         timeout-minutes: 20
         env:
           HOOKS: ${{ matrix.hooks }}
+          TYPED: ${{ matrix.typed }}
         run: .github/scripts/client-test.sh
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure() || cancelled()
         with:
-          name: client-test-logs-hooks-${{ matrix.hooks }}
+          name: client-test-logs-hooks-${{ matrix.hooks }}-typed-${{ matrix.typed }}
           path: |
             run/logs/latest.log
             server.out

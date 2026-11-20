@@ -23,3 +23,11 @@ Thumbs.db
 
 # Kotlin DSL caches
 .kotlin/
+
+# The connected-client test (.github/scripts/client-test.sh)
+HeadlessMC/
+headlessmc.jar
+client-run/
+client-in.fifo
+client-*.out
+server.out
