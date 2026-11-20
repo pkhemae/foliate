@@ -21,8 +21,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # The tag is the version: one that is not a version, or that was cut from a commit that never
-      # went through main, must not become a release.
+      # A tag that is not a version, or that was cut from a commit that never went through main,
+      # must not become a release.
       - name: Check the tag
         run: |
           if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?$ ]]; then
