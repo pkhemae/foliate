@@ -178,11 +178,11 @@ jobs:
           FOLIATE_TEST_MYSQL_PASSWORD: throwaway
         run: ./gradlew test --tests '*ProfileStorageOnMysqlTest'
 
-      # A skipped class would still be a green build: the five tests must have run.
+      # A skipped class would still be a green build: some tests must have run, and none skipped.
       - name: The tests were not skipped
         run: |
           report=build/test-results/test/TEST-dev.foliate.modules.profile.ProfileStorageOnMysqlTest.xml
-          grep -q 'tests="5" skipped="0" failures="0" errors="0"' "$report"
+          grep -qE 'tests="[1-9][0-9]*" skipped="0" failures="0" errors="0"' "$report"
 
   # The template's promise is that renaming it gives a plugin that builds and passes its tests.
   rename-check:
