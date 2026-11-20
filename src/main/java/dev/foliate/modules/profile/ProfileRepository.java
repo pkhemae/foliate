@@ -1,6 +1,7 @@
 package dev.foliate.modules.profile;
 
 import dev.foliate.core.player.PlayerRepository;
+import dev.foliate.core.storage.SqlErrors;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -26,18 +27,15 @@ final class ProfileRepository implements PlayerRepository<PlayerProfile> {
         }
     }
 
-    /** Inserts or updates. Update first: "upsert" syntax differs between SQLite and MySQL. */
+    /**
+     * Inserts or updates. Update first: "upsert" syntax differs between SQLite and MySQL. When
+     * another server sharing the database inserted the row between the two, the insert fails on
+     * the key and the update is made again, so the save is not lost.
+     */
     @Override
     public void save(Connection connection, PlayerProfile profile) throws SQLException {
-        try (PreparedStatement update = connection.prepareStatement(
-                "UPDATE foliate_profiles SET name = ?, last_seen = ?, joins = ? WHERE id = ?")) {
-            update.setString(1, profile.name());
-            update.setLong(2, profile.lastSeen());
-            update.setInt(3, profile.joins());
-            update.setString(4, profile.id().toString());
-            if (update.executeUpdate() > 0) {
-                return;
-            }
+        if (update(connection, profile)) {
+            return;
         }
         try (PreparedStatement insert = connection.prepareStatement(
                 "INSERT INTO foliate_profiles (id, name, first_seen, last_seen, joins) VALUES (?, ?, ?, ?, ?)")) {
@@ -47,6 +45,22 @@ final class ProfileRepository implements PlayerRepository<PlayerProfile> {
             insert.setLong(4, profile.lastSeen());
             insert.setInt(5, profile.joins());
             insert.executeUpdate();
+        } catch (SQLException e) {
+            if (!SqlErrors.isDuplicateKey(e) || !update(connection, profile)) {
+                throw e;
+            }
+        }
+    }
+
+    /** @return false when there is no row to update */
+    private static boolean update(Connection connection, PlayerProfile profile) throws SQLException {
+        try (PreparedStatement update = connection.prepareStatement(
+                "UPDATE foliate_profiles SET name = ?, last_seen = ?, joins = ? WHERE id = ?")) {
+            update.setString(1, profile.name());
+            update.setLong(2, profile.lastSeen());
+            update.setInt(3, profile.joins());
+            update.setString(4, profile.id().toString());
+            return update.executeUpdate() > 0;
         }
     }
 }

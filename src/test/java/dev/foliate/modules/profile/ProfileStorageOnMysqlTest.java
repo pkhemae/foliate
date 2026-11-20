@@ -8,10 +8,13 @@ import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
 import dev.foliate.core.storage.Database;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Clock;
@@ -23,6 +26,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,6 +69,7 @@ class ProfileStorageOnMysqlTest {
             statement.execute("DROP TABLE IF EXISTS foliate_profiles");
             statement.execute("DROP TABLE IF EXISTS foliate_schema_history");
         }
+        // A session variable set through the driver properties, read back by a test below.
         Files.writeString(directory.resolve("config.yml"), """
                 storage:
                   type: MYSQL
@@ -74,6 +79,8 @@ class ProfileStorageOnMysqlTest {
                     database: %s
                     username: %s
                     password: "%s"
+                    properties:
+                      sessionVariables: "wait_timeout=4321"
                 """.formatted(HOST, PORT, DATABASE, USER, PASSWORD));
         config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
@@ -97,6 +104,70 @@ class ProfileStorageOnMysqlTest {
 
         assertEquals(1, count("foliate_schema_history"));
         assertEquals(0, count("foliate_profiles"));
+    }
+
+    /**
+     * Several servers of a network share the database and may start together: each must find the
+     * migrations applied once, none may fail on the work of another.
+     */
+    @Test
+    void serversStartingTogetherMigrateTheSharedDatabaseOnce() throws Exception {
+        for (int round = 0; round < 3; round++) {
+            database.disable();
+            database = null;
+            try (Connection connection = DriverManager.getConnection(url(), USER, PASSWORD);
+                    Statement statement = connection.createStatement()) {
+                statement.execute("DROP TABLE IF EXISTS foliate_profiles");
+                statement.execute("DROP TABLE IF EXISTS foliate_schema_history");
+            }
+            List<Database> servers = IntStream.range(0, 4).mapToObj(i -> newDatabase()).toList();
+            ExecutorService starts = Executors.newFixedThreadPool(servers.size());
+            try {
+                List<Future<?>> started = new ArrayList<>();
+                for (Database server : servers) {
+                    started.add(starts.submit(() -> {
+                        server.enable();
+                        return null;
+                    }));
+                }
+                for (Future<?> future : started) {
+                    future.get(60, TimeUnit.SECONDS);
+                }
+            } finally {
+                starts.shutdownNow();
+                servers.subList(1, servers.size()).forEach(Database::disable);
+            }
+            database = servers.getFirst();
+            assertEquals(1, count("foliate_schema_history"));
+        }
+    }
+
+    /** Another server inserted the player between our update, which found no row, and our insert. */
+    @Test
+    void aRowInsertedByAnotherServerInTheMeantimeIsUpdatedInstead() throws Exception {
+        UUID id = UUID.randomUUID();
+        PlayerProfile theirs = new PlayerProfile(id, "Alex", 10, 20, 1);
+        PlayerProfile ours = new PlayerProfile(id, "Alex", 10, 30, 2);
+
+        database.call(connection -> {
+            repository.save(racing(connection, theirs), ours);
+            return null;
+        });
+
+        assertEquals(ours, database.call(connection -> repository.find(connection, id)).orElseThrow());
+    }
+
+    @Test
+    void driverPropertiesReachTheDriver() throws Exception {
+        int timeout = database.call(connection -> {
+            try (Statement statement = connection.createStatement();
+                    var rows = statement.executeQuery("SELECT @@session.wait_timeout")) {
+                rows.next();
+                return rows.getInt(1);
+            }
+        });
+
+        assertEquals(4321, timeout);
     }
 
     @Test
@@ -219,6 +290,40 @@ class ProfileStorageOnMysqlTest {
             assertEquals(1 + changes, database.call(connection -> repository.find(connection, id)).orElseThrow().joins());
         }
         profiles.disable();
+    }
+
+    /**
+     * A connection on which the first update finds no row because, just before it, another server
+     * inserts {@code theirs}: what a save sees when it loses the race for a new player.
+     */
+    private Connection racing(Connection real, PlayerProfile theirs) {
+        AtomicBoolean raced = new AtomicBoolean();
+        return (Connection) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {Connection.class}, (proxy, method, arguments) -> {
+            Object result = invoke(real, method, arguments);
+            if (method.getName().equals("prepareStatement")
+                    && ((String) arguments[0]).startsWith("UPDATE")
+                    && raced.compareAndSet(false, true)) {
+                PreparedStatement update = (PreparedStatement) result;
+                return Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {PreparedStatement.class}, (self, call, parameters) -> {
+                    if (call.getName().equals("executeUpdate")) {
+                        try (Connection other = DriverManager.getConnection(url(), USER, PASSWORD)) {
+                            repository.save(other, theirs);
+                        }
+                        return 0;
+                    }
+                    return invoke(update, call, parameters);
+                });
+            }
+            return result;
+        });
+    }
+
+    private static Object invoke(Object target, java.lang.reflect.Method method, Object[] arguments) throws Throwable {
+        try {
+            return method.invoke(target, arguments);
+        } catch (InvocationTargetException e) {
+            throw e.getCause();
+        }
     }
 
     private Database newDatabase() {

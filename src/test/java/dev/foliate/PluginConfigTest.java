@@ -34,6 +34,24 @@ class PluginConfigTest {
         assertEquals(expected, Files.readString(directory.resolve("config.yml")));
     }
 
+    @Test
+    void driverPropertiesAreReadAsTheyAreWritten() throws Exception {
+        Files.writeString(directory.resolve("config.yml"), """
+                storage:
+                  mysql:
+                    properties:
+                      sslMode: REQUIRED
+                      connectionTimeZone: UTC
+                """);
+        ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
+
+        service.enable();
+
+        assertEquals(
+                java.util.Map.of("sslMode", "REQUIRED", "connectionTimeZone", "UTC"),
+                service.get().storage().mysql().properties());
+    }
+
     /** A key left empty in YAML is a null: the library keeps the default instead of failing later. */
     @Test
     void settingsLeftEmptyKeepTheirDefault() throws Exception {
@@ -42,6 +60,7 @@ class PluginConfigTest {
             "scoreboard:\n  title:\n",
             "scoreboard:\n  lines:\n",
             "storage:\n  type:\n",
+            "storage:\n  mysql:\n    properties:\n",
             "scoreboard:\n",
         }) {
             Files.writeString(directory.resolve("config.yml"), empty);

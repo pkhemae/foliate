@@ -40,3 +40,8 @@ storage:
     password: ''
     # Maximum number of connections kept open.
     pool-size: 4
+    # Options passed to the database driver as they are, for instance:
+    #   sslMode: REQUIRED
+    #   connectionTimeZone: UTC
+    # See the MySQL Connector/J documentation for the full list.
+    properties: {}

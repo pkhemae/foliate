@@ -3,6 +3,8 @@ package dev.foliate.core.storage;
 import de.exlll.configlib.Comment;
 import de.exlll.configlib.Configuration;
 import dev.foliate.core.config.ConfigException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /** The {@code storage} section of {@code config.yml}: where the {@link Database} keeps its data. */
 @Configuration
@@ -60,6 +62,14 @@ public final class StorageSettings {
         @Comment("Maximum number of connections kept open.")
         private int poolSize = 4;
 
+        @Comment({
+            "Options passed to the database driver as they are, for instance:",
+            "  sslMode: REQUIRED",
+            "  connectionTimeZone: UTC",
+            "See the MySQL Connector/J documentation for the full list."
+        })
+        private Map<String, String> properties = new LinkedHashMap<>();
+
         private Mysql() {}
 
         public String host() {
@@ -84,6 +94,10 @@ public final class StorageSettings {
 
         public int poolSize() {
             return poolSize;
+        }
+
+        public Map<String, String> properties() {
+            return Map.copyOf(properties);
         }
 
         void validate() throws ConfigException {

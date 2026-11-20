@@ -26,20 +26,59 @@ import org.slf4j.Logger;
  *
  * <p>Keep each script to one change. MySQL commits schema statements as it runs them, so there a
  * script that fails halfway cannot be rolled back, and it is not recorded as applied either.
+ *
+ * <p>On MySQL and MariaDB, several servers of a network may share the database and start at the
+ * same time: the migrations run under a named lock of the database server, so that one server
+ * applies them while the others wait, then find them applied. SQLite is a file of one server.
  */
 final class Migrations {
 
     private static final String HISTORY_TABLE = "foliate_schema_history";
+    /** How long a server waits for another one to finish migrating the shared database. */
+    private static final int LOCK_TIMEOUT_SECONDS = 60;
 
     private final Logger logger;
     private final List<String> scripts;
+    private final boolean sharedServer;
 
-    Migrations(Logger logger, List<String> scripts) {
+    /** @param sharedServer true on MySQL and MariaDB, whose database other servers may share */
+    Migrations(Logger logger, List<String> scripts, boolean sharedServer) {
         this.logger = logger;
         this.scripts = scripts;
+        this.sharedServer = sharedServer;
     }
 
     void apply(Connection connection) throws SQLException, IOException {
+        if (!sharedServer) {
+            applyAll(connection);
+            return;
+        }
+        // The lock belongs to the connection's session: taken and released on this connection. It
+        // is named after the database, so that plugins on other databases of the same MySQL server
+        // do not wait for each other; MySQL allows 64 characters.
+        String name = HISTORY_TABLE + "." + connection.getCatalog();
+        String lock = name.substring(0, Math.min(name.length(), 64));
+        try (PreparedStatement take = connection.prepareStatement("SELECT GET_LOCK(?, ?)")) {
+            take.setString(1, lock);
+            take.setInt(2, LOCK_TIMEOUT_SECONDS);
+            try (ResultSet result = take.executeQuery()) {
+                if (!result.next() || result.getInt(1) != 1) {
+                    throw new SQLException("Another server kept the database migrations locked for more than "
+                            + LOCK_TIMEOUT_SECONDS + " seconds");
+                }
+            }
+        }
+        try {
+            applyAll(connection);
+        } finally {
+            try (PreparedStatement release = connection.prepareStatement("SELECT RELEASE_LOCK(?)")) {
+                release.setString(1, lock);
+                release.executeQuery().close();
+            }
+        }
+    }
+
+    private void applyAll(Connection connection) throws SQLException, IOException {
         boolean autoCommit = connection.getAutoCommit();
         connection.setAutoCommit(false);
         try {
