@@ -1,6 +1,5 @@
 package dev.foliate.modules.profile;
 
-import com.destroystokyo.paper.event.player.PlayerConnectionCloseEvent;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
@@ -11,12 +10,14 @@ import java.time.Clock;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
@@ -51,6 +52,12 @@ public final class ProfileModule implements Module, Listener {
     public static final String MIGRATION = "001_create_profiles.sql";
 
     private static final long LOAD_TIMEOUT_SECONDS = 10;
+
+    /**
+     * How long a profile loaded at pre-login waits for its join. A connection can end between the
+     * two without a trace (banned, server full, dropped), so an entry older than this is forgotten.
+     */
+    private static final long LOGIN_TTL_MILLIS = 5 * 60_000L;
     private static final long FLUSH_TIMEOUT_SECONDS = 15;
 
     private final Plugin plugin;
@@ -65,7 +72,16 @@ public final class ProfileModule implements Module, Listener {
     private final Map<UUID, PlayerProfile> online = new ConcurrentHashMap<>();
 
     /** Profiles loaded at pre-login, waiting for a join that may never come. */
-    private final Map<UUID, PlayerProfile> loggingIn = new ConcurrentHashMap<>();
+    private final Map<UUID, PendingLogin> loggingIn = new ConcurrentHashMap<>();
+
+    /** Players whose profile is being loaded after their join, because no pre-login was seen. */
+    private final Set<UUID> pendingJoins = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Makes "the player quit" and "their late profile is cached" atomic: whichever comes second
+     * must see the other, or a profile would be cached for a player who is gone.
+     */
+    private final Object lifecycle = new Object();
 
     /** The last database operation queued for each player; the next one is chained after it. */
     private final Map<UUID, CompletableFuture<?>> queues = new ConcurrentHashMap<>();
@@ -113,6 +129,7 @@ public final class ProfileModule implements Module, Listener {
         online.values().forEach(profile -> write(profile.seen(now)));
         online.clear();
         loggingIn.clear();
+        pendingJoins.clear();
         if (!awaitWrites(FLUSH_TIMEOUT_SECONDS)) {
             logger.warn("Some player profiles were not saved within {} seconds", FLUSH_TIMEOUT_SECONDS);
         }
@@ -150,15 +167,6 @@ public final class ProfileModule implements Module, Listener {
         quit(event.getPlayer().getUniqueId());
     }
 
-    /**
-     * A connection can end after pre-login without ever becoming a join (banned, server full,
-     * dropped). No quit event follows, so this is where its profile is let go.
-     */
-    @EventHandler
-    public void onConnectionClose(PlayerConnectionCloseEvent event) {
-        abandonLogin(event.getPlayerUniqueId());
-    }
-
     /** Loads the profile of a player who is logging in. Blocks: never call from a tick thread. */
     void beginLogin(UUID id, String name) throws ExecutionException, TimeoutException, InterruptedException {
         // Someone logging in while already online (the old session is about to be kicked) has a
@@ -169,31 +177,42 @@ public final class ProfileModule implements Module, Listener {
                 : read(id)
                         .get(LOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                         .orElseGet(() -> PlayerProfile.create(id, name, clock.millis()));
-        loggingIn.put(id, profile);
+        long now = clock.millis();
+        // Logins that never became a join leave nothing else to tell us: forget them here.
+        loggingIn.values().removeIf(pending -> now - pending.at() > LOGIN_TTL_MILLIS);
+        loggingIn.put(id, new PendingLogin(profile, now));
     }
 
-    void abandonLogin(UUID id) {
-        loggingIn.remove(id);
+    /** How many logins wait for their join. For tests. */
+    int pendingLogins() {
+        return loggingIn.size();
     }
 
     void join(UUID id, String name) {
         long now = clock.millis();
-        PlayerProfile loaded = loggingIn.remove(id);
-        if (loaded != null) {
-            PlayerProfile joined = loaded.joined(name, now);
+        PendingLogin pending = loggingIn.remove(id);
+        if (pending != null && now - pending.at() <= LOGIN_TTL_MILLIS) {
+            PlayerProfile joined = pending.profile().joined(name, now);
             online.put(id, joined);
             write(joined);
             return;
         }
-        // No pre-login was seen for this player, which happens when the plugin is enabled while
-        // they connect. Load without blocking the tick; until then they simply have no profile.
+        // No usable pre-login: the plugin was enabled while the player connected, or the login
+        // took longer than anyone should wait. Load without blocking the tick; until then they
+        // simply have no profile.
+        pendingJoins.add(id);
         read(id).thenAccept(stored -> {
                     PlayerProfile joined = stored.orElseGet(() -> PlayerProfile.create(id, name, now))
                             .joined(name, now);
-                    if (plugin.getServer().getPlayer(id) != null) {
-                        online.put(id, joined);
+                    synchronized (lifecycle) {
+                        // Gone while the profile was loading: nobody to cache it for.
+                        if (pendingJoins.remove(id)) {
+                            online.put(id, joined);
+                        }
+                        // Queued under the same lock as the quit's save, so the two reach the
+                        // database in the order the player's session went.
+                        write(joined);
                     }
-                    write(joined);
                 })
                 .exceptionally(error -> {
                     logger.error("Could not load the profile of {}", name, error);
@@ -202,10 +221,21 @@ public final class ProfileModule implements Module, Listener {
     }
 
     void quit(UUID id) {
-        PlayerProfile profile = online.remove(id);
-        if (profile != null) {
-            write(profile.seen(clock.millis()));
+        synchronized (lifecycle) {
+            pendingJoins.remove(id);
+            PlayerProfile profile = online.remove(id);
+            if (profile != null) {
+                write(profile.seen(clock.millis()));
+            }
         }
+    }
+
+    /** A profile loaded at pre-login, and when. */
+    private record PendingLogin(PlayerProfile profile, long at) {}
+
+    /** How many players still have database work queued. For tests: it must fall back to zero. */
+    int pendingQueues() {
+        return queues.size();
     }
 
     /** Waits until everything queued so far has reached the database. */
@@ -244,20 +274,29 @@ public final class ProfileModule implements Module, Listener {
      */
     private <T> CompletableFuture<T> enqueue(UUID id, SqlFunction<T> work) {
         CompletableFuture<T> result = new CompletableFuture<>();
+        // What the queue holds is not the database work itself but a gate that opens once the
+        // callbacks of its result have run: a callback that queues more work (the late join does)
+        // has then queued it before anyone waiting for the queue is released.
+        CompletableFuture<Void> gate = new CompletableFuture<>();
+        AtomicReference<CompletableFuture<T>> chained = new AtomicReference<>();
         queues.compute(id, (key, tail) -> {
             CompletableFuture<?> previous = tail == null ? CompletableFuture.completedFuture(null) : tail;
-            return previous.handle((done, error) -> null)
-                    .thenCompose(ignored -> database.submit(work))
-                    .whenComplete((value, error) -> {
-                        if (error == null) {
-                            result.complete(value);
-                        } else {
-                            result.completeExceptionally(error.getCause() != null ? error.getCause() : error);
-                        }
-                    });
+            chained.set(previous.handle((done, error) -> null).thenCompose(ignored -> database.submit(work)));
+            return gate;
         });
-        // Drop the queue once it is idle, or the map would keep one entry per player ever seen.
-        result.whenComplete((value, error) -> queues.computeIfPresent(id, (key, tail) -> tail.isDone() ? null : tail));
+        // Registered outside compute(): a future that is already complete would run this at once,
+        // and updating the map from inside one of its own updates is not allowed.
+        chained.get().whenComplete((value, error) -> {
+            if (error == null) {
+                result.complete(value);
+            } else {
+                result.completeExceptionally(error.getCause() != null ? error.getCause() : error);
+            }
+            gate.complete(null);
+            // Drop the queue once this is its last operation, or the map would keep one entry per
+            // player ever seen. If a later operation chained after this one, the entry is theirs.
+            queues.remove(id, gate);
+        });
         return result;
     }
 }

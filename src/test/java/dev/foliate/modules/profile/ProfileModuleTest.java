@@ -156,14 +156,44 @@ class ProfileModuleTest {
     }
 
     @Test
-    void loginThatNeverBecomesAJoinLeavesNothingBehind() throws Exception {
+    void loginThatNeverBecomesAJoinSavesNothing() throws Exception {
         UUID id = UUID.randomUUID();
 
         profiles.beginLogin(id, "Banned");
-        profiles.abandonLogin(id);
         profiles.disable();
 
         assertTrue(stored(id).isEmpty());
+    }
+
+    /** A connection can end after pre-login without a trace: such entries expire by themselves. */
+    @Test
+    void loginsThatNeverBecameAJoinAreForgottenAfterAWhile() throws Exception {
+        profiles.beginLogin(UUID.randomUUID(), "Banned");
+        profiles.beginLogin(UUID.randomUUID(), "Full");
+        assertEquals(2, profiles.pendingLogins());
+
+        clock.set(1_000 + 6 * 60_000);
+        profiles.beginLogin(UUID.randomUUID(), "Next");
+
+        assertEquals(1, profiles.pendingLogins());
+    }
+
+    @Test
+    void loginThatWaitedTooLongIsNotTrustedAtJoinButTheProfileIsStillLoaded() throws Exception {
+        UUID id = store(new PlayerProfile(UUID.randomUUID(), "Alex", 10, 20, 4));
+        profiles.beginLogin(id, "Alex");
+        // The row changes while the login waits: only a fresh load can see it.
+        store(new PlayerProfile(id, "Alex", 10, 20, 9));
+
+        clock.set(1_000 + 6 * 60_000);
+        profiles.join(id, "Alex");
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (profiles.find(id).isEmpty() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+
+        assertEquals(10, profiles.find(id).orElseThrow().joins());
+        assertEquals(0, profiles.pendingLogins());
     }
 
     @Test
@@ -193,6 +223,41 @@ class ProfileModuleTest {
         PlayerProfile profile = stored(id).orElseThrow();
         assertEquals(25, profile.joins());
         assertEquals(1_024, profile.lastSeen());
+    }
+
+    /** The map of queues used to keep one entry per player ever seen. */
+    @Test
+    void queuesAreReleasedOnceTheirWritesLanded() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        player.disconnect();
+        flush();
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (profiles.pendingQueues() > 0 && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(0, profiles.pendingQueues());
+    }
+
+    /** A profile loaded after the player quit must not be cached for a player who is gone. */
+    @Test
+    void profileLoadedAfterTheQuitIsNotCached() throws Exception {
+        UUID id = UUID.randomUUID();
+        // The player is really connected: the server still knows them when the load completes.
+        server.addPlayer(new PlayerMock(server, "Alex", id));
+        profiles.quit(id);
+        flush();
+        CountDownLatch release = holdStorageThread();
+
+        profiles.join(id, "Alex"); // no pre-login: the load happens in the background
+        profiles.quit(id); // and the player quits before it is done
+        release.countDown();
+        // The callback that caches the profile also saves it, counting the second join: waiting
+        // for the writes, as the shutdown does, must wait for that save too.
+        flush();
+        assertEquals(2, stored(id).orElseThrow().joins(), "the load callback's save was not awaited");
+
+        assertTrue(profiles.find(id).isEmpty());
     }
 
     @Test
