@@ -10,10 +10,6 @@ config-version: 1
 # Language of the console, and of players whose game language has no file in the lang folder.
 # Must be the name of a file in that folder, without the extension.
 default-locale: en
-# Asks GitHub once at startup whether a newer release exists, and says so in the console.
-# This is an outbound connection, made at startup: nothing about the server is sent beyond its address.
-# A change here applies after a server restart.
-update-check: true
 # Scoreboard shown on the right of each player's screen.
 scoreboard:
   enabled: true

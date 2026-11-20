@@ -34,7 +34,7 @@ first. The same jar runs on Paper.
 | **Scoreboard** | A per-player scoreboard on the side of the screen, drawn with packets because the Bukkit scoreboard API does not work on Folia |
 | **Integrations** | PlaceholderAPI and zMenu, both optional |
 | **Tests** | Unit tests, and a smoke test that boots a real Folia server in CI |
-| **Tooling** | One command to rename the template, GitHub releases on tag, Renovate, update check |
+| **Tooling** | One command to rename the template, GitHub releases on tag, Renovate |
 
 ## Quick start
 

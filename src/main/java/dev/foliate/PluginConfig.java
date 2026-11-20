@@ -56,13 +56,6 @@ public final class PluginConfig implements ConfigRoot {
     })
     private String defaultLocale = "en";
 
-    @Comment({
-        "Asks GitHub once at startup whether a newer release exists, and says so in the console.",
-        "This is an outbound connection, made at startup: nothing about the server is sent beyond its address.",
-        "A change here applies after a server restart."
-    })
-    private boolean updateCheck = true;
-
     @Comment("Scoreboard shown on the right of each player's screen.")
     private ScoreboardSettings scoreboard = new ScoreboardSettings();
 
@@ -83,10 +76,6 @@ public final class PluginConfig implements ConfigRoot {
 
     public String defaultLocale() {
         return defaultLocale;
-    }
-
-    public boolean updateCheck() {
-        return updateCheck;
     }
 
     public ScoreboardSettings scoreboard() {
