@@ -15,6 +15,13 @@ HOOKS="${HOOKS:-true}"
 # One visit per language, as Minecraft names it (en_us, fr_fr): a client set to it joins, is checked and kicked, then the next one joins
 # as the same player. Two visits are what a player coming back needs.
 LANGUAGES="${LANGUAGES:-en_us,fr_fr}"
+# With TYPED=true the client is a Fabric client with the mod hmc-specifics, which lets this script
+# make it type a command; without it the client is the vanilla one and only joins.
+TYPED="${TYPED:-false}"
+TYPED_COMMAND="foliate info"
+# The mod for the Minecraft version of the build, pinned: change both with that version.
+SPECIFICS_VERSION="${SPECIFICS_VERSION:-3.0.1}"
+SPECIFICS_SHA256="${SPECIFICS_SHA256:-7f0e13aee05184520c80cde986d6510f11cfb62c00a5ebc17b2f16f416468b92}"
 SERVER_LOG=run/logs/latest.log
 # Logged by the self-test (SelfTest.WAITING) when it waits for a player.
 WAITING="SELF-TEST WAITING FOR A PLAYER"
@@ -32,6 +39,15 @@ if [ ! -f headlessmc.jar ]; then
 fi
 echo "${HMC_SHA256}  headlessmc.jar" | sha256sum -c -
 
+LOADER=""
+if [ "$TYPED" = true ]; then
+  LOADER="fabric"
+  mkdir -p client-run/mods
+  curl -fsSL --retry 3 -o "client-run/mods/hmc-specifics.jar" \
+    "https://github.com/headlesshq/hmc-specifics/releases/download/${SPECIFICS_VERSION}/hmc-specifics-${MC_VERSION}-${SPECIFICS_VERSION}-fabric-release.jar"
+  echo "${SPECIFICS_SHA256}  client-run/mods/hmc-specifics.jar" | sha256sum -c -
+fi
+
 cat > HeadlessMC/config.properties <<CONFIG
 hmc.java.versions=$JAVA_HOME
 hmc.files.game=$PWD/client-run
@@ -44,9 +60,13 @@ CONFIG
 
 client_pid=""
 server_pid=""
+typer_pid=""
 # Ends the client's whole process group and waits for it to be gone, so that the next client does
 # not share the game directory with one that is still writing to it.
 stop_client() {
+  # The one typing for that client must not go on typing to the next.
+  [ -z "$typer_pid" ] || kill "$typer_pid" 2>/dev/null || true
+  typer_pid=""
   [ -n "$client_pid" ] || return 0
   kill -- "-$client_pid" 2>/dev/null || true
   for _ in $(seq 1 20); do
@@ -59,7 +79,7 @@ stop_client() {
 
 show_logs() {
   echo "::group::What the server logged about the player and the self-test"
-  grep -E "$JOINED|joined the game|lost connection|left the game|SELF-TEST|Checked for a connected|Foliate\\]" \
+  grep -E "$JOINED|joined the game|issued server command|lost connection|left the game|SELF-TEST|Checked for a connected|Typed by|Foliate\\]" \
     "$SERVER_LOG" 2>/dev/null | tail -n 40 || true
   echo "::endgroup::"
 }
@@ -78,11 +98,13 @@ trap cleanup EXIT
 
 echo "::group::Download the Minecraft client"
 # A dry run downloads everything and needs no account.
-java -jar headlessmc.jar launch --dry-run -lwjgl --offline "$MC_VERSION"
+# shellcheck disable=SC2086
+java -jar headlessmc.jar launch --dry-run -lwjgl --offline $LOADER "$MC_VERSION"
 echo "::endgroup::"
 
 rm -f "$SERVER_LOG"
 ./gradlew runFolia -PselfTest=true -PclientTest=true -PacceptEula=true "-Phooks=$HOOKS" "-PclientLanguages=$(echo "$LANGUAGES" | sed 's/_[a-z_]*//g')" \
+  "-PclientTyped=$([ "$TYPED" = true ] && echo "$TYPED_COMMAND")" \
   < /dev/null > server.out 2>&1 &
 server_pid=$!
 
@@ -99,13 +121,34 @@ for _ in $(seq 1 120); do
 done
 [ "$(count "$WAITING")" -ge 1 ] || { echo "The server never got ready"; exit 1; }
 
+# Makes the client type the command once the server saw it join: a few times, as its first
+# attempts may come before the game is ready for input.
+type_when_joined() {
+  expected="$1"
+  while [ "$(count "$JOINED")" -lt "$expected" ]; do sleep 1; done
+  sleep 6
+  for _ in 1 2 3; do
+    echo "/$TYPED_COMMAND" >&7 || true
+    sleep 4
+  done
+}
+
 launch_client() {
   language="$1"
   printf 'onboardAccessibility:false\npauseOnLostFocus:false\nlang:%s\n' "$language" > client-run/options.txt
-  # The pipe keeps the launcher's input open: its shell would otherwise read an end of input.
-  setsid bash -c 'tail -f /dev/null | java -jar headlessmc.jar launch -lwjgl --offline --server=127.0.0.1 --jvm "-Xmx2G" "$0"' \
-    "$MC_VERSION" > "client-$visit.out" 2>&1 &
+  # The launcher's shell reads its commands from a pipe that this script keeps open (an end of
+  # input would make it quit), and writes the typed command to.
+  rm -f client-in.fifo
+  mkfifo client-in.fifo
+  exec 7<>client-in.fifo
+  # shellcheck disable=SC2016
+  setsid bash -c 'java -jar headlessmc.jar launch -lwjgl --offline --server=127.0.0.1 --jvm "-Xmx2G" $1 "$0" < client-in.fifo' \
+    "$MC_VERSION" "$LOADER" > "client-$visit.out" 2>&1 &
   client_pid=$!
+  if [ "$TYPED" = true ]; then
+    type_when_joined "$visit" &
+    typer_pid=$!
+  fi
 }
 
 visit=0

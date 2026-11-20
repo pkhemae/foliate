@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,6 +29,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryType;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.Plugin;
 import org.jspecify.annotations.Nullable;
@@ -62,6 +64,7 @@ public final class SelfTest {
     private static final String EXPECTED_MODULES_PROPERTY = "foliate.selftest.expect";
     private static final String CLIENT_PROPERTY = "foliate.selftest.client";
     private static final String LANGUAGES_PROPERTY = "foliate.selftest.client.languages";
+    private static final String TYPED_PROPERTY = "foliate.selftest.client.typed";
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
     /** Starting a client takes much longer than starting the server. */
     private static final Duration CLIENT_TIMEOUT = Duration.ofMinutes(12);
@@ -81,6 +84,10 @@ public final class SelfTest {
     private final AtomicReference<CompletableFuture<Player>> nextPlayer =
             new AtomicReference<>(new CompletableFuture<>());
     private final boolean withClient = Boolean.getBoolean(CLIENT_PROPERTY);
+    /** A command the client is made to type once it has joined, without the slash; empty for none. */
+    private final String typedCommand = System.getProperty(TYPED_PROPERTY, "").strip();
+    /** Commands players typed, as the server saw them (with the slash), in order. */
+    private final List<String> typedByPlayers = new CopyOnWriteArrayList<>();
     /** The language each visit's client is set to, in order: one visit per entry, one at least. */
     private final List<String> visitLanguages = Arrays.stream(System.getProperty(LANGUAGES_PROPERTY, "").split(","))
             .map(String::strip)
@@ -120,6 +127,11 @@ public final class SelfTest {
                 @EventHandler
                 public void onJoin(PlayerJoinEvent event) {
                     nextPlayer.get().complete(event.getPlayer());
+                }
+
+                @EventHandler
+                public void onCommand(PlayerCommandPreprocessEvent event) {
+                    typedByPlayers.add(event.getMessage());
                 }
             }, plugin);
         }
@@ -173,6 +185,7 @@ public final class SelfTest {
                 .thenCompose(player -> after(SETTLE)
                         .thenCompose(ignored -> eventually(() -> schedulers.async().supply(() -> servedProblem(player, number, language))))
                         .thenCompose(ignored -> menuOpens(player))
+                        .thenCompose(ignored -> commandIsTyped())
                         .thenCompose(ignored -> after(SETTLE))
                         .thenCompose(ignored -> schedulers.entity(player)
                                 .run(() -> check(player.isOnline(), "the client was disconnected")))
@@ -213,6 +226,19 @@ public final class SelfTest {
                 visit,
                 checks.stream().map(check -> check.getClass().getSimpleName()).toList());
         return null;
+    }
+
+    /** Waits for the client to type the command it was asked to: what a player's own keystrokes reach. */
+    private CompletableFuture<Void> commandIsTyped() {
+        if (typedCommand.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        int before = typedByPlayers.size();
+        return eventually(() -> CompletableFuture.completedFuture(
+                        typedByPlayers.stream().skip(before).anyMatch(("/" + typedCommand)::equals)
+                                ? null
+                                : "the client did not type /" + typedCommand))
+                .thenRun(() -> logger.info("Typed by the client: /{}", typedCommand));
     }
 
     /** Kicks the player and checks that no module kept anything of them. */

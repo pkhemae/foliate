@@ -50,6 +50,10 @@ val clientTest: Boolean = providers.gradleProperty("clientTest").map(String::toB
 // client set to that language: a player who comes back, and the messages of their own language.
 val clientLanguages: String = providers.gradleProperty("clientLanguages").getOrElse("")
 
+// -PclientTyped="foliate info" makes each visit expect the client to type that command, which the
+// CI job does through the client mod hmc-specifics.
+val clientTyped: String = providers.gradleProperty("clientTyped").getOrElse("")
+
 // The modules the self-test must find enabled. Without this, a hook that silently failed to load
 // (its plugin could not download its libraries, say) would still give a green run.
 val expectedModules: String =
@@ -182,7 +186,7 @@ tasks.withType<RunServer>().configureEach {
     if (selfTest) {
         jvmArgs("-Dfoliate.selftest=true", "-Dfoliate.selftest.expect=$expectedModules")
         if (clientTest) {
-            jvmArgs("-Dfoliate.selftest.client=true", "-Dfoliate.selftest.client.languages=$clientLanguages")
+            jvmArgs("-Dfoliate.selftest.client=true", "-Dfoliate.selftest.client.languages=$clientLanguages", "-Dfoliate.selftest.client.typed=$clientTyped")
             doFirst {
                 // The server is switched to offline mode, which would stay on a developer's
                 // machine: this is for CI runners, which are thrown away.
