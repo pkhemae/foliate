@@ -1,7 +1,7 @@
 package dev.foliate.hooks.zmenu;
 
-import dev.foliate.api.menu.MenuException;
-import dev.foliate.api.menu.Menus;
+import dev.foliate.contracts.menu.MenuException;
+import dev.foliate.contracts.menu.Menus;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.scheduler.EntityRetiredException;

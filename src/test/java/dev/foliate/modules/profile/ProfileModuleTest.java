@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.foliate.PluginConfig;
-import dev.foliate.api.profile.ProfileSummary;
+import dev.foliate.contracts.profile.ProfileSummary;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleSkippedException;

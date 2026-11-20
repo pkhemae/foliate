@@ -11,7 +11,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import dev.foliate.PluginConfig;
-import dev.foliate.api.profile.ProfileSummary;
+import dev.foliate.contracts.profile.ProfileSummary;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;

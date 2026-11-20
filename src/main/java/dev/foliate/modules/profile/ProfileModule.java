@@ -1,7 +1,7 @@
 package dev.foliate.modules.profile;
 
-import dev.foliate.api.profile.ProfileLookup;
-import dev.foliate.api.profile.ProfileSummary;
+import dev.foliate.contracts.profile.ProfileLookup;
+import dev.foliate.contracts.profile.ProfileSummary;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;

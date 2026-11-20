@@ -1,12 +1,12 @@
 package dev.foliate;
 
-import dev.foliate.api.menu.Menus;
 import dev.foliate.commands.InfoCommand;
 import dev.foliate.commands.MenuCommand;
 import dev.foliate.commands.ProfileCommand;
 import dev.foliate.commands.ReloadCommand;
 import dev.foliate.commands.RootCommand;
 import dev.foliate.commands.Subcommand;
+import dev.foliate.contracts.menu.Menus;
 import dev.foliate.core.Platform;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;

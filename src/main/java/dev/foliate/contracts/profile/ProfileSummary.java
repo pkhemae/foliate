@@ -1,4 +1,4 @@
-package dev.foliate.api.profile;
+package dev.foliate.contracts.profile;
 
 /**
  * A player's profile as a command or another feature may show it.

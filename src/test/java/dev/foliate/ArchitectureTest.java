@@ -16,8 +16,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The layout of the code is a rule, not a habit: {@code core} knows nothing of the plugin;
- * {@code api} holds what features offer each other, and depends on {@code core} only; the modules,
- * hooks and commands depend on {@code core} and {@code api}, never on each other. Only
+ * {@code contracts} holds what features offer each other, and depends on {@code core} and itself;
+ * the modules, hooks and commands depend on {@code core} and {@code contracts}, never on each other.
+ * Only
  * {@code FoliatePlugin} and {@code PluginConfig}, which compose everything, may know it all.
  *
  * <p>It reads every mention of the plugin's packages in the source files (imports, wildcard or
@@ -39,7 +40,7 @@ class ArchitectureTest {
     private static final Set<String> GROUPS = Set.of("modules", "hooks");
 
     @Test
-    void everyPartDependsOnCoreAndItselfOnly() throws IOException {
+    void everyPartDependsOnlyOnWhatTheLayoutAllows() throws IOException {
         List<String> violations = new ArrayList<>();
         try (Stream<Path> files = Files.walk(MAIN)) {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
@@ -122,15 +123,15 @@ class ArchitectureTest {
     @Test
     void theContractsBetweenFeaturesAreOpenToAllButCore() {
         String source = """
-                import dev.foliate.api.profile.ProfileLookup;
+                import dev.foliate.contracts.profile.ProfileLookup;
                 import dev.foliate.core.message.MessageService;
                 import dev.foliate.modules.profile.ProfileModule;
                 """;
 
         assertEquals(List.of("modules.profile.ProfileModule"), foreignReferences("commands", source));
-        assertEquals(List.of("modules.profile.ProfileModule"), foreignReferences("api", source));
+        assertEquals(List.of("modules.profile.ProfileModule"), foreignReferences("contracts", source));
         assertEquals(
-                List.of("api.profile.ProfileLookup", "modules.profile.ProfileModule"), foreignReferences("core", source));
+                List.of("contracts.profile.ProfileLookup", "modules.profile.ProfileModule"), foreignReferences("core", source));
     }
 
     @Test
@@ -150,7 +151,7 @@ class ArchitectureTest {
             boolean allowed = target.equals(unit)
                     || target.equals("core")
                     // Everything but core may use the contracts between features.
-                    || (target.equals("api") && !unit.equals("core"));
+                    || (target.equals("contracts") && !unit.equals("core"));
             if (!allowed) {
                 foreign.add(references.group(1));
             }

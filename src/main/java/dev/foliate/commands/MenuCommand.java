@@ -2,7 +2,7 @@ package dev.foliate.commands;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import dev.foliate.api.menu.Menus;
+import dev.foliate.contracts.menu.Menus;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import org.bukkit.entity.Player;
 
