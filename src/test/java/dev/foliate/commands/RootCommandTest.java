@@ -424,11 +424,18 @@ class RootCommandTest {
         return player;
     }
 
-    /** Lets the async reload run, then the reply scheduled back on the sender's context. */
-    private void runAsyncWork() {
-        server.getScheduler().performTicks(1);
-        server.getScheduler().waitAsyncTasksFinished();
-        server.getScheduler().performTicks(2);
+    /**
+     * Lets the async reload run, then the reply scheduled back on the sender's context.
+     * MockBukkit's {@code waitAsyncTasksFinished} returns at once when the task has not been picked
+     * up by its thread yet, so a single round can end before the reply exists: it takes several,
+     * a few milliseconds apart.
+     */
+    private void runAsyncWork() throws InterruptedException {
+        for (int round = 0; round < 40; round++) {
+            server.getScheduler().performTicks(1);
+            server.getScheduler().waitAsyncTasksFinished();
+            Thread.sleep(10);
+        }
     }
 
     private static String plain(Component component) {
