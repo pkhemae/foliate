@@ -119,7 +119,7 @@ class ProfileModuleTest {
     void checkPassesForAPlayerWhoseProfileWasSaved() {
         PlayerMock player = server.addPlayer("Alex");
 
-        assertEquals(null, profiles.problemWith(player, 1));
+        assertEquals(null, new ProfileCheck(profiles).problemWith(player, 1));
     }
 
     @Test
@@ -131,7 +131,7 @@ class ProfileModuleTest {
             return null;
         });
 
-        assertEquals("the profile of Alex was not saved", profiles.problemWith(player, 1));
+        assertEquals("the profile of Alex was not saved", new ProfileCheck(profiles).problemWith(player, 1));
     }
 
     @Test
@@ -140,9 +140,9 @@ class ProfileModuleTest {
 
         assertEquals(
                 "the profile of Alex stayed in memory after the player left",
-                profiles.problemAfterQuit(player.getUniqueId(), "Alex"));
+                new ProfileCheck(profiles).problemAfterQuit(player.getUniqueId(), "Alex"));
         player.disconnect();
-        assertEquals(null, profiles.problemAfterQuit(player.getUniqueId(), "Alex"));
+        assertEquals(null, new ProfileCheck(profiles).problemAfterQuit(player.getUniqueId(), "Alex"));
     }
 
     @Test
@@ -167,7 +167,7 @@ class ProfileModuleTest {
         PlayerMock player = server.addPlayer("Alex");
 
         assertEquals(
-                "the profile of Alex counts 1 joins after visit 2", profiles.problemWith(player, 2));
+                "the profile of Alex counts 1 joins after visit 2", new ProfileCheck(profiles).problemWith(player, 2));
     }
 
     @Test
@@ -187,7 +187,7 @@ class ProfileModuleTest {
         PlayerMock player = server.addPlayer("Alex");
         player.disconnect();
 
-        assertEquals("the profile of Alex is not loaded", profiles.problemWith(player, 1));
+        assertEquals("the profile of Alex is not loaded", new ProfileCheck(profiles).problemWith(player, 1));
     }
 
     /** Letting a player in without their profile would mean guessing it: they are told why. */

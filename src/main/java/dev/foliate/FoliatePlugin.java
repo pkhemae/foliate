@@ -17,8 +17,8 @@ import dev.foliate.core.scheduler.FoliaSchedulers;
 import dev.foliate.core.storage.Database;
 import dev.foliate.hooks.placeholderapi.PlaceholderApiHook;
 import dev.foliate.hooks.zmenu.ZMenuHook;
+import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.modules.profile.ProfileModule;
-import dev.foliate.selftest.SelfTest;
 import dev.foliate.modules.scoreboard.ScoreboardModule;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import java.time.Clock;
@@ -32,7 +32,9 @@ import org.jspecify.annotations.Nullable;
  * Plugin entrypoint and composition root: everything the plugin is made of is created and wired
  * here, by hand, so the dependency graph can be read in one place.
  *
- * <p>Not final: MockBukkit subclasses the plugin class to load it in tests.
+ * <p>Not final: MockBukkit subclasses the plugin class to load it in tests, and the self-test
+ * build (the {@code selftest} source set) extends it through {@link #started} and
+ * {@link #failedToStart}, which do nothing here.
  */
 public class FoliatePlugin extends JavaPlugin {
 
@@ -44,11 +46,7 @@ public class FoliatePlugin extends JavaPlugin {
         try {
             start();
         } catch (RuntimeException | Error e) {
-            // The server would log this and carry on without the plugin, leaving the smoke test
-            // waiting for a verdict that cannot come.
-            if (SelfTest.requested()) {
-                SelfTest.abort(this, "the plugin failed to start: " + e);
-            }
+            failedToStart("the plugin failed to start: " + e);
             throw e;
         }
     }
@@ -79,9 +77,7 @@ public class FoliatePlugin extends JavaPlugin {
         Menus menus = hook(modules, ZMenuHook.PLUGIN_NAME, () -> new ZMenuHook(this, schedulers, messages));
 
         if (!modules.enableAll()) {
-            if (SelfTest.requested()) {
-                SelfTest.abort(this, "a required module failed to enable");
-            }
+            failedToStart("a required module failed to enable");
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
@@ -100,10 +96,24 @@ public class FoliatePlugin extends JavaPlugin {
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> event.registrar()
                 .register(command.build(), "Shows information about Foliate and reloads it."));
 
-        if (SelfTest.requested()) {
-            new SelfTest(this, schedulers, modules, database).start();
-        }
+        started(new Parts(schedulers, modules, database));
     }
+
+    /** What the plugin is made of, handed to {@link #started}. */
+    protected record Parts(Schedulers schedulers, ModuleManager modules, Database database) {}
+
+    /**
+     * Called at the end of {@code onEnable}, once every module is enabled and the command is
+     * registered. Does nothing: the self-test build overrides it to start its checks.
+     */
+    protected void started(Parts parts) {}
+
+    /**
+     * Called when the plugin cannot start, just before it gives up. Does nothing: the self-test
+     * build overrides it, so that the smoke test fails at once instead of waiting for a verdict
+     * that cannot come.
+     */
+    protected void failedToStart(String reason) {}
 
     /**
      * Registers an optional integration, only when the other plugin is installed. The hook is

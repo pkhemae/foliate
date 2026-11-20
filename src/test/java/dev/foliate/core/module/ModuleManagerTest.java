@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import org.bukkit.entity.Player;
 import org.junit.jupiter.api.Test;
 import org.slf4j.helpers.NOPLogger;
 
@@ -30,23 +29,20 @@ class ModuleManagerTest {
 
     @Test
     void enabledModulesCanBeAskedForACapability() {
-        PlayerCheck check = (player, visit) -> null;
-        class Checking extends RecordingModule implements PlayerCheck {
-            Checking() {
-                super("checking");
+        class Capable extends RecordingModule implements Runnable {
+            Capable() {
+                super("capable");
             }
 
             @Override
-            public String problemWith(Player player, int visit) {
-                return check.problemWith(player, visit);
-            }
+            public void run() {}
         }
         manager.register(new RecordingModule("plain"));
-        manager.register(new Checking());
+        manager.register(new Capable());
         manager.register(new RecordingModule("broken").failingOn("enable"));
         manager.enableAll();
 
-        assertEquals(1, manager.enabledOf(PlayerCheck.class).size());
+        assertEquals(1, manager.enabledOf(Runnable.class).size());
         assertEquals(2, manager.enabledOf(Module.class).size());
     }
 
