@@ -1,8 +1,7 @@
 name: Release
 
 # Pushing a tag such as v1.2.0 builds the plugin as version 1.2.0 and publishes it as a GitHub
-# release, which is also where the plugin's update check looks. A tag with a suffix, such as
-# v1.2.0-rc.1, is published as a pre-release.
+# release. A tag with a suffix, such as v1.2.0-rc.1, is published as a pre-release.
 on:
   push:
     tags: ["v*"]
@@ -22,8 +21,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # The update check of every installed copy reads the latest release: a tag it cannot parse,
-      # or one cut from a commit that never went through main, must not become that release.
+      # The tag is the version: one that is not a version, or that was cut from a commit that never
+      # went through main, must not become a release.
       - name: Check the tag
         run: |
           if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+(\.[0-9]+)*(-[0-9A-Za-z.]+)?$ ]]; then
