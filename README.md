@@ -36,6 +36,8 @@ first. The same jar runs on Paper.
 | **Tests** | Unit tests, and a smoke test that boots a real Folia server in CI |
 | **Tooling** | One command to rename the template, GitHub releases on tag, Renovate |
 
+What you keep is `core/`, the plugin class and one command. Everything under `modules/` and `hooks/` is example code that you can delete: the [developer guide](https://github.com/pkhemae/foliate/wiki/Making-it-yours) lists what each removal takes with it.
+
 ## Quick start
 
 Clone or fork this repository, then make it yours:
@@ -79,16 +81,10 @@ The [wiki](https://github.com/pkhemae/foliate/wiki) has one page per topic.
 
 ## Status
 
-Foliate is at version 0.1.0-SNAPSHOT and has no release yet. It is verified by its unit tests and
-by a smoke test that CI runs on a real Folia 26.2 server; the same smoke test was run by hand on
-Paper 26.2. Other CI jobs join that server with a real Minecraft client, run headlessly, twice as
-the same player and in two languages: the scoreboard is created and refreshed without error, the
-profile is loaded, saved and counted again on the return, the example menu opens, the connection
-holds, messages come in the player's language, and once the player is kicked no module keeps
-anything of them. A Fabric client also types a command. The profile storage runs in CI on MySQL 8.4
-and MariaDB 11.4, but the whole plugin has only been run on SQLite. A headless client draws
-nothing, so what the screen shows is not checked, and clicks in a menu are not exercised
-([#56](https://github.com/pkhemae/foliate/issues/56)).
+Foliate is at version 0.1.0-SNAPSHOT and has no release yet. CI runs its unit tests, a smoke test on a
+real Folia 26.2 server, jobs that join that server with a headless Minecraft client, and the storage
+tests on MySQL and MariaDB. What each of them checks, and what none of them can see, is in the
+[Testing](https://github.com/pkhemae/foliate/wiki/Testing) page of the guide.
 
 ## Contributing
 
