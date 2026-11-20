@@ -31,7 +31,7 @@ first. The same jar runs on Paper.
 | **Commands** | One class per subcommand, on Paper's native command API, with declared permissions |
 | **Storage** | SQLite out of the box, MySQL or MariaDB by configuration, with schema migrations |
 | **Player data** | Loaded before login, cached, saved in order, flushed on shutdown |
-| **Scoreboard** | A per-player scoreboard drawn with packets, since Bukkit scoreboards do not work on Folia |
+| **Scoreboard** | A per-player scoreboard on the side of the screen, drawn with packets because the Bukkit scoreboard API does not work on Folia |
 | **Integrations** | PlaceholderAPI and zMenu, both optional |
 | **Tests** | Unit tests, and a smoke test that boots a real Folia server in CI |
 | **Tooling** | One command to rename the template, GitHub releases on tag, Renovate, update check |
