@@ -139,7 +139,8 @@ jobs:
           if-no-files-found: ignore
 
   # SQLite is what the unit tests use. This runs the profile storage on the servers it is meant to
-  # work with, through the same Database and migrations as the plugin.
+  # work with, through the same Database and migrations as the plugin, and opens there the databases
+  # that earlier versions left (src/test/resources/upgrade).
   database-test:
     name: Storage on ${{ matrix.image }}
     runs-on: ubuntu-latest
@@ -183,13 +184,18 @@ jobs:
         env:
           FOLIATE_TEST_MYSQL_PORT: 3306
           FOLIATE_TEST_MYSQL_PASSWORD: throwaway
-        run: ./gradlew test --tests '*ProfileStorageOnMysqlTest'
+        run: ./gradlew test --tests '*ProfileStorageOnMysqlTest' --tests '*DatabaseUpgradeTest'
 
       # A skipped class would still be a green build: some tests must have run, and none skipped.
       - name: The tests were not skipped
         run: |
-          report=build/test-results/test/TEST-dev.foliate.modules.profile.ProfileStorageOnMysqlTest.xml
-          grep -qE 'tests="[1-9][0-9]*" skipped="0" failures="0" errors="0"' "$report"
+          for test in ProfileStorageOnMysqlTest DatabaseUpgradeTest; do
+            report=build/test-results/test/TEST-dev.foliate.modules.profile.$test.xml
+            if ! grep -qE 'tests="[1-9][0-9]*" skipped="0" failures="0" errors="0"' "$report"; then
+              echo "$test did not run on the database server, or was skipped"
+              exit 1
+            fi
+          done
 
   # The template's promise is that renaming it gives a plugin that builds and passes its tests.
   rename-check:
