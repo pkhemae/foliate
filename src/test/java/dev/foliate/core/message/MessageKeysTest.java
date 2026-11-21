@@ -41,7 +41,12 @@ class MessageKeysTest {
             "renderLines", List.of(1),
             "showTitle", List.of(1, 2));
 
-    private static final Pattern CALL = Pattern.compile("\\bmessages\\s*\\.\\s*(\\w+)\\s*\\(");
+    /**
+     * A call of one of those methods on any receiver ({@code messages}, {@code this.messages},
+     * {@code plugin.messages()}): the method's name and the position of its key tell it apart from
+     * the audience methods of the same name, which take no text.
+     */
+    private static final Pattern CALL = Pattern.compile("\\.\\s*(\\w+)\\s*\\(");
     private static final Pattern LITERAL = Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"");
 
     @Test
@@ -82,21 +87,38 @@ class MessageKeysTest {
         return used;
     }
 
-    /** The arguments of a call, trimmed, from just after its opening parenthesis. */
-    private static List<String> arguments(String source, int start) {
+    /**
+     * The arguments of a call, trimmed, from just after its opening parenthesis. Strings, text
+     * blocks, character literals and comments are skipped, so a parenthesis or a comma in them does
+     * not end an argument.
+     */
+    static List<String> arguments(String source, int start) {
         List<String> arguments = new ArrayList<>();
         int depth = 0;
         int from = start;
-        for (int i = start; i < source.length(); i++) {
+        int i = start;
+        while (i < source.length()) {
             char c = source.charAt(i);
-            if (c == '"') {
-                // Skip the literal, escaped quotes included.
-                for (i++; i < source.length() && source.charAt(i) != '"'; i++) {
-                    if (source.charAt(i) == '\\') {
-                        i++;
-                    }
-                }
-            } else if (c == '(' || c == '[' || c == '{') {
+            if (source.startsWith("\"\"\"", i)) {
+                int end = source.indexOf("\"\"\"", i + 3);
+                i = end < 0 ? source.length() : end + 3;
+                continue;
+            }
+            if (c == '"' || c == '\'') {
+                i = endOfLiteral(source, i, c);
+                continue;
+            }
+            if (source.startsWith("//", i)) {
+                int end = source.indexOf('\n', i);
+                i = end < 0 ? source.length() : end;
+                continue;
+            }
+            if (source.startsWith("/*", i)) {
+                int end = source.indexOf("*/", i + 2);
+                i = end < 0 ? source.length() : end + 2;
+                continue;
+            }
+            if (c == '(' || c == '[' || c == '{') {
                 depth++;
             } else if ((c == ')' || c == ']' || c == '}') && depth > 0) {
                 depth--;
@@ -107,8 +129,28 @@ class MessageKeysTest {
                     return arguments;
                 }
             }
+            i++;
         }
         return arguments;
+    }
+
+    /** Just after the string or character literal that starts at {@code start}, escapes included. */
+    private static int endOfLiteral(String source, int start, char quote) {
+        int i = start + 1;
+        while (i < source.length() && source.charAt(i) != quote) {
+            i += source.charAt(i) == '\\' ? 2 : 1;
+        }
+        return i + 1;
+    }
+
+    @Test
+    void argumentsSkipWhatLooksLikeTheEndOfACall() {
+        String source = "send(player, \"a.b\", ')', '\\'', \"x)\" /* ) */, f(1, 2), // )\n last) tail";
+
+        List<String> arguments = arguments(source, "send(".length());
+
+        assertEquals(List.of("player", "\"a.b\"", "')'", "'\\''", "\"x)\" /* ) */", "f(1, 2)", "// )\n last"),
+                arguments);
     }
 
     private static String read(Path file) {
