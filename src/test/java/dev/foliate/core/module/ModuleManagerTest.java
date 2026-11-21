@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.foliate.testing.RecordingLogger;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -18,12 +19,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.slf4j.helpers.NOPLogger;
 
 class ModuleManagerTest {
 
     private final List<String> events = new ArrayList<>();
-    private final ModuleManager manager = new ModuleManager(NOPLogger.NOP_LOGGER);
+    private final RecordingLogger logger = new RecordingLogger();
+    private final ModuleManager manager = new ModuleManager(logger);
 
     @Test
     void enablesInOrderAndDisablesInReverse() {
@@ -230,6 +231,12 @@ class ModuleManagerTest {
         assertInstanceOf(InterruptedException.class, failures.get("after"));
         assertTrue(interruptKept.get(), "the interrupt status is kept for the caller");
         assertEquals(List.of("reload waiting", "disable after", "disable waiting"), calls);
+        // No module is at fault: nothing reads as an error.
+        List<String> lines = logger.lines();
+        assertTrue(lines.stream().noneMatch(line -> line.startsWith("ERROR")), lines.toString());
+        assertTrue(
+                lines.contains("INFO Reload stopped by shutdown: the plugin is being disabled; not reloaded: after"),
+                lines.toString());
     }
 
     @Test

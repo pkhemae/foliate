@@ -104,7 +104,8 @@ public final class ModuleManager {
      *
      * <p>Stops early when the thread is interrupted, which {@link #disableAll()} does: the module
      * being reloaded is expected to give up (see {@link Module#reload()}), and the ones after it
-     * are left as they were and reported as failed. The interrupt status is kept for the caller.
+     * are left as they were and reported as failed. This is logged as information, not as errors:
+     * no module is at fault. The interrupt status is kept for the caller.
      *
      * @return the failures by module name, empty when everything reloaded
      * @throws IllegalStateException when the modules are not enabled, or are being disabled: there
@@ -119,17 +120,32 @@ public final class ModuleManager {
         }
         try {
             Map<String, Throwable> failures = new LinkedHashMap<>();
+            List<String> skipped = new ArrayList<>();
             for (Module module : enabled) {
                 if (Thread.currentThread().isInterrupted()) {
                     failures.put(module.name(), new InterruptedException("the reload was interrupted before this module"));
+                    skipped.add(module.name());
                     continue;
                 }
                 try {
                     module.reload();
                 } catch (Exception | LinkageError e) {
-                    log("Module '{}' failed to reload, previous state kept", module, e);
                     failures.put(module.name(), e);
+                    if (Thread.currentThread().isInterrupted()) {
+                        // The interrupt cut it short, not a fault of the module: an interrupted
+                        // file read, for one, fails with a message that would send an
+                        // administrator looking for a problem that does not exist.
+                        logger.info("Reload of module '{}' cut short, previous state kept: {}", module.name(), e.toString());
+                    } else {
+                        log("Module '{}' failed to reload, previous state kept", module, e);
+                    }
                 }
+            }
+            if (Thread.currentThread().isInterrupted()) {
+                logger.info(
+                        "Reload {}{}",
+                        isStopping() ? "stopped by shutdown: the plugin is being disabled" : "interrupted",
+                        skipped.isEmpty() ? "" : "; not reloaded: " + String.join(", ", skipped));
             }
             return failures;
         } finally {
@@ -160,6 +176,12 @@ public final class ModuleManager {
             enabled.clear();
             state = State.DISABLED;
             publishEnabledNames();
+        }
+    }
+
+    private boolean isStopping() {
+        synchronized (reloadLock) {
+            return stopping;
         }
     }
 
