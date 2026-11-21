@@ -8,6 +8,7 @@ import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.Database;
 import dev.foliate.core.storage.SqlDump;
+import dev.foliate.core.storage.StorageSettings;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URISyntaxException;
@@ -231,6 +232,100 @@ class DatabaseUpgradeTest {
         });
         assertEquals(returning, find(returning.id()), "A profile of " + snapshot + " saved again");
         assertEquals(newcomer, find(newcomer.id()), "A new profile saved in the database left by " + snapshot);
+
+        // A migration edited after it shipped starts, reads and saves fine, and leaves the servers
+        // that ran it with another schema than a new database: the two are compared on what the
+        // database reports, not on the text of the CREATE statements, which a rebuild changes.
+        Map<String, List<String>> upgraded = database.call(DatabaseUpgradeTest::schema);
+        database.disable();
+        database = null;
+        Path freshDirectory = directory;
+        if (config.get().storage().type() == StorageSettings.Type.SQLITE) {
+            freshDirectory = directory.resolve("fresh");
+        } else {
+            try (Connection connection = TestMysql.connect()) {
+                dropAllTables(connection);
+            }
+        }
+        database = new Database(freshDirectory, () -> config.get().storage(), FoliatePlugin.MIGRATIONS, NOPLogger.NOP_LOGGER);
+        database.enable();
+        Map<String, List<String>> fresh = database.call(DatabaseUpgradeTest::schema);
+        // The tables of a retired module stay in the upgraded database, as they do on a server.
+        upgraded.keySet().retainAll(fresh.keySet());
+        assertEquals(fresh, upgraded, "The database left by " + snapshot + ", once upgraded, must have the schema of"
+                + " a new database: was a migration that already shipped edited, instead of a new one appended?");
+    }
+
+    /**
+     * Each table with its columns, then its indexes, as the database reports them: the same
+     * description on a database built by the migrations one after the other as on one rebuilt.
+     */
+    private static Map<String, List<String>> schema(Connection connection) throws SQLException {
+        boolean sqlite = connection.getMetaData().getDatabaseProductName().equalsIgnoreCase("SQLite");
+        List<List<String>> tables = rows(connection, sqlite
+                ? "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite~_%' ESCAPE '~'"
+                : "SELECT table_name FROM information_schema.tables"
+                        + " WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'");
+        Map<String, List<String>> schema = new TreeMap<>();
+        for (List<String> row : tables) {
+            String table = row.getFirst();
+            List<String> description = new ArrayList<>();
+            // The columns in their order, then one row per column of each index: its name, whether
+            // it is unique, the column's place in it and the column.
+            List<List<String>> columns;
+            List<List<String>> indexColumns = new ArrayList<>();
+            if (sqlite) {
+                // cid, name, type, notnull, dflt_value, pk
+                columns = rows(connection, "PRAGMA table_info(\"" + table + "\")").stream()
+                        .map(column -> column.subList(1, column.size()))
+                        .toList();
+                // seq, name, unique, origin, partial. An index that the table's own constraints
+                // made is named after the table, which a rebuild renames: it is known by its
+                // origin (pk, u) and its columns instead.
+                for (List<String> index : rows(connection, "PRAGMA index_list(\"" + table + "\")")) {
+                    String name = index.get(3).equals("c") ? index.get(1) : index.get(3);
+                    // seqno, cid, name
+                    for (List<String> column : rows(connection, "PRAGMA index_info(\"" + index.get(1) + "\")")) {
+                        indexColumns.add(List.of(name, index.get(2), column.get(0), column.get(2)));
+                    }
+                }
+            } else {
+                columns = rows(connection, "SELECT column_name, column_type, is_nullable, column_default, extra"
+                        + " FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '"
+                        + table + "' ORDER BY ordinal_position");
+                indexColumns = rows(connection, "SELECT index_name, non_unique, seq_in_index, column_name"
+                        + " FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = '"
+                        + table + "' ORDER BY index_name, seq_in_index");
+            }
+            for (List<String> column : columns) {
+                description.add("column " + column);
+            }
+            List<String> indexes = new ArrayList<>();
+            for (List<String> column : indexColumns) {
+                indexes.add("index " + column);
+            }
+            // SQLite lists the indexes newest first: their order says nothing of the schema.
+            indexes.sort(null);
+            description.addAll(indexes);
+            schema.put(table, description);
+        }
+        return schema;
+    }
+
+    /** Every row of a query, each value as a string. */
+    private static List<List<String>> rows(Connection connection, String query) throws SQLException {
+        List<List<String>> rows = new ArrayList<>();
+        try (Statement statement = connection.createStatement(); ResultSet result = statement.executeQuery(query)) {
+            int width = result.getMetaData().getColumnCount();
+            while (result.next()) {
+                List<String> row = new ArrayList<>();
+                for (int i = 1; i <= width; i++) {
+                    row.add(String.valueOf(result.getString(i)));
+                }
+                rows.add(row);
+            }
+        }
+        return rows;
     }
 
     private PlayerProfile find(UUID id) throws SQLException {

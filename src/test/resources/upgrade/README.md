@@ -3,9 +3,11 @@
 Each folder here holds the database that one version of the plugin leaves, frozen as a SQL dump.
 `DatabaseUpgradeTest` loads each one into a fresh database, starts the current `Database` on it
 with the plugin's migrations, and checks that it starts, that every migration ends up recorded,
-that the rows come back through the real repositories, and that a save still works. It does so on
-SQLite in every build, and on MySQL and MariaDB in the CI job "Storage on ...". Every other test
-starts from an empty database: this is what catches a release that breaks the servers updating to it.
+that the rows come back through the real repositories, that a save still works, and that the
+upgraded database has the columns and indexes of a new one, which an edit to a migration that has
+shipped would break. It does so on SQLite in every build, and on MySQL and MariaDB in the CI job
+"Storage on ...". Every other test starts from an empty database: this is what catches a release
+that breaks the servers updating to it.
 
 A folder is named after the version that wrote it:
 
