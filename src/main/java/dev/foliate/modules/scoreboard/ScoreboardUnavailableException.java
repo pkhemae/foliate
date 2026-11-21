@@ -8,6 +8,10 @@ public final class ScoreboardUnavailableException extends Exception {
     @Serial
     private static final long serialVersionUID = 1L;
 
+    ScoreboardUnavailableException(String message) {
+        super(message);
+    }
+
     ScoreboardUnavailableException(String message, Throwable cause) {
         super(message, cause);
     }

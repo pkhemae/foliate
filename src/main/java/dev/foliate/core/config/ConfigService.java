@@ -1,6 +1,7 @@
 package dev.foliate.core.config;
 
 import de.exlll.configlib.ConfigurationException;
+import de.exlll.configlib.NameFormatter;
 import de.exlll.configlib.NameFormatters;
 import de.exlll.configlib.YamlConfigurationProperties;
 import de.exlll.configlib.YamlConfigurationStore;
@@ -16,6 +17,12 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.lang.reflect.Field;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -23,6 +30,9 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -43,6 +53,12 @@ import org.slf4j.Logger;
 public final class ConfigService<T extends ConfigRoot> implements Module {
 
     private static final String FILE_NAME = "config.yml";
+
+    /** How the settings are named in the file. */
+    private static final NameFormatter NAMES = NameFormatters.LOWER_KEBAB_CASE;
+
+    /** How the library names a field in its messages: {@code for field 'private int a.Settings.port'}. */
+    private static final Pattern FIELD = Pattern.compile("for field '[^']* ([\\w.$]+)\\.(\\w+)'");
 
     private final Path file;
     private final Logger logger;
@@ -70,7 +86,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         this.defaults = defaults;
         this.migrator = new ConfigMigrator(migrations);
         YamlConfigurationProperties properties = YamlConfigurationProperties.newBuilder()
-                .setNameFormatter(NameFormatters.LOWER_KEBAB_CASE)
+                .setNameFormatter(NAMES)
                 .header(header)
                 .build();
         this.store = new YamlConfigurationStore<>(type, properties);
@@ -153,27 +169,103 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         } catch (ConfigurationException e) {
             // Not chained: the library's messages print the values of the whole section, password
             // included, and a stack trace would print every cause.
-            throw new ConfigException(FILE_NAME + " has a setting with the wrong kind of value: " + describe(e));
+            throw new ConfigException(FILE_NAME + " is invalid: " + describe(e));
         } catch (IOException | UncheckedIOException e) {
             throw new ConfigException(FILE_NAME + " could not be read or written: " + e.getMessage(), e);
         }
     }
 
     /**
-     * The innermost explanation of the library, which is about the setting itself, or of one of
-     * the plugin's serializers ({@link IllegalArgumentException}), without the value it quotes (it
-     * may be a password) and with the setting's name instead of the Java field.
+     * What is wrong, in the administrator's terms: the setting's path and the kind of value it
+     * takes, such as {@code storage.mysql.port must be a whole number}.
+     *
+     * <p>Built from the fields the library names, never from its text: that text quotes the value,
+     * which may be a password, in a different way for every kind of mistake, so no filter on it
+     * can be trusted. A serializer of the plugin explains itself with an
+     * {@link InvalidSettingException}, whose message is shown as it is.
      */
     static String describe(ConfigurationException failure) {
-        Throwable explained = failure;
-        for (Throwable cause = failure.getCause(); cause != null; cause = cause.getCause()) {
-            if (cause instanceof ConfigurationException || cause instanceof IllegalArgumentException) {
-                explained = cause;
+        List<Field> fields = new ArrayList<>();
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof InvalidSettingException explained) {
+                return explained.getMessage();
+            }
+            if (cause instanceof ConfigurationException) {
+                field(cause.getMessage()).ifPresent(fields::add);
             }
         }
-        return String.valueOf(explained.getMessage())
-                .replaceAll("(?s)value '.*' with type", "value with type")
-                .replaceAll("for field '[^']*?\\.([\\w]+)'", "for '$1'");
+        if (fields.isEmpty()) {
+            return "a setting has a value of the wrong kind";
+        }
+        String path = fields.stream()
+                .map(field -> NAMES.format(field.getName()))
+                .collect(Collectors.joining("."));
+        Type type = fields.getLast().getGenericType();
+        // Unquoted, YAML reads a number, true, or a value starting with [ or { as something else.
+        return path + " must be " + kind(type) + (type == String.class ? ": put it in quotes" : "");
+    }
+
+    /** The field a message of the library is about, if it names one. */
+    private static Optional<Field> field(@Nullable String message) {
+        if (message == null) {
+            return Optional.empty();
+        }
+        // The last match: the library quotes the value before naming the field, and a value could
+        // contain text that looks like a field.
+        Matcher matcher = FIELD.matcher(message);
+        String owner = null;
+        String name = null;
+        while (matcher.find()) {
+            owner = matcher.group(1);
+            name = matcher.group(2);
+        }
+        if (owner == null || name == null) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Class.forName(owner, false, ConfigService.class.getClassLoader()).getDeclaredField(name));
+        } catch (ClassNotFoundException | NoSuchFieldException | LinkageError e) {
+            return Optional.empty();
+        }
+    }
+
+    /** The kind of value a setting of this type takes, as the administrator writes it. */
+    private static String kind(Type type) {
+        if (type instanceof ParameterizedType generic && generic.getRawType() instanceof Class<?> raw) {
+            Type[] arguments = generic.getActualTypeArguments();
+            if (Collection.class.isAssignableFrom(raw)) {
+                return "a list (each entry: " + kind(arguments[0]) + ")";
+            }
+            if (Map.class.isAssignableFrom(raw)) {
+                return "a section (each value: " + kind(arguments[1]) + ")";
+            }
+            return kind(raw);
+        }
+        if (!(type instanceof Class<?> raw)) {
+            return "a value of another kind";
+        }
+        if (raw == String.class) {
+            return "text";
+        }
+        if (raw == boolean.class || raw == Boolean.class) {
+            return "true or false";
+        }
+        if (raw == int.class || raw == long.class || raw == short.class || raw == byte.class
+                || raw == Integer.class || raw == Long.class || raw == Short.class || raw == Byte.class) {
+            return "a whole number";
+        }
+        if (raw == double.class || raw == float.class || raw == Double.class || raw == Float.class) {
+            return "a number";
+        }
+        if (raw.isEnum()) {
+            return "one of " + Arrays.stream(raw.getEnumConstants())
+                    .map(constant -> ((Enum<?>) constant).name())
+                    .collect(Collectors.joining(", "));
+        }
+        if (Collection.class.isAssignableFrom(raw)) {
+            return "a list";
+        }
+        return "a section of settings";
     }
 
     private String render(T config) {
@@ -183,12 +275,36 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     }
 
     private void reportUnknownSettings(Map<String, Object> content, String rendered) throws YamlException {
-        Set<String> unknown = new TreeSet<>(Yaml.flatten(content).keySet());
-        unknown.removeAll(Yaml.flatten(Yaml.parse(rendered)).keySet());
+        Set<String> known = settings(Yaml.parse(rendered));
+        Set<String> unknown = settings(content);
+        unknown.removeAll(known);
+        // An empty section the plugin knows, such as 'scoreboard: {}', was filled with defaults.
+        unknown.removeIf(setting -> known.stream().anyMatch(path -> path.startsWith(setting + ".")));
         // A whole unknown section shows up as its leaves; a known list shows up as one key.
         for (String setting : unknown) {
             logger.warn("{}: '{}' is not a setting of this plugin and was removed from the file", FILE_NAME, setting);
         }
+    }
+
+    /** The dotted paths of the file's values, an empty section counting as one. */
+    private static Set<String> settings(Map<?, ?> content) {
+        Set<String> paths = new TreeSet<>();
+        collect("", content, paths);
+        return paths;
+    }
+
+    private static void collect(String prefix, Map<?, ?> section, Set<String> paths) {
+        if (section.isEmpty() && !prefix.isEmpty()) {
+            paths.add(prefix);
+        }
+        section.forEach((key, value) -> {
+            String path = prefix.isEmpty() ? String.valueOf(key) : prefix + "." + key;
+            if (value instanceof Map<?, ?> nested) {
+                collect(path, nested, paths);
+            } else {
+                paths.add(path);
+            }
+        });
     }
 
     /** Writes through a temporary file, so a crash mid-write cannot leave a truncated config. */

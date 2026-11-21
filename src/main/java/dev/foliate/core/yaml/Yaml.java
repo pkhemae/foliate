@@ -7,6 +7,13 @@ import org.snakeyaml.engine.v2.api.DumpSettings;
 import org.snakeyaml.engine.v2.api.Load;
 import org.snakeyaml.engine.v2.api.LoadSettings;
 import org.snakeyaml.engine.v2.common.FlowStyle;
+import org.snakeyaml.engine.v2.exceptions.ComposerException;
+import org.snakeyaml.engine.v2.exceptions.ConstructorException;
+import org.snakeyaml.engine.v2.exceptions.DuplicateKeyException;
+import org.snakeyaml.engine.v2.exceptions.MarkedYamlEngineException;
+import org.snakeyaml.engine.v2.exceptions.ParserException;
+import org.snakeyaml.engine.v2.exceptions.ReaderException;
+import org.snakeyaml.engine.v2.exceptions.ScannerException;
 import org.snakeyaml.engine.v2.exceptions.YamlEngineException;
 
 /**
@@ -32,13 +39,14 @@ public final class Yaml {
         try {
             root = new Load(LoadSettings.builder().build()).loadFromString(document);
         } catch (YamlEngineException e) {
-            throw new YamlException("not valid YAML (" + firstLine(e.getMessage()) + ")", e);
+            // Not chained: the library's message quotes the line, which may hold a password.
+            throw new YamlException("not valid YAML (" + explain(e) + ")");
         }
         if (root == null) {
             return new LinkedHashMap<>();
         }
         if (!(root instanceof Map<?, ?> map)) {
-            throw new YamlException("expected a list of settings, found a single value", null);
+            throw new YamlException("expected a list of settings, found a single value");
         }
         return stringKeys(map);
     }
@@ -77,7 +85,26 @@ public final class Yaml {
         return copy;
     }
 
-    private static String firstLine(String message) {
-        return message == null ? "unknown error" : message.lines().findFirst().orElse("unknown error").strip();
+    /**
+     * What is wrong, in fixed words, and where, such as {@code a key appears twice, line 6,
+     * column 3}. Nothing is taken from the library's text: it repeats tokens of the file (an
+     * alias, a tag, a key) and its marks quote the line, any of which may be a password.
+     */
+    private static String explain(YamlEngineException failure) {
+        String problem = switch (failure) {
+            case DuplicateKeyException duplicate -> "a key appears twice";
+            case ComposerException alias -> "a value starts with * or &: put it in quotes";
+            case ConstructorException tag -> "a value starts with !: put it in quotes";
+            case ScannerException scanner -> "a quote, a bracket or the indentation is wrong";
+            case ParserException parser -> "the indentation or a list is wrong";
+            case ReaderException reader -> "it contains a character that is not allowed";
+            default -> "a value cannot be read: put it in quotes";
+        };
+        if (failure instanceof MarkedYamlEngineException marked) {
+            problem += marked.getProblemMark()
+                    .map(mark -> ", line " + (mark.getLine() + 1) + ", column " + (mark.getColumn() + 1))
+                    .orElse("");
+        }
+        return problem;
     }
 }
