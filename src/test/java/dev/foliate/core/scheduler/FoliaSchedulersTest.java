@@ -159,6 +159,7 @@ class FoliaSchedulersTest {
     }
 
     @Test
+    @SuppressWarnings("FutureReturnValueIgnored") // the inner future is composed at once
     void teleportOfARemovedEntityCompletesWithFalse() throws Exception {
         Entity entity = removedEntity();
         Location destination = entity.getLocation().add(0, 5, 0);
@@ -244,6 +245,7 @@ class FoliaSchedulersTest {
     }
 
     /** An implementation of an interface answering through {@code answer}; unanswered primitives are zero. */
+    @SuppressWarnings("ReferenceEquality") // a proxy is equal to itself only, as Object is
     private static <T> T proxy(Class<T> type, Answer answer) {
         Object proxy = Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type}, (self, method, args) -> {
             switch (method.getName()) {

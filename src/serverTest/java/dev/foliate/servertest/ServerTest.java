@@ -135,10 +135,13 @@ public final class ServerTest {
                 }
             }, plugin);
         }
-        schedulers.global().runLater(Ticks.duration(20), () -> run().whenComplete((ignored, error) -> {
-            Throwable cause = error != null && error.getCause() != null ? error.getCause() : error;
-            finish(cause == null ? null : String.valueOf(cause));
-        }));
+        schedulers.global().runLater(Ticks.duration(20), () -> {
+            // The verdict is given in the callback: nothing waits on this future.
+            CompletableFuture<?> _ = run().whenComplete((ignored, error) -> {
+                Throwable cause = error != null && error.getCause() != null ? error.getCause() : error;
+                finish(cause == null ? null : String.valueOf(cause));
+            });
+        });
     }
 
     private CompletableFuture<Void> run() {
@@ -352,8 +355,11 @@ public final class ServerTest {
 
     private CompletableFuture<Void> teleportFromAnotherThread(Entity marker, Location spawn) {
         Location destination = spawn.clone().add(0, 5, 0);
-        return schedulers.async()
-                .supply(() -> schedulers.teleport(marker, destination))
+        // The future that teleport gives is composed on the next line, not left unobserved.
+        @SuppressWarnings("FutureReturnValueIgnored")
+        CompletableFuture<CompletableFuture<Boolean>> started =
+                schedulers.async().supply(() -> schedulers.teleport(marker, destination));
+        return started
                 .thenCompose(future -> future)
                 .thenCompose(moved -> schedulers.entity(marker).run(() -> {
                     check(moved, "teleport was refused");

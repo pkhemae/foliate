@@ -29,6 +29,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -197,7 +198,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         List<Field> fields = new ArrayList<>();
         for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
             if (cause instanceof InvalidSettingException explained) {
-                return explained.getMessage();
+                return Objects.requireNonNullElse(explained.getMessage(), "a setting has a value it cannot take");
             }
             if (cause instanceof ConfigurationException) {
                 field(cause.getMessage()).ifPresent(fields::add);

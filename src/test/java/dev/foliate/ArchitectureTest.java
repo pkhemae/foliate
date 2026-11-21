@@ -1,9 +1,14 @@
 package dev.foliate;
 
+import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
+import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
 import java.io.IOException;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -12,48 +17,135 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.BeforeAll;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
  * The layout of the code is a rule, not a habit: {@code core} knows nothing of the plugin;
  * {@code contracts} holds what features offer each other, and depends on {@code core} and itself;
  * the modules, hooks and commands depend on {@code core} and {@code contracts}, never on each other.
- * Only
- * {@code FoliatePlugin} and {@code PluginConfig}, which compose everything, may know it all.
+ * Only {@code FoliatePlugin} and {@code PluginConfig}, which compose everything, may know it all.
  *
- * <p>It reads every mention of the plugin's packages in the source files (imports, wildcard or
- * static, and qualified names), so a violation is reported with the file before it can spread.
- * The server test's source set is left out of that rule: it tests everything, and the plugin cannot
- * depend on it, since it is not on the plugin's classpath.
+ * <p>Checked with ArchUnit on the compiled classes of the plugin, so every real dependency counts
+ * (a type, a method, a lambda) and a mention in a comment does not. One kind of dependency leaves
+ * no trace in a class file: javac copies a {@code static final} constant into the class that uses
+ * it. The imports of the sources are therefore checked against the same layout too. The server
+ * test's classes are left out: they test everything, and the plugin cannot depend on them, since
+ * they are not on its classpath.
  */
 class ArchitectureTest {
 
     /** The base package: taken from here, so that renaming the template cannot leave this test looking for the old one. */
     private static final String BASE = ArchitectureTest.class.getPackageName();
 
-    private static final Path MAIN = Path.of("src/main/java", BASE.split("\\."));
-    private static final Path SERVER_TEST = Path.of("src/serverTest/java", BASE.split("\\."));
-    /** Any mention of a plugin class or package: an import (wildcard or static) or a qualified name. */
-    private static final Pattern REFERENCE = Pattern.compile("\\b" + Pattern.quote(BASE) + "\\.([\\w.]*[\\w*])");
+    private static final Path MAIN = Path.of("src/main/java", BASE.split("\\.", -1));
+    private static final Path SERVER_TEST = Path.of("src/serverTest/java", BASE.split("\\.", -1));
 
-    /** Parents whose children are independent of one another: {@code modules.alpha}, ... */
+    /** An import of the plugin, wildcard or static: what follows the base package. */
+    private static final Pattern IMPORT =
+            Pattern.compile("\\s*import\\s+(?:static\\s+)?" + Pattern.quote(BASE) + "\\.([\\w.]*[\\w*])\\s*;.*");
+
+    /** Parents whose children are parts of their own: {@code modules.profile}, {@code hooks.zmenu}. */
     private static final Set<String> GROUPS = Set.of("modules", "hooks");
 
+    private static JavaClasses plugin;
+
+    /** The plugin's classes only: the folder FoliatePlugin was compiled to, without the tests'. */
+    @BeforeAll
+    static void importThePlugin() throws URISyntaxException {
+        plugin = new ClassFileImporter().importPath(
+                Path.of(FoliatePlugin.class.getProtectionDomain().getCodeSource().getLocation().toURI()));
+    }
+
     @Test
-    void everyPartDependsOnlyOnWhatTheLayoutAllows() throws IOException {
+    void everyPartDependsOnlyOnWhatTheLayoutAllows() {
+        layeredArchitecture()
+                .consideringOnlyDependenciesInAnyPackage(BASE + "..")
+                // A part with no class, as contracts in the template, is a rule waiting for code.
+                .withOptionalLayers(true)
+                // A new top-level package must find its place here before it can be used.
+                .ensureAllClassesAreContainedInArchitecture()
+                .layer("composition root").definedBy(BASE)
+                .layer("core").definedBy(BASE + ".core..")
+                .layer("contracts").definedBy(BASE + ".contracts..")
+                .layer("modules").definedBy(BASE + ".modules..")
+                .layer("hooks").definedBy(BASE + ".hooks..")
+                .layer("commands").definedBy(BASE + ".commands..")
+                .whereLayer("composition root").mayNotBeAccessedByAnyLayer()
+                .whereLayer("modules").mayOnlyBeAccessedByLayers("composition root")
+                .whereLayer("hooks").mayOnlyBeAccessedByLayers("composition root")
+                .whereLayer("commands").mayOnlyBeAccessedByLayers("composition root")
+                .whereLayer("contracts").mayOnlyBeAccessedByLayers("composition root", "modules", "hooks", "commands")
+                .because("see the Architecture page of the wiki")
+                .check(plugin);
+    }
+
+    @Test
+    void aFeatureNeverDependsOnAnother() {
+        for (String group : GROUPS) {
+            slices().matching(BASE + "." + group + ".(*)..")
+                    .should().notDependOnEachOther()
+                    .allowEmptyShould(true)
+                    .because("a feature reaches another one through contracts only")
+                    .check(plugin);
+        }
+    }
+
+    /**
+     * What the bytecode cannot show: a constant of another part, copied into the class by javac,
+     * as in {@code import static ...PlaceholderApiHook.PLUGIN_NAME}. The imports of every source
+     * file of the plugin follow the same layout.
+     */
+    @Test
+    void theImportsFollowTheLayoutToo() throws IOException {
         List<String> violations = new ArrayList<>();
         try (Stream<Path> files = Files.walk(MAIN)) {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
-                String unit = unitOfFile(MAIN.relativize(file));
+                String unit = unitOf(MAIN.relativize(file).getParent());
                 if (unit == null) {
-                    continue; // the composition root
+                    continue; // the composition root may know everything
                 }
-                for (String reference : foreignReferences(unit, Files.readString(file))) {
-                    violations.add(file + " (" + unit + ") refers to " + BASE + "." + reference);
+                for (String line : Files.readAllLines(file)) {
+                    Matcher imported = IMPORT.matcher(line);
+                    if (imported.matches() && !mayDependOn(unit, unitOfImport(imported.group(1)))) {
+                        violations.add(MAIN.relativize(file) + ": " + line.strip());
+                    }
                 }
             }
         }
         assertEquals(List.of(), violations, "These imports break the layout, see the Architecture page of the wiki");
+    }
+
+    @Test
+    void theRulesSeeTheCodeTheyGuard() {
+        // A guard that imports nothing would pass forever: from a jar instead of the classes
+        // folder, the importer finds nothing.
+        assertTrue(plugin.containPackage(BASE + ".core.module"));
+        assertTrue(plugin.size() > 10, plugin.size() + " classes");
+    }
+
+    /** What a part of {@code unit} may depend on: itself, core, and the contracts unless it is core. */
+    private static boolean mayDependOn(String unit, String target) {
+        return target.equals(unit) || target.equals("core") || (target.equals("contracts") && !unit.equals("core"));
+    }
+
+    /** The part a folder of the plugin belongs to ({@code modules.profile}, {@code core}), or null for the root. */
+    private static @Nullable String unitOf(@Nullable Path folder) {
+        if (folder == null) {
+            return null;
+        }
+        String first = folder.getName(0).toString();
+        return GROUPS.contains(first) && folder.getNameCount() > 1 ? first + "." + folder.getName(1) : first;
+    }
+
+    /** The part an imported name belongs to; "root" for a class of the root package. */
+    private static String unitOfImport(String name) {
+        String[] parts = name.split("\\.", -1);
+        if (Character.isUpperCase(parts[0].charAt(0))) {
+            return "root";
+        }
+        return GROUPS.contains(parts[0]) && parts.length > 1 ? parts[0] + "." + parts[1] : parts[0];
     }
 
     /**
@@ -70,7 +162,7 @@ class ArchitectureTest {
                         boolean holdsClasses = inside.anyMatch(path -> path.toString().endsWith(".java")
                                 && !path.getFileName().toString().equals("package-info.java"));
                         Path info = folder.resolve("package-info.java");
-                        if (root == SERVER_TEST && !Files.exists(info)) {
+                        if (root.equals(SERVER_TEST) && !Files.exists(info)) {
                             info = MAIN.resolve(SERVER_TEST.relativize(folder)).resolve("package-info.java");
                         }
                         if (holdsClasses && (!Files.exists(info) || !Files.readString(info).contains("@NullMarked"))) {
@@ -92,88 +184,5 @@ class ArchitectureTest {
                     .toList();
             assertEquals(List.of(), doubled, "The plugin already has these package-info files");
         }
-    }
-
-    @Test
-    void theRuleCatchesEveryWayToReachAnotherPart() {
-        String source = """
-                package dev.foliate.modules.alpha;
-
-                import dev.foliate.core.message.MessageService;
-                import dev.foliate.modules.beta.*;
-                import static dev.foliate.hooks.gamma.GammaHook.NAME;
-                import dev.foliate.PluginConfig;
-
-                class Example {
-                    dev.foliate.commands.FoliateCommand command;
-                    // see dev.foliate.modules
-                }
-                """;
-
-        assertEquals(
-                List.of(
-                        "modules.beta.*",
-                        "hooks.gamma.GammaHook.NAME",
-                        "PluginConfig",
-                        "commands.FoliateCommand",
-                        "modules"),
-                foreignReferences("modules.alpha", source));
-    }
-
-    @Test
-    void theContractsBetweenFeaturesAreOpenToAllButCore() {
-        String source = """
-                import dev.foliate.contracts.economy.Wallet;
-                import dev.foliate.core.message.MessageService;
-                import dev.foliate.hooks.zmenu.ZMenuHook;
-                """;
-
-        assertEquals(List.of("hooks.zmenu.ZMenuHook"), foreignReferences("modules.profile", source));
-        assertEquals(List.of("hooks.zmenu.ZMenuHook"), foreignReferences("contracts", source));
-        assertEquals(List.of("contracts.economy.Wallet", "hooks.zmenu.ZMenuHook"), foreignReferences("core", source));
-    }
-
-    @Test
-    void theRuleSeesTheCodeItGuards() throws IOException {
-        // A guard that scans nothing would pass forever.
-        try (Stream<Path> files = Files.walk(MAIN.resolve("core"))) {
-            assertTrue(files.filter(path -> path.toString().endsWith(".java")).count() > 10);
-        }
-    }
-
-    /** What a source file of {@code unit} mentions of the plugin that it may not depend on. */
-    private static List<String> foreignReferences(String unit, String source) {
-        List<String> foreign = new ArrayList<>();
-        Matcher references = REFERENCE.matcher(source);
-        while (references.find()) {
-            String target = unitOfImport(references.group(1));
-            boolean allowed = target.equals(unit)
-                    || target.equals("core")
-                    // Everything but core may use the contracts between features.
-                    || (target.equals("contracts") && !unit.equals("core"));
-            if (!allowed) {
-                foreign.add(references.group(1));
-            }
-        }
-        return foreign;
-    }
-
-    /** The unit a source file belongs to, or null for the classes of the root package. */
-    private static String unitOfFile(Path relative) {
-        if (relative.getNameCount() == 1) {
-            return null;
-        }
-        String first = relative.getName(0).toString();
-        return GROUPS.contains(first) ? first + "." + relative.getName(1) : first;
-    }
-
-    /** The unit an imported name belongs to; "root" for a class of the root package. */
-    private static String unitOfImport(String name) {
-        String[] parts = name.split("\\.");
-        if (Character.isUpperCase(parts[0].charAt(0)) || parts[0].equals("*")) {
-            return "root";
-        }
-        // A bare "modules" or "hooks", in a comment for instance, names no part in particular.
-        return GROUPS.contains(parts[0]) && parts.length > 1 ? parts[0] + "." + parts[1] : parts[0];
     }
 }

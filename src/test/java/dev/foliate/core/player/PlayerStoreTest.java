@@ -787,7 +787,7 @@ class PlayerStoreTest {
     /** Keeps the single storage thread busy, so that what follows piles up behind it. */
     private CountDownLatch holdStorageThread() {
         CountDownLatch release = new CountDownLatch(1);
-        database.submit(connection -> {
+        CompletableFuture<?> _ = database.submit(connection -> {
             try {
                 release.await(10, TimeUnit.SECONDS);
             } catch (InterruptedException e) {

@@ -1,4 +1,6 @@
 import java.util.zip.ZipFile
+import net.ltgt.gradle.errorprone.CheckSeverity
+import net.ltgt.gradle.errorprone.errorprone
 import xyz.jpenilla.resourcefactory.bukkit.Permission
 import xyz.jpenilla.runpaper.task.RunServer
 import xyz.jpenilla.runtask.pluginsapi.DownloadPluginsSpec
@@ -8,6 +10,7 @@ plugins {
     alias(libs.plugins.shadow)
     alias(libs.plugins.run.paper)
     alias(libs.plugins.resource.factory.bukkit)
+    alias(libs.plugins.errorprone)
 }
 
 // Adds the one-off renameTemplate task. The task removes this line when it has run.
@@ -89,6 +92,11 @@ repositories {
 dependencies {
     compileOnly(libs.folia.api)
 
+    // Run by the compiler on every source set: Error Prone's checks, and NullAway, which holds the
+    // @NullMarked packages to their annotations.
+    errorprone(libs.errorprone.core)
+    errorprone(libs.nullaway)
+
     // Optional integrations: provided by the other plugin when it is installed, never bundled.
     compileOnly(libs.placeholderapi)
     compileOnly(libs.zmenu.api) { isTransitive = false }
@@ -109,6 +117,7 @@ dependencies {
     testImplementation(libs.folia.api)
     testImplementation(libs.placeholderapi)
     testImplementation(libs.zmenu.api) { isTransitive = false }
+    testImplementation(libs.archunit)
     // The tests of the server test's checks.
     testImplementation(serverTestSources.output)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -157,6 +166,22 @@ tasks {
     withType<JavaCompile>().configureEach {
         options.encoding = "UTF-8"
         options.compilerArgs.addAll(listOf("-Xlint:all", "-Xlint:-processing", "-Werror"))
+        options.errorprone {
+            // Every package of the plugin is @NullMarked (ArchitectureTest checks it): NullAway
+            // checks exactly those, with the JSpecify semantics the annotations come from.
+            check("NullAway", CheckSeverity.ERROR)
+            option("NullAway:OnlyNullMarked", "true")
+            option("NullAway:JSpecifyMode", "true")
+            // Bukkit calls event handlers by reflection: an @EventHandler method is used, and
+            // public as Bukkit's own examples write it, even in an anonymous listener.
+            option("UnusedMethod:ExemptingMethodAnnotations", "org.bukkit.event.EventHandler")
+            disable("EffectivelyPrivate")
+            // Unit tests share the plugin's @NullMarked packages but not its contract: an assertion
+            // may read a value that can be null, and failing there is what the test is for.
+            if (name == "compileTestJava") {
+                disable("NullAway")
+            }
+        }
     }
 
     test {

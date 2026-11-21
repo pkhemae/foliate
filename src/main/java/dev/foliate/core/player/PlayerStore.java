@@ -28,6 +28,7 @@ import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
@@ -423,7 +424,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         }
         PendingSave<T> save = new PendingSave<>(value);
         waitingSaves.put(id, save);
-        enqueue(id, () -> {
+        this.<@Nullable Void>enqueue(id, () -> {
                     // Leaving the player's queue: from here on, a change queues a save of its own.
                     // Closed now rather than once a connection is found, so that the changes made
                     // while it waits for one are not lost with it if it never gets one.
@@ -481,7 +482,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      * @param work gives the database work when the operation leaves the player's queue, that is
      *     once everything queued before it is done
      */
-    private <R> CompletableFuture<R> enqueue(UUID id, Supplier<SqlFunction<R>> work) {
+    private <R extends @Nullable Object> CompletableFuture<R> enqueue(UUID id, Supplier<SqlFunction<R>> work) {
         CompletableFuture<R> result = new CompletableFuture<>();
         // What the queue holds is not the database work itself but a gate that opens once the
         // callbacks of its result have run: a callback that queues more work (the late join does)
@@ -495,7 +496,8 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         });
         // Registered outside compute(): a future that is already complete would run this at once,
         // and updating the map from inside one of its own updates is not allowed.
-        chained.get().whenComplete((value, error) -> {
+        // Its own outcome goes to result, which the callers observe: this future is not one to wait on.
+        CompletableFuture<?> _ = chained.get().whenComplete((value, error) -> {
             if (error == null) {
                 result.complete(value);
             } else {

@@ -181,7 +181,6 @@ final class Migrations {
     private void applyAll(Connection connection) throws SQLException, IOException {
         boolean autoCommit = connection.getAutoCommit();
         connection.setAutoCommit(false);
-        Exception failure = null;
         try {
             try (Statement statement = connection.createStatement()) {
                 statement.execute("CREATE TABLE IF NOT EXISTS " + HISTORY_TABLE
@@ -215,19 +214,17 @@ final class Migrations {
                     throw e;
                 }
             }
-        } catch (SQLException | IOException | RuntimeException e) {
-            failure = e;
-            throw e;
-        } finally {
+        } catch (Throwable e) {
+            // The migration's failure is the one to report, even when restoring fails too. Any
+            // failure, an Error included, must not leave the connection outside auto-commit.
             try {
                 connection.setAutoCommit(autoCommit);
             } catch (SQLException restoreFailure) {
-                if (failure == null) {
-                    throw restoreFailure;
-                }
-                failure.addSuppressed(restoreFailure);
+                e.addSuppressed(restoreFailure);
             }
+            throw e;
         }
+        connection.setAutoCommit(autoCommit);
     }
 
     /**

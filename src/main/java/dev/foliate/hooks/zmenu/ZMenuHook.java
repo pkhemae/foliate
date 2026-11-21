@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -215,7 +216,7 @@ public final class ZMenuHook implements Module, SubcommandProvider {
         }
 
         MenuException asMenuException() {
-            return (MenuException) getCause();
+            return (MenuException) Objects.requireNonNull(getCause());
         }
     }
 }

@@ -68,7 +68,10 @@ public final class FoliaSchedulers implements Schedulers {
         if (context.isCurrent()) {
             return entity.teleportAsync(target);
         }
-        return context.supply(() -> entity.teleportAsync(target))
+        // The future that teleportAsync gives is composed on the next line, not left unobserved.
+        @SuppressWarnings("FutureReturnValueIgnored")
+        CompletableFuture<CompletableFuture<Boolean>> started = context.supply(() -> entity.teleportAsync(target));
+        return started
                 .thenCompose(future -> future)
                 .exceptionally(error -> {
                     Throwable cause = error instanceof CompletionException && error.getCause() != null

@@ -247,7 +247,8 @@ class ConfigServiceTest {
         assertEquals(List.of(), logger.lines());
     }
 
-    /** A settings class with a nested section. */
+    /** A settings class with a nested section. Its fields are read and written by ConfigLib only. */
+    @SuppressWarnings("UnusedVariable")
     @Configuration
     static final class PluginConfigShape implements ConfigRoot {
 

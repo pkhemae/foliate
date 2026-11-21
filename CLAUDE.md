@@ -48,3 +48,5 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
 - Code that schedules depends on the `Schedulers` interface. Anything using timers or cancellation
   is tested with `ManualSchedulers`: MockBukkit cannot cancel tasks.
 - Every package that holds classes has a `package-info.java` annotated with `@NullMarked`.
+  NullAway checks those annotations when compiling the plugin and the server test, and Error Prone
+  runs on every source set; with `-Werror`, any of their warnings fails the build.
