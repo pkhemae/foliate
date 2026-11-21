@@ -67,7 +67,7 @@ class ProfileStorageOnMysqlTest {
         try (Connection connection = DriverManager.getConnection(url(), USER, PASSWORD);
                 Statement statement = connection.createStatement()) {
             statement.execute("DROP TABLE IF EXISTS foliate_profiles");
-            statement.execute("DROP TABLE IF EXISTS foliate_schema_history");
+            statement.execute("DROP TABLE IF EXISTS foliate_migrations");
         }
         // A session variable set through the driver properties, read back by a test below, and an
         // option the plugin must override (see savingAnUnchangedProfileAgainIsFine).
@@ -104,7 +104,7 @@ class ProfileStorageOnMysqlTest {
         database = newDatabase();
         database.enable();
 
-        assertEquals(1, count("foliate_schema_history"));
+        assertEquals(1, count("foliate_migrations"));
         assertEquals(0, count("foliate_profiles"));
     }
 
@@ -120,7 +120,7 @@ class ProfileStorageOnMysqlTest {
             try (Connection connection = DriverManager.getConnection(url(), USER, PASSWORD);
                     Statement statement = connection.createStatement()) {
                 statement.execute("DROP TABLE IF EXISTS foliate_profiles");
-                statement.execute("DROP TABLE IF EXISTS foliate_schema_history");
+                statement.execute("DROP TABLE IF EXISTS foliate_migrations");
             }
             List<Database> servers = IntStream.range(0, 4).mapToObj(i -> newDatabase()).toList();
             ExecutorService starts = Executors.newFixedThreadPool(servers.size());
@@ -143,7 +143,7 @@ class ProfileStorageOnMysqlTest {
                 database = servers.getFirst();
                 servers.subList(1, servers.size()).forEach(Database::disable);
             }
-            assertEquals(1, count("foliate_schema_history"));
+            assertEquals(1, count("foliate_migrations"));
         }
     }
 
