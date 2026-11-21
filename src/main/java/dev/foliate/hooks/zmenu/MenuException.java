@@ -1,4 +1,4 @@
-package dev.foliate.contracts.menu;
+package dev.foliate.hooks.zmenu;
 
 import java.io.Serial;
 

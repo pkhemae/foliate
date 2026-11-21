@@ -494,10 +494,13 @@ class PlayerStoreTest {
 
         store.join(id, "Alex");
         store.beginLogin(id, "Alex");
+        flush();
 
         assertTrue(store.find(id).isEmpty());
         assertEquals(0, store.pendingLogins());
-        assertEquals(0, store.pendingQueues());
+        // A join that went on would have loaded the value in the background and saved it. (The
+        // number of queues is no proof: the last one is dropped just after its work completes.)
+        assertTrue(stored(id).isEmpty(), "the join queued work after the store was disabled");
     }
 
     /**

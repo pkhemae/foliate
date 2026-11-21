@@ -124,12 +124,28 @@ class ScoreboardModuleTest {
         configure("scoreboard:\n  title: \"<red>Changed\"\n");
 
         scoreboard.reload();
-        // A reload runs off the tick threads: the swap is deferred to the player's scheduler, and
-        // the first draw comes a tick after that.
+        // A reload runs off the tick threads: the redraw is deferred to the player's scheduler.
+        schedulers.tick(1);
+
+        // Redrawn, not rebuilt: a new board would flicker.
+        assertEquals(1, boards.size());
+        assertFalse(boards.getFirst().deleted);
+        assertEquals("Changed", boards.getFirst().title);
+    }
+
+    /** The interval belongs to the board's timer: changing it needs a new one. */
+    @Test
+    void reloadChangingTheRefreshIntervalRebuildsTheBoard() throws Exception {
+        server.addPlayer("Alex");
+        schedulers.tick(1);
+        configure("scoreboard:\n  refresh-ticks: 5\n");
+
+        scoreboard.reload();
         schedulers.tick(2);
 
+        assertEquals(2, boards.size());
         assertTrue(boards.getFirst().deleted);
-        assertEquals("Changed", boards.getLast().title);
+        assertFalse(boards.getLast().deleted);
     }
 
     @Test
@@ -144,6 +160,23 @@ class ScoreboardModuleTest {
         assertEquals(1, boards.size());
         assertTrue(boards.getFirst().deleted);
         assertEquals(0, schedulers.pendingTasks());
+    }
+
+    @Test
+    void reloadTurningTheScoreboardOnGivesTheOnlinePlayersABoard() throws Exception {
+        configure("scoreboard:\n  enabled: false\n");
+        scoreboard.reload();
+        server.addPlayer("Alex");
+        schedulers.tick(1);
+        assertEquals(0, boards.size());
+
+        configure("scoreboard:\n  enabled: true\n");
+        scoreboard.reload();
+        schedulers.tick(2);
+
+        assertEquals(1, boards.size());
+        assertFalse(boards.getFirst().deleted);
+        assertEquals("Foliate", boards.getFirst().title);
     }
 
     @Test

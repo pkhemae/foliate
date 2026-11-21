@@ -9,7 +9,13 @@ import java.sql.SQLException;
 import java.util.Optional;
 import java.util.UUID;
 
-/** SQL for profiles. Plain JDBC, written to run unchanged on SQLite and MySQL. */
+/**
+ * SQL for profiles. Plain JDBC, written to run unchanged on SQLite and MySQL.
+ *
+ * <p>A save writes the whole row as the server last saw it. When servers of a network share a MySQL
+ * database, a player who switches servers can be loaded by the next one before the previous one
+ * saved their quit: the Storage page of the wiki describes this limit and how to lift it.
+ */
 final class ProfileRepository implements PlayerRepository<PlayerProfile> {
 
     @Override

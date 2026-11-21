@@ -68,12 +68,12 @@ public final class ScoreboardModule implements Module, Listener {
     public void enable() throws ScoreboardUnavailableException {
         supportCheck.run();
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
-        refreshAll();
+        applyToAll();
     }
 
     @Override
     public void reload() {
-        refreshAll();
+        applyToAll();
     }
 
     @Override
@@ -106,17 +106,32 @@ public final class ScoreboardModule implements Module, Listener {
     }
 
     /** Applies the current settings to everyone online, each on their own scheduler. */
-    private void refreshAll() {
+    private void applyToAll() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             try {
-                schedulers.entity(player).executeOrRun(() -> {
-                    hide(player);
-                    show(player);
-                });
+                schedulers.entity(player).executeOrRun(() -> apply(player));
             } catch (EntityRetiredException leaving) {
                 // Still listed as online but already on the way out: the quit event removes the
                 // board. Carry on with the other players.
             }
+        }
+    }
+
+    /**
+     * Brings a player's board in line with the settings. A board is only rebuilt when its refresh
+     * interval changed: rebuilding it makes it flicker, and the title and lines are read on every
+     * refresh anyway, so redrawing it is enough.
+     */
+    private void apply(Player player) {
+        ScoreboardSettings settings = this.settings.get();
+        Entry entry = entries.get(player.getUniqueId());
+        if (!settings.enabled()) {
+            hide(player);
+        } else if (entry != null && entry.refreshTicks() == settings.refreshTicks()) {
+            draw(player, entry.board());
+        } else {
+            hide(player);
+            show(player);
         }
     }
 
@@ -134,7 +149,7 @@ public final class ScoreboardModule implements Module, Listener {
             hide(player);
             return;
         }
-        Entry previous = entries.put(player.getUniqueId(), new Entry(board, refresh));
+        Entry previous = entries.put(player.getUniqueId(), new Entry(board, refresh, settings.refreshTicks()));
         if (previous != null) {
             previous.remove();
         }
@@ -148,7 +163,7 @@ public final class ScoreboardModule implements Module, Listener {
     }
 
     private void draw(Player player, ScoreboardDisplay board) {
-        // Read on every refresh so a reload shows up without rebuilding the board.
+        // Read on every refresh: a reload that changes the title or the lines needs no new board.
         ScoreboardSettings settings = this.settings.get();
         TagResolver[] values = {
             Placeholder.unparsed("player", player.getName()),
@@ -167,7 +182,7 @@ public final class ScoreboardModule implements Module, Listener {
         void run() throws ScoreboardUnavailableException;
     }
 
-    private record Entry(ScoreboardDisplay board, TaskHandle refresh) {
+    private record Entry(ScoreboardDisplay board, TaskHandle refresh, int refreshTicks) {
 
         void remove() {
             refresh.cancel();
