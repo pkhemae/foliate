@@ -49,12 +49,6 @@ public final class Database implements Module {
             "connectTimeout", String.valueOf(CONNECTION_TIMEOUT_MILLIS),
             "socketTimeout", "30000");
 
-    /**
-     * How long the migrations' connection waits for an answer: longer than the lock that keeps two
-     * servers from migrating at once, which MySQL holds for up to 60 seconds.
-     */
-    private static final int MIGRATION_NETWORK_TIMEOUT_MILLIS = 90_000;
-
     private final Path dataDirectory;
     private final Supplier<StorageSettings> settings;
     private final List<String> migrations;
@@ -137,10 +131,6 @@ public final class Database implements Module {
         HikariDataSource source = new HikariDataSource(pool);
         dataSource = source;
         try (Connection connection = source.getConnection()) {
-            if (settings.type() == StorageSettings.Type.MYSQL) {
-                // Reset by the pool when the connection goes back to it.
-                connection.setNetworkTimeout(Runnable::run, MIGRATION_NETWORK_TIMEOUT_MILLIS);
-            }
             new Migrations(logger, migrations, settings.type()).apply(connection);
         }
 
