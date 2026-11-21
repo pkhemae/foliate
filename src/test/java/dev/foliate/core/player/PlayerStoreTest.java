@@ -574,6 +574,22 @@ class PlayerStoreTest {
         assertTrue(store.find(broken.getUniqueId()).isEmpty());
     }
 
+    /** Enabled while they play (Paper's /reload): no join will come for them, so they are loaded at once. */
+    @Test
+    void playersAlreadyOnlineWhenTheStoreStartsAreLoaded() throws Exception {
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        store.disable();
+        server.addPlayer(new PlayerMock(server, "Alex", id));
+        store = new PlayerStore<>(
+                "visit", MockBukkit.createMockPlugin(), database, repository, lifecycle,
+                () -> Component.text("could not load"), NOPLogger.NOP_LOGGER, clock);
+
+        store.enable();
+        flush();
+
+        assertEquals(5, store.find(id).orElseThrow().visits());
+    }
+
     @Test
     void aStoreCannotBeEnabledTwice() {
         assertThrows(IllegalStateException.class, store::enable);

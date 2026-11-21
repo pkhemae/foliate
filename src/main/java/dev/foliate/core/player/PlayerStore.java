@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import net.kyori.adventure.text.Component;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
@@ -121,7 +122,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     }
 
     /**
-     * Starts listening to the logins, joins and quits.
+     * Starts listening to the logins, joins and quits, and loads the players already online.
      *
      * @throws IllegalStateException when it is already enabled: a second registration would count
      *     every join twice, and one store belongs to one module
@@ -131,6 +132,12 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             throw new IllegalStateException("The " + subject + " store is already enabled");
         }
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
+        // Players already online when the store starts (the plugin enabled by Paper's /reload or a
+        // plugin manager) will see no login nor join: their value is loaded as for a join that
+        // came without a pre-login, and their session counts from now.
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            join(player.getUniqueId(), player.getName());
+        }
     }
 
     /**
