@@ -25,6 +25,8 @@ command:
     unknown: "<prefix><red><white><player></white> n'est pas en ligne."
     not-loaded: "<prefix><red>Le profil de <white><player></white> n'est pas encore chargé."
     others-denied: "<prefix><red>Vous ne pouvez pas voir le profil d'un autre joueur."
+  menu:
+    player-required: "<prefix><red>Seul un joueur peut ouvrir un menu : <white>/execute as \\<joueur> run foliate menu</white>"
 
 menu:
   unknown: "<prefix><red>Le menu <white><menu></white> n'existe pas."

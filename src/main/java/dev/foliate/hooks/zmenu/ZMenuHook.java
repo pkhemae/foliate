@@ -87,7 +87,7 @@ public final class ZMenuHook implements Module, SubcommandProvider {
     /** {@code /foliate menu}, which opens the example menu. */
     @Override
     public List<Subcommand> subcommands() {
-        return List.of(new MenuCommand(this::open));
+        return List.of(new MenuCommand(this::open, messages));
     }
 
     @Override
