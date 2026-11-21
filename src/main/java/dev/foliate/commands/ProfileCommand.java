@@ -16,6 +16,7 @@ import java.util.Optional;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Server;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
@@ -68,8 +69,11 @@ public final class ProfileCommand implements Subcommand {
     public void build(LiteralArgumentBuilder<CommandSourceStack> node) {
         // /foliate profile: the one who runs it. The executor is the player the command runs as,
         // which differs from the sender under /execute as: showing another player's profile that
-        // way needs the permission to see other players' profiles, like naming them.
-        node.requires(source -> source.getExecutor() == source.getSender()
+        // way needs the permission to see other players' profiles, like naming them. Without an
+        // executor (the console, a command block), there is nobody else's profile to show: the
+        // command asks for a name.
+        node.requires(source -> source.getExecutor() == null
+                        || source.getExecutor() == source.getSender()
                         || source.getSender().hasPermission(Permissions.COMMAND_PROFILE_OTHERS))
                 .executes(context -> {
             CommandSourceStack source = context.getSource();
@@ -89,9 +93,10 @@ public final class ProfileCommand implements Subcommand {
                     if (!context.getSource().getSender().hasPermission(Permissions.COMMAND_PROFILE_OTHERS)) {
                         return suggestions.buildFuture();
                     }
+                    CommandSender sender = context.getSource().getSender();
                     String typed = suggestions.getRemainingLowerCase();
                     for (Player online : server.getOnlinePlayers()) {
-                        if (online.getName().toLowerCase(Locale.ROOT).startsWith(typed)) {
+                        if (canSee(sender, online) && online.getName().toLowerCase(Locale.ROOT).startsWith(typed)) {
                             suggestions.suggest(online.getName());
                         }
                     }
@@ -100,7 +105,7 @@ public final class ProfileCommand implements Subcommand {
                 .executes(context -> {
                     String typed = StringArgumentType.getString(context, ARGUMENT);
                     Player target = server.getPlayerExact(typed);
-                    if (target == null) {
+                    if (target == null || !canSee(context.getSource().getSender(), target)) {
                         messages.send(
                                 context.getSource().getSender(),
                                 "command.profile.unknown",
@@ -110,6 +115,11 @@ public final class ProfileCommand implements Subcommand {
                     }
                     return Command.SINGLE_SUCCESS;
                 }));
+    }
+
+    /** A player the sender cannot see, such as one who vanished, is treated as not online. */
+    private static boolean canSee(CommandSender sender, Player player) {
+        return !(sender instanceof Player viewer) || viewer.canSee(player);
     }
 
     private void show(Audience to, Player player) {

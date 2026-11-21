@@ -107,6 +107,51 @@ class ModuleManagerTest {
         assertEquals(List.of("enable b", "disable b"), events);
     }
 
+    /** The plugin cannot run without a required module, whatever the reason it gives. */
+    @Test
+    void requiredModuleThatSkipsItselfStopsEverything() {
+        manager.register(new RecordingModule("a"));
+        manager.register(new Module() {
+            @Override
+            public String name() {
+                return "needed";
+            }
+
+            @Override
+            public boolean required() {
+                return true;
+            }
+
+            @Override
+            public void enable() throws ModuleSkippedException {
+                throw new ModuleSkippedException("turned off");
+            }
+        });
+
+        assertFalse(manager.enableAll());
+        assertEquals(List.of("enable a", "disable a"), events);
+        assertTrue(manager.enabledNames().isEmpty());
+    }
+
+    @Test
+    void twoModulesCannotShareAName() {
+        manager.register(new RecordingModule("a"));
+
+        assertThrows(IllegalArgumentException.class, () -> manager.register(new RecordingModule("a")));
+    }
+
+    /** An empty report would read as a success. */
+    @Test
+    void reloadingModulesThatAreNotEnabledIsRejected() {
+        manager.register(new RecordingModule("a"));
+        assertThrows(IllegalStateException.class, manager::reloadAll);
+
+        manager.enableAll();
+        manager.disableAll();
+
+        assertThrows(IllegalStateException.class, manager::reloadAll);
+    }
+
     @Test
     void reloadReportsFailuresAndKeepsGoing() {
         manager.register(new RecordingModule("broken").failingOn("reload"));

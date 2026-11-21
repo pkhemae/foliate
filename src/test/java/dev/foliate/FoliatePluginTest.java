@@ -1,6 +1,5 @@
 package dev.foliate;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,21 +50,27 @@ class FoliatePluginTest {
         assertFalse(plugin.isEnabled());
     }
 
-    /** The shutdown order: the players still online are saved before the database closes. */
+    /**
+     * The shutdown order: the players still online are saved, their quit applied, before the
+     * database closes. The join saved the row already: only the time they were last seen tells
+     * the shutdown's save from it.
+     */
     @Test
     void pluginSavesThePlayersStillOnlineWhenItIsDisabled() throws Exception {
         FoliatePlugin plugin = MockBukkit.load(FoliatePlugin.class);
         PlayerMock alex = server.addPlayer("Alex");
+        Thread.sleep(20);
+        long beforeShutdown = System.currentTimeMillis();
 
         server.getPluginManager().disablePlugin(plugin);
 
         assertFalse(plugin.isEnabled());
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + plugin.getDataPath().resolve("data.db"));
-                PreparedStatement select = connection.prepareStatement("SELECT joins FROM foliate_profiles WHERE id = ?")) {
+                PreparedStatement select = connection.prepareStatement("SELECT last_seen FROM foliate_profiles WHERE id = ?")) {
             select.setString(1, alex.getUniqueId().toString());
             try (ResultSet row = select.executeQuery()) {
                 assertTrue(row.next(), "the player was not saved");
-                assertEquals(1, row.getInt(1));
+                assertTrue(row.getLong(1) >= beforeShutdown, "the player's quit was not saved at the shutdown");
             }
         }
     }

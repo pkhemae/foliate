@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.AfterEach;
@@ -162,6 +163,23 @@ class ScoreboardModuleTest {
     }
 
     @Test
+    void reloadTurningTheScoreboardOnGivesTheOnlinePlayersABoard() throws Exception {
+        configure("scoreboard:\n  enabled: false\n");
+        scoreboard.reload();
+        server.addPlayer("Alex");
+        schedulers.tick(1);
+        assertEquals(0, boards.size());
+
+        configure("scoreboard:\n  enabled: true\n");
+        scoreboard.reload();
+        schedulers.tick(2);
+
+        assertEquals(1, boards.size());
+        assertFalse(boards.getFirst().deleted);
+        assertEquals("Foliate", boards.getFirst().title);
+    }
+
+    @Test
     void reloadCarriesOnPastAPlayerWhoIsDisconnecting() throws Exception {
         server.addPlayer("First");
         PlayerMock leaving = server.addPlayer("Leaving");
@@ -224,6 +242,19 @@ class ScoreboardModuleTest {
         assertThrows(ConfigException.class, () -> configure("scoreboard:\n  refresh-ticks: 0\n"));
         String sixteenLines = "scoreboard:\n  lines:\n" + "  - line\n".repeat(16);
         assertThrows(ConfigException.class, () -> configure(sixteenLines));
+    }
+
+    /** A board whose refresh cannot be scheduled would never be drawn, nor removed by a quit. */
+    @Test
+    void noBoardIsKeptForAPlayerWhoseSchedulerIsRetired() {
+        PlayerMock leaving = server.addPlayer("Leaving");
+        scoreboard.onQuit(new PlayerQuitEvent(leaving, Component.empty(), PlayerQuitEvent.QuitReason.DISCONNECTED));
+        schedulers.retire(leaving);
+
+        scoreboard.onJoin(new PlayerJoinEvent(leaving, Component.empty()));
+
+        assertFalse(scoreboard.hasBoard(leaving.getUniqueId()));
+        assertTrue(boards.stream().allMatch(board -> board.deleted));
     }
 
     @Test

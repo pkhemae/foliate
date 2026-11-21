@@ -30,6 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
 import org.slf4j.helpers.NOPLogger;
+import dev.foliate.testing.RecordingLogger;
 
 class MessageServiceTest {
 
@@ -260,6 +261,49 @@ class MessageServiceTest {
         assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
                 .serialize(fresh.render(Locale.ENGLISH, "greeting", Placeholder.unparsed("player", "Alex"))));
         assertThrows(MessageException.class, fresh::reload);
+    }
+
+    /** A folder that happens to be named like a language file is not one, and stops nothing. */
+    @Test
+    void folderNamedLikeALanguageFileIsIgnored() throws Exception {
+        Files.createDirectories(directory.resolve("lang/de.yml"));
+        RecordingLogger logger = new RecordingLogger();
+        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
+
+        fresh.enable();
+        fresh.reload();
+
+        assertTrue(logger.lines().contains("WARN Ignoring lang/de.yml: it is not a file"), logger.lines().toString());
+    }
+
+    /** Two names for one language: the first in name order is used, the other is reported. */
+    @Test
+    void secondFileForTheSameLanguageIsIgnored() throws Exception {
+        Files.writeString(directory.resolve("lang/fr-CA.yml"), "greeting: \"Allo <player>\"\n");
+        Files.writeString(directory.resolve("lang/fr_CA.yml"), "greeting: \"Salut <player>\"\n");
+        RecordingLogger logger = new RecordingLogger();
+        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
+
+        fresh.enable();
+
+        assertEquals("Allo Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render(Locale.CANADA_FRENCH, "greeting", Placeholder.unparsed("player", "Alex"))));
+        assertTrue(
+                logger.lines().contains("WARN Ignoring lang/fr_CA.yml: lang/fr-CA.yml is already the file of this language"),
+                logger.lines().toString());
+    }
+
+    /** A broken file does not hide a good one for the same language. */
+    @Test
+    void brokenFileDoesNotHideAGoodOneForTheSameLanguage() throws Exception {
+        Files.writeString(directory.resolve("lang/fr-CA.yml"), "greeting: [unclosed\n");
+        Files.writeString(directory.resolve("lang/fr_CA.yml"), "greeting: \"Salut <player>\"\n");
+        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+
+        fresh.enable();
+
+        assertEquals("Salut Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render(Locale.CANADA_FRENCH, "greeting", Placeholder.unparsed("player", "Alex"))));
     }
 
     @Test

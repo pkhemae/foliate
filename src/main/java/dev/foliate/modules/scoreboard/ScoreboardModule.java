@@ -143,6 +143,12 @@ public final class ScoreboardModule implements Module, Listener {
         ScoreboardDisplay board = boardFactory.apply(player);
         TaskHandle refresh = schedulers.entity(player)
                 .runTimer(Ticks.duration(1), Ticks.duration(settings.refreshTicks()), () -> draw(player, board));
+        if (refresh.isCancelled()) {
+            // The player is being removed: no refresh will ever run, and no quit will remove it.
+            board.delete();
+            hide(player);
+            return;
+        }
         Entry previous = entries.put(player.getUniqueId(), new Entry(board, refresh, settings.refreshTicks()));
         if (previous != null) {
             previous.remove();
