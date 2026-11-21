@@ -7,7 +7,7 @@ import java.time.Clock;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
+import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -77,13 +77,17 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     /** Values loaded at pre-login, waiting for a join that may never come. */
     private final Map<UUID, PendingLogin<T>> loggingIn = new ConcurrentHashMap<>();
 
-    /** Players whose value is being loaded after their join, because no pre-login was seen. */
-    private final Set<UUID> pendingJoins = ConcurrentHashMap.newKeySet();
+    /**
+     * Players whose value is being loaded after their join, because no pre-login was seen, with
+     * the time they quit if they did so before it was loaded: the value is then saved as of then.
+     */
+    private final Map<UUID, OptionalLong> pendingJoins = new ConcurrentHashMap<>();
 
     /**
      * Makes "the player quit" and "their late value is cached" atomic: whichever comes second must
      * see the other, or a value would be cached for a player who is gone. {@link #update} and the
-     * join take it too, so that saves are queued in the order the changes were made.
+     * join take it too, so that saves are queued in the order the changes were made, and so does
+     * {@link #disable()}: once it holds it, nothing is cached or queued any more.
      */
     private final Object sessions = new Object();
 
@@ -135,10 +139,10 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      * still accept work at this point, unlike the server's schedulers.
      */
     public void disable() {
-        enabled.set(false);
         HandlerList.unregisterAll(this);
         long now = clock.millis();
         synchronized (sessions) {
+            enabled.set(false);
             online.forEach((id, value) -> write(id, applyLeft(id, value, now)));
             online.clear();
             loggingIn.clear();
@@ -242,6 +246,8 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, loadFailed.get());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            // The data is not loaded either: the same reason to refuse.
+            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, loadFailed.get());
         }
     }
 
@@ -262,6 +268,9 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         // uses: a quit in between would otherwise not see this pending login, and the new session
         // would start from a copy older than what the quit saved.
         synchronized (sessions) {
+            if (!enabled.get()) {
+                return;
+            }
             T current = online.get(id);
             if (current != null) {
                 remember(id, current);
@@ -272,6 +281,9 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         T loaded = read(id).get(LOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .orElseGet(() -> keepingId(id, lifecycle.create(id, name, clock.millis()), "create"));
         synchronized (sessions) {
+            if (!enabled.get()) {
+                return;
+            }
             // A session that joined while we were reading is fresher than what we read.
             T current = online.get(id);
             remember(id, current != null ? current : loaded);
@@ -293,16 +305,24 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
 
     void join(UUID id, String name) {
         long now = clock.millis();
-        PendingLogin<T> pending = loggingIn.remove(id);
-        if (pending != null && now - pending.at() <= LOGIN_TTL_MILLIS) {
-            T joined = applyJoined(id, pending.value(), name, now);
-            // Under the lock `update` uses: a change made between the two lines would otherwise be
-            // saved before this older value, and the database would end up with the older one.
-            synchronized (sessions) {
+        // Under the lock `update` and the quit use, from taking the pending login to queuing the
+        // save: a change or a quit in between would otherwise be lost, or saved before this older
+        // value and then overwritten by it.
+        synchronized (sessions) {
+            if (!enabled.get()) {
+                return;
+            }
+            PendingLogin<T> pending = loggingIn.remove(id);
+            if (pending != null && now - pending.at() <= LOGIN_TTL_MILLIS) {
+                // The server disconnects an old session before the new one joins, and its quit hands
+                // over what it saved. Were it still here, its value would be the freshest one.
+                T current = online.get(id);
+                T joined = applyJoined(id, current != null ? current : pending.value(), name, now);
                 online.put(id, joined);
                 write(id, joined);
+                return;
             }
-            return;
+            pendingJoins.put(id, OptionalLong.empty());
         }
         // No usable pre-login: the plugin was enabled while the player connected, or the login
         // took longer than anyone should wait. Load without blocking the tick; until then they
@@ -310,17 +330,22 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         // is still running reads the database before this join is saved, so the new session
         // does not count this join. It needs a re-login within the moment the load takes, right
         // after the plugin was enabled; it loses that one join, nothing else.
-        pendingJoins.add(id);
         read(id).thenAccept(stored -> {
                     T joined = applyJoined(id, stored.orElseGet(() -> keepingId(id, lifecycle.create(id, name, now), "create")), name, now);
+                    // Queued under the same lock as the quit's save, so the two reach the database
+                    // in the order the player's session went.
                     synchronized (sessions) {
-                        // Gone while the value was loading: nobody to cache it for.
-                        if (pendingJoins.remove(id)) {
+                        OptionalLong left = pendingJoins.remove(id);
+                        if (left == null) {
+                            // The store was disabled meanwhile: saved as it saved the others.
+                            write(id, applyLeft(id, joined, clock.millis()));
+                        } else if (left.isPresent()) {
+                            // Gone while the value was loading: nobody to cache it for.
+                            write(id, applyLeft(id, joined, left.getAsLong()));
+                        } else {
                             online.put(id, joined);
+                            write(id, joined);
                         }
-                        // Queued under the same lock as the quit's save, so the two reach the
-                        // database in the order the player's session went.
-                        write(id, joined);
                     }
                 })
                 .exceptionally(error -> {
@@ -331,11 +356,12 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     }
 
     void quit(UUID id) {
+        long now = clock.millis();
         synchronized (sessions) {
-            pendingJoins.remove(id);
+            pendingJoins.computeIfPresent(id, (key, loading) -> OptionalLong.of(now));
             T value = online.remove(id);
             if (value != null) {
-                T saved = applyLeft(id, value, clock.millis());
+                T saved = applyLeft(id, value, now);
                 write(id, saved);
                 // A second login while this session was online took a copy of its value at
                 // pre-login, and the new session will start from it. What this session changed

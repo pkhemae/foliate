@@ -169,6 +169,26 @@ class PlayerStoreTest {
         assertEquals(106, stored(id).orElseThrow().visits());
     }
 
+    /**
+     * The server disconnects the old session before the new one joins. Were the new one to join
+     * first, it would still start from the old session's value, not from the older copy taken at
+     * pre-login.
+     */
+    @Test
+    void joinWhileTheOldSessionIsStillOnlineStartsFromItsValue() throws Exception {
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        store.beginLogin(id, "Alex");
+        store.join(id, "Alex"); // 5
+
+        store.beginLogin(id, "Alex"); // copies 5
+        store.update(id, visit -> withVisits(visit, visit.visits() + 100)); // 105
+        store.join(id, "Alex");
+        flush();
+
+        assertEquals(106, store.find(id).orElseThrow().visits());
+        assertEquals(106, stored(id).orElseThrow().visits());
+    }
+
     /** A login must read behind the saves still queued for the player, not ahead of them. */
     @Test
     void loginWhileEarlierSavesAreStillQueuedSeesThem() throws Exception {
@@ -287,12 +307,14 @@ class PlayerStoreTest {
         CountDownLatch release = holdStorageThread();
 
         store.join(id, "Alex"); // no pre-login: the load happens in the background
+        clock.set(9_000);
         store.quit(id); // and the player quits before it is done
         release.countDown();
         // The callback that caches the value also saves it, counting the second join: waiting for
         // the writes, as the shutdown does, must wait for that save too.
         flush();
         assertEquals(2, stored(id).orElseThrow().visits(), "the load callback's save was not awaited");
+        assertEquals(9_000, stored(id).orElseThrow().lastSeen(), "the quit was not applied");
 
         assertTrue(store.find(id).isEmpty());
     }
@@ -441,6 +463,57 @@ class PlayerStoreTest {
 
         assertEquals(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, login.getLoginResult());
         assertEquals(Component.text("could not load"), login.kickMessage());
+    }
+
+    /** An interrupted load has not loaded the data either: the player is refused all the same. */
+    @Test
+    void playerWhoseLoadIsInterruptedIsRefused() {
+        AsyncPlayerPreLoginEvent login =
+                new AsyncPlayerPreLoginEvent("Alex", InetAddress.getLoopbackAddress(), UUID.randomUUID(), false);
+
+        Thread.currentThread().interrupt();
+        try {
+            store.onPreLogin(login);
+        } finally {
+            assertTrue(Thread.interrupted(), "the interruption was not kept");
+        }
+
+        assertEquals(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, login.getLoginResult());
+    }
+
+    /** Once disabled, the store caches and queues nothing: the database is about to close. */
+    @Test
+    void joinAfterTheStoreIsDisabledDoesNothing() throws Exception {
+        UUID id = UUID.randomUUID();
+        store.beginLogin(id, "Alex");
+        store.disable();
+
+        store.join(id, "Alex");
+        store.beginLogin(id, "Alex");
+
+        assertTrue(store.find(id).isEmpty());
+        assertEquals(0, store.pendingLogins());
+        assertEquals(0, store.pendingQueues());
+    }
+
+    /**
+     * A load still running when the store is disabled completes while the shutdown waits for the
+     * writes: its value is saved like those of the other players still online, and not cached.
+     */
+    @Test
+    void lateLoadThatCompletesDuringTheShutdownIsSavedNotCached() throws Exception {
+        UUID id = UUID.randomUUID();
+        CountDownLatch release = holdStorageThread();
+        store.join(id, "Alex"); // no pre-login: the load waits behind the hold
+        clock.set(9_000);
+
+        CompletableFuture<Void> disabling = CompletableFuture.runAsync(store::disable);
+        Thread.sleep(200);
+        release.countDown();
+        disabling.get(20, TimeUnit.SECONDS);
+
+        assertTrue(store.find(id).isEmpty());
+        assertEquals(9_000, stored(id).orElseThrow().lastSeen());
     }
 
     @Test
