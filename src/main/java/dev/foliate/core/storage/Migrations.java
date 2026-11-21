@@ -284,8 +284,14 @@ final class Migrations {
             }
             sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
+        List<String> statements;
+        try {
+            statements = statements(sql);
+        } catch (IllegalArgumentException e) {
+            throw new IOException("Migration " + script + " cannot be read: " + e.getMessage(), e);
+        }
         try (Statement statement = connection.createStatement()) {
-            for (String single : statements(sql)) {
+            for (String single : statements) {
                 statement.execute(single);
             }
         }
@@ -297,6 +303,9 @@ final class Migrations {
      * comment too. A quote inside a value is escaped by doubling it, the one way both SQLite and
      * MySQL understand. Stored procedures and triggers, whose bodies hold semicolons of their own,
      * are not supported.
+     *
+     * @throws IllegalArgumentException when a comment is not closed: everything after it would be
+     *     skipped, and the script still recorded as applied
      */
     static List<String> statements(String script) {
         List<String> statements = new ArrayList<>();
@@ -323,7 +332,10 @@ final class Migrations {
                 }
             } else if (c == '/' && i + 1 < script.length() && script.charAt(i + 1) == '*') {
                 int end = script.indexOf("*/", i + 2);
-                i = end < 0 ? script.length() : end + 1;
+                if (end < 0) {
+                    throw new IllegalArgumentException("a /* comment is never closed");
+                }
+                i = end + 1;
                 // Kept apart from what surrounds it, as the comment did.
                 current.append(' ');
             } else if (c == ';') {

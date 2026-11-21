@@ -73,6 +73,14 @@ class MigrationsTest {
                         .stream().map(statement -> statement.replaceAll("\\s+", " ")).toList());
     }
 
+    /** The rest of the script would be skipped, and the script still recorded as applied. */
+    @Test
+    void aCommentThatIsNeverClosedIsRefused() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> Migrations.statements("CREATE TABLE a (id INT); /* forgot to close\nCREATE TABLE b (id INT);\n"));
+    }
+
     /**
      * Rebuilding a table is how SQLite changes a column: with foreign keys on, dropping the old
      * table would delete the rows that refer to it.
