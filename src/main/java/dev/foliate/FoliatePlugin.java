@@ -36,6 +36,13 @@ import org.jspecify.annotations.Nullable;
  */
 public class FoliatePlugin extends JavaPlugin {
 
+    /**
+     * The SQL scripts of every module that has tables, given to the {@code Database}: a module that
+     * brings scripts of its own adds its list here. The test that opens the databases left by
+     * earlier versions reads it too, so that it migrates them exactly as the plugin does.
+     */
+    public static final List<String> MIGRATIONS = ProfileModule.MIGRATIONS;
+
     private @Nullable FoliaSchedulers schedulers;
     private @Nullable ModuleManager modules;
 
@@ -64,8 +71,7 @@ public class FoliatePlugin extends JavaPlugin {
         modules.register(config);
         modules.register(messages);
         hook(modules, PlaceholderApiHook.PLUGIN_NAME, () -> new PlaceholderApiHook(getPluginMeta(), placeholders, messages));
-        Database database = new Database(
-                getDataPath(), () -> config.get().storage(), ProfileModule.MIGRATIONS, getSLF4JLogger());
+        Database database = new Database(getDataPath(), () -> config.get().storage(), MIGRATIONS, getSLF4JLogger());
         modules.register(database);
         modules.register(new ProfileModule(
                 this, database, messages, placeholders, getSLF4JLogger(), Clock.systemUTC()));
