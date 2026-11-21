@@ -13,13 +13,13 @@ import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Queue;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -83,8 +83,12 @@ public final class ServerTest {
     private static final long CLEANUP_TIMEOUT_SECONDS = 5;
     /** Far enough apart for two places never to share a region, whatever the grid size. */
     private static final int DISTANCE = 10_000;
-    /** How long each run of a busy region's timer works: long enough for two runs to meet. */
-    private static final Duration WORK = Duration.ofMillis(10);
+    /**
+     * How long a run of a busy place's timer works while the other place's is not seen running:
+     * over half the 50 ms between two ticks of a region, so that the two places' runs meet
+     * whatever the gap between the two regions' ticks.
+     */
+    private static final Duration WORK = Duration.ofMillis(30);
 
     private final Plugin plugin;
     private final Server server;
@@ -412,45 +416,58 @@ public final class ServerTest {
                 });
     }
 
-    /** One run of a busy region's timer: where, on which thread, and when, in nanoseconds. */
-    private record Run(String place, long thread, String threadName, long start, long end) {
+    /** A run of a busy place's timer in progress, and its thread. */
+    private record Busy(long thread, String threadName) {}
 
-        boolean overlaps(Run other) {
-            return start < other.end && other.start < end;
+    /**
+     * One of the two busy places: whether its timer has run yet, and the run in progress, if any.
+     */
+    private record Side(String name, Location place, AtomicBoolean ticking, AtomicReference<@Nullable Busy> running) {
+
+        Side(String name, Location place) {
+            this(name, place, new AtomicBoolean(), new AtomicReference<>());
+        }
+    }
+
+    /**
+     * What the two places' timers find, from their region threads: the first thing wrong, the two
+     * runs seen at the same time, and every place and thread a run was seen on.
+     */
+    private record Findings(
+            AtomicReference<@Nullable String> problem, AtomicReference<@Nullable String> met, Set<String> runs) {
+
+        Findings() {
+            this(new AtomicReference<>(), new AtomicReference<>(), ConcurrentHashMap.newKeySet());
         }
     }
 
     /**
      * Keeps two regions far apart busy at the same time, as players spread over a world do: an
-     * entity in each, with a timer that works a little on every tick. Each run must be on the
-     * thread of the region that owns the entity, never in the other region, and the two regions
-     * must at some point work at the same time on two threads: that is what the build's
-     * {@code threaded-regions.threads} is for. Folia picks which thread ticks a region on each
-     * tick, so this waits, within a bound, for the two to meet. Whatever the outcome, the timers,
-     * the entities and the chunk tickets are gone before the next check.
+     * entity in each, with a timer that works on every tick until it sees the other place's timer
+     * running on another thread, for {@link #WORK} at most. Each run must be on the thread of the
+     * region that owns the entity, never in the other region, and two runs must be seen at the same
+     * time: that is what the build's {@code threaded-regions.threads} is for. Once they have been,
+     * the timers stop working. Whatever the outcome, the timers, the entities and the chunk
+     * tickets are gone before the next check.
      */
     private CompletableFuture<Void> distantRegionsTickInParallel(World world, Location spawn) {
-        Location west = spawn.clone().add(-DISTANCE / 2.0, 0, 0);
-        Location east = spawn.clone().add(DISTANCE / 2.0, 0, 0);
-        Queue<Run> runs = new ConcurrentLinkedQueue<>();
-        AtomicReference<@Nullable String> problem = new AtomicReference<>();
+        Side west = new Side("west", spawn.clone().add(-DISTANCE / 2.0, 0, 0));
+        Side east = new Side("east", spawn.clone().add(DISTANCE / 2.0, 0, 0));
+        Findings found = new Findings();
         // Undone in the reverse order they were done: timers, then entities, then chunk tickets.
         Deque<Supplier<CompletableFuture<?>>> undo = new ConcurrentLinkedDeque<>();
         CompletableFuture<Void> checked = CompletableFuture.allOf(
-                        keepBusy(world, "west", west, east, runs, problem, undo),
-                        keepBusy(world, "east", east, west, runs, problem, undo))
+                        keepBusy(world, west, east, found, undo),
+                        keepBusy(world, east, west, found, undo))
                 .thenCompose(ignored -> eventually(() -> CompletableFuture.completedFuture(
-                        problem.get() != null || parallelRuns(runs).isPresent()
+                        found.problem().get() != null || found.met().get() != null
                                 ? null
-                                : "two regions " + DISTANCE + " blocks apart never ticked at the same time (threads: "
-                                        + runs.stream().map(run -> run.place() + " " + run.threadName()).distinct().sorted().toList()
-                                        + "): is the test server given several region threads?")))
+                                : "two regions " + DISTANCE + " blocks apart were never seen running at the same time "
+                                        + "on two threads (runs seen: " + new TreeSet<>(found.runs()) + ")")))
                 .thenRun(() -> {
-                    String wrong = problem.get();
+                    String wrong = found.problem().get();
                     check(wrong == null, String.valueOf(wrong));
-                    Run[] pair = parallelRuns(runs).orElseThrow();
-                    logger.info("Regions {} blocks apart ticked at the same time: {} on {}, {} on {}",
-                            DISTANCE, pair[0].place(), pair[0].threadName(), pair[1].place(), pair[1].threadName());
+                    logger.info("Regions {} blocks apart ran at the same time: {}", DISTANCE, found.met().get());
                 });
         return checked
                 .handle((ignored, error) -> error)
@@ -461,11 +478,12 @@ public final class ServerTest {
     }
 
     /**
-     * Loads the chunk at {@code place} with a ticket, spawns an entity there and starts its busy
-     * timer, which records its runs. Completes once the timer is started.
+     * Loads the chunk of {@code side} with a ticket, spawns an entity there and starts its busy
+     * timer. Completes once the timer is started.
      */
-    private CompletableFuture<Void> keepBusy(World world, String name, Location place, Location elsewhere,
-            Queue<Run> runs, AtomicReference<@Nullable String> problem, Deque<Supplier<CompletableFuture<?>>> undo) {
+    private CompletableFuture<Void> keepBusy(
+            World world, Side side, Side other, Findings found, Deque<Supplier<CompletableFuture<?>>> undo) {
+        Location place = side.place();
         int chunkX = place.getBlockX() >> 4;
         int chunkZ = place.getBlockZ() >> 4;
         return schedulers.region(place)
@@ -478,26 +496,13 @@ public final class ServerTest {
                 .thenCompose(ignored -> eventually(() -> schedulers.region(place).supply(() ->
                         world.isChunkLoaded(chunkX, chunkZ) && world.getChunkAt(chunkX, chunkZ).isEntitiesLoaded()
                                 ? null
-                                : "the chunk " + name + " of spawn did not load"), 2 * ATTEMPTS))
+                                : "the chunk " + side.name() + " of spawn did not load"), 2 * ATTEMPTS))
                 .thenCompose(ignored -> schedulers.region(place)
                         .supply(() -> world.spawn(place, Marker.class, entity -> entity.setPersistent(false))))
                 .thenAccept(entity -> {
                     undo.addFirst(() -> schedulers.entity(entity).run(entity::remove));
-                    TaskHandle timer = schedulers.entity(entity).runTimer(Ticks.duration(1), Ticks.duration(1), () -> {
-                        long start = System.nanoTime();
-                        if (!server.isOwnedByCurrentRegion(entity) || !server.isOwnedByCurrentRegion(place)) {
-                            problem.compareAndSet(null, "the timer " + name + " of spawn did not run on the region that owns its entity");
-                        }
-                        if (server.isOwnedByCurrentRegion(elsewhere)) {
-                            problem.compareAndSet(null, "places " + DISTANCE + " blocks apart were in the same region");
-                        }
-                        // Stands for real work: a region thread is never meant to wait.
-                        while (System.nanoTime() - start < WORK.toNanos()) {
-                            Thread.onSpinWait();
-                        }
-                        Thread thread = Thread.currentThread();
-                        runs.add(new Run(name, thread.threadId(), thread.getName(), start, System.nanoTime()));
-                    });
+                    TaskHandle timer = schedulers.entity(entity).runTimer(
+                            Ticks.duration(1), Ticks.duration(1), () -> workUntilMet(entity, side, other, found));
                     undo.addFirst(() -> {
                         timer.cancel();
                         return CompletableFuture.completedFuture(null);
@@ -505,18 +510,40 @@ public final class ServerTest {
                 });
     }
 
-    /** Two runs, one in each place, that worked at the same time on two threads, if there are any. */
-    private static Optional<Run[]> parallelRuns(Queue<Run> runs) {
-        List<Run> west = runs.stream().filter(run -> run.place().equals("west")).toList();
-        List<Run> east = runs.stream().filter(run -> run.place().equals("east")).toList();
-        for (Run a : west) {
-            for (Run b : east) {
-                if (a.thread() != b.thread() && a.overlaps(b)) {
-                    return Optional.of(new Run[] {a, b});
-                }
-            }
+    /**
+     * One run of a busy place's timer. It stands for real work, which a region thread does rather
+     * than wait: it spins, and watches for the other place's timer running at the same moment.
+     */
+    private void workUntilMet(Entity entity, Side side, Side other, Findings found) {
+        long start = System.nanoTime();
+        Thread thread = Thread.currentThread();
+        found.runs().add(side.name() + " on " + thread.getName());
+        if (!server.isOwnedByCurrentRegion(entity) || !server.isOwnedByCurrentRegion(side.place())) {
+            found.problem().compareAndSet(
+                    null, "the timer " + side.name() + " of spawn did not run on the region that owns its entity");
         }
-        return Optional.empty();
+        if (server.isOwnedByCurrentRegion(other.place())) {
+            found.problem().compareAndSet(null, "places " + DISTANCE + " blocks apart were in the same region");
+        }
+        side.ticking().set(true);
+        // Nothing to meet before the other timer has started, nor once the runs have met.
+        if (!other.ticking().get() || found.met().get() != null) {
+            return;
+        }
+        side.running().set(new Busy(thread.threadId(), thread.getName()));
+        try {
+            while (found.met().get() == null && System.nanoTime() - start < WORK.toNanos()) {
+                // Set when the other run starts and cleared when it ends: seen here, both are running.
+                Busy theirs = other.running().get();
+                if (theirs != null && theirs.thread() != thread.threadId()) {
+                    found.met().compareAndSet(null, side.name() + " on " + thread.getName() + ", "
+                            + other.name() + " on " + theirs.threadName());
+                }
+                Thread.onSpinWait();
+            }
+        } finally {
+            side.running().set(null);
+        }
     }
 
     /** Runs each step in turn, each one whatever happened to the one before. */
