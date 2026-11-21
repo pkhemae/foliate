@@ -10,10 +10,16 @@ import dev.foliate.hooks.zmenu.ZMenuHook;
 import dev.foliate.modules.profile.ProfileModule;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -42,12 +48,13 @@ import org.slf4j.Logger;
  * in the jar that {@code ./gradlew runFolia -PserverTest=true} installs instead of the plugin's; the
  * build then fails unless the log contains {@link #PASSED}.
  *
- * <p>Never install that jar on a production server: the server test loads the spawn chunk, reloads
- * every module and stops the server.
+ * <p>Never install that jar on a production server: the server test loads the spawn chunk and two
+ * far from it, reloads every module and stops the server.
  *
  * <p>Unit tests run everything on one thread, so they cannot catch what breaks on Folia: work on
  * the wrong region, a timer that survives its cancellation, a scheduler call that only fails on a
- * real server, a command that was never registered. This checks exactly those, once, against the real thing.
+ * real server, a command that was never registered, regions ticking at the same time on several
+ * threads. This checks exactly those, once, against the real thing.
  *
  * <p>With {@code -Dfoliate.servertest.client=true} ({@code -PclientTest=true}) it then waits for a
  * real client to join, which the CI job starts, and checks what only a connected player shows: the
@@ -66,13 +73,18 @@ public final class ServerTest {
     private static final String CLIENT_PROPERTY = "foliate.servertest.client";
     private static final String VISITS_PROPERTY = "foliate.servertest.client.visits";
     private static final String TYPED_PROPERTY = "foliate.servertest.client.typed";
-    private static final Duration TIMEOUT = Duration.ofSeconds(60);
+    /** Generating the chunks of two distant regions takes the longest. */
+    private static final Duration TIMEOUT = Duration.ofSeconds(90);
     /** Starting a client takes much longer than starting the server. */
     private static final Duration CLIENT_TIMEOUT = Duration.ofMinutes(12);
     private static final Duration SETTLE = Duration.ofSeconds(3);
     private static final Duration RETRY = Duration.ofSeconds(2);
     private static final int ATTEMPTS = 10;
     private static final long CLEANUP_TIMEOUT_SECONDS = 5;
+    /** Far enough apart for two places never to share a region, whatever the grid size. */
+    private static final int DISTANCE = 10_000;
+    /** How long each run of a busy region's timer works: long enough for two runs to meet. */
+    private static final Duration WORK = Duration.ofMillis(10);
 
     private final Plugin plugin;
     private final Server server;
@@ -168,6 +180,7 @@ public final class ServerTest {
                         .thenCompose(ignored -> teleportFromAnotherThread(marker, spawn))
                         .thenCompose(ignored -> removedEntityIsReported(marker)))
                 .thenCompose(ignored -> removedEntityStopsItsTimer(world, spawn))
+                .thenCompose(ignored -> distantRegionsTickInParallel(world, spawn))
                 .thenCompose(ignored -> schedulers.global().run(this::commandsAreRegistered))
                 .thenCompose(ignored -> databaseAnswers())
                 .thenCompose(ignored -> schedulers.async().run(this::everyModuleReloads))
@@ -397,6 +410,128 @@ public final class ServerTest {
                                         "the timer of a removed entity kept running (" + (runs.get() - stopped) + " more runs)"));
                             });
                 });
+    }
+
+    /** One run of a busy region's timer: where, on which thread, and when, in nanoseconds. */
+    private record Run(String place, long thread, String threadName, long start, long end) {
+
+        boolean overlaps(Run other) {
+            return start < other.end && other.start < end;
+        }
+    }
+
+    /**
+     * Keeps two regions far apart busy at the same time, as players spread over a world do: an
+     * entity in each, with a timer that works a little on every tick. Each run must be on the
+     * thread of the region that owns the entity, never in the other region, and the two regions
+     * must at some point work at the same time on two threads: that is what the build's
+     * {@code threaded-regions.threads} is for. Folia picks which thread ticks a region on each
+     * tick, so this waits, within a bound, for the two to meet. Whatever the outcome, the timers,
+     * the entities and the chunk tickets are gone before the next check.
+     */
+    private CompletableFuture<Void> distantRegionsTickInParallel(World world, Location spawn) {
+        Location west = spawn.clone().add(-DISTANCE / 2.0, 0, 0);
+        Location east = spawn.clone().add(DISTANCE / 2.0, 0, 0);
+        Queue<Run> runs = new ConcurrentLinkedQueue<>();
+        AtomicReference<@Nullable String> problem = new AtomicReference<>();
+        // Undone in the reverse order they were done: timers, then entities, then chunk tickets.
+        Deque<Supplier<CompletableFuture<?>>> undo = new ConcurrentLinkedDeque<>();
+        CompletableFuture<Void> checked = CompletableFuture.allOf(
+                        keepBusy(world, "west", west, east, runs, problem, undo),
+                        keepBusy(world, "east", east, west, runs, problem, undo))
+                .thenCompose(ignored -> eventually(() -> CompletableFuture.completedFuture(
+                        problem.get() != null || parallelRuns(runs).isPresent()
+                                ? null
+                                : "two regions " + DISTANCE + " blocks apart never ticked at the same time (threads: "
+                                        + runs.stream().map(run -> run.place() + " " + run.threadName()).distinct().sorted().toList()
+                                        + "): is the test server given several region threads?")))
+                .thenRun(() -> {
+                    String wrong = problem.get();
+                    check(wrong == null, String.valueOf(wrong));
+                    Run[] pair = parallelRuns(runs).orElseThrow();
+                    logger.info("Regions {} blocks apart ticked at the same time: {} on {}, {} on {}",
+                            DISTANCE, pair[0].place(), pair[0].threadName(), pair[1].place(), pair[1].threadName());
+                });
+        return checked
+                .handle((ignored, error) -> error)
+                .thenCompose(error -> undoAll(undo).thenCompose(ignored -> error == null
+                        ? CompletableFuture.<Void>completedFuture(null)
+                        : CompletableFuture.<Void>failedFuture(
+                                error instanceof CompletionException && error.getCause() != null ? error.getCause() : error)));
+    }
+
+    /**
+     * Loads the chunk at {@code place} with a ticket, spawns an entity there and starts its busy
+     * timer, which records its runs. Completes once the timer is started.
+     */
+    private CompletableFuture<Void> keepBusy(World world, String name, Location place, Location elsewhere,
+            Queue<Run> runs, AtomicReference<@Nullable String> problem, Deque<Supplier<CompletableFuture<?>>> undo) {
+        int chunkX = place.getBlockX() >> 4;
+        int chunkZ = place.getBlockZ() >> 4;
+        return schedulers.region(place)
+                .run(() -> {
+                    world.addPluginChunkTicket(chunkX, chunkZ, plugin);
+                    undo.addFirst(() -> schedulers.region(place).run(() -> world.removePluginChunkTicket(chunkX, chunkZ, plugin)));
+                })
+                // The ticket loads the chunk in the background, generating it and its neighbours on a
+                // fresh world: on a slow runner that takes longer than the other waits allow.
+                .thenCompose(ignored -> eventually(() -> schedulers.region(place).supply(() ->
+                        world.isChunkLoaded(chunkX, chunkZ) && world.getChunkAt(chunkX, chunkZ).isEntitiesLoaded()
+                                ? null
+                                : "the chunk " + name + " of spawn did not load"), 2 * ATTEMPTS))
+                .thenCompose(ignored -> schedulers.region(place)
+                        .supply(() -> world.spawn(place, Marker.class, entity -> entity.setPersistent(false))))
+                .thenAccept(entity -> {
+                    undo.addFirst(() -> schedulers.entity(entity).run(entity::remove));
+                    TaskHandle timer = schedulers.entity(entity).runTimer(Ticks.duration(1), Ticks.duration(1), () -> {
+                        long start = System.nanoTime();
+                        if (!server.isOwnedByCurrentRegion(entity) || !server.isOwnedByCurrentRegion(place)) {
+                            problem.compareAndSet(null, "the timer " + name + " of spawn did not run on the region that owns its entity");
+                        }
+                        if (server.isOwnedByCurrentRegion(elsewhere)) {
+                            problem.compareAndSet(null, "places " + DISTANCE + " blocks apart were in the same region");
+                        }
+                        // Stands for real work: a region thread is never meant to wait.
+                        while (System.nanoTime() - start < WORK.toNanos()) {
+                            Thread.onSpinWait();
+                        }
+                        Thread thread = Thread.currentThread();
+                        runs.add(new Run(name, thread.threadId(), thread.getName(), start, System.nanoTime()));
+                    });
+                    undo.addFirst(() -> {
+                        timer.cancel();
+                        return CompletableFuture.completedFuture(null);
+                    });
+                });
+    }
+
+    /** Two runs, one in each place, that worked at the same time on two threads, if there are any. */
+    private static Optional<Run[]> parallelRuns(Queue<Run> runs) {
+        List<Run> west = runs.stream().filter(run -> run.place().equals("west")).toList();
+        List<Run> east = runs.stream().filter(run -> run.place().equals("east")).toList();
+        for (Run a : west) {
+            for (Run b : east) {
+                if (a.thread() != b.thread() && a.overlaps(b)) {
+                    return Optional.of(new Run[] {a, b});
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Runs each step in turn, each one whatever happened to the one before. */
+    private static CompletableFuture<Void> undoAll(Deque<Supplier<CompletableFuture<?>>> undo) {
+        CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
+        for (Supplier<CompletableFuture<?>> step : undo) {
+            chain = chain.thenCompose(ignored -> {
+                try {
+                    return step.get().handle((value, error) -> null);
+                } catch (RuntimeException e) {
+                    return CompletableFuture.completedFuture(null);
+                }
+            });
+        }
+        return chain;
     }
 
     /** Run from the console, on the global region, like a command typed in the server console. */
