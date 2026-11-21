@@ -7,6 +7,7 @@ import org.snakeyaml.engine.v2.api.DumpSettings;
 import org.snakeyaml.engine.v2.api.Load;
 import org.snakeyaml.engine.v2.api.LoadSettings;
 import org.snakeyaml.engine.v2.common.FlowStyle;
+import org.snakeyaml.engine.v2.exceptions.MarkedYamlEngineException;
 import org.snakeyaml.engine.v2.exceptions.YamlEngineException;
 
 /**
@@ -32,13 +33,13 @@ public final class Yaml {
         try {
             root = new Load(LoadSettings.builder().build()).loadFromString(document);
         } catch (YamlEngineException e) {
-            throw new YamlException("not valid YAML (" + firstLine(e.getMessage()) + ")", e);
+            throw new YamlException("not valid YAML (" + explain(e) + ")", e);
         }
         if (root == null) {
             return new LinkedHashMap<>();
         }
         if (!(root instanceof Map<?, ?> map)) {
-            throw new YamlException("expected a list of settings, found a single value", null);
+            throw new YamlException("expected a list of settings, found a single value");
         }
         return stringKeys(map);
     }
@@ -77,7 +78,18 @@ public final class Yaml {
         return copy;
     }
 
-    private static String firstLine(String message) {
+    /**
+     * The problem and where it is, such as {@code found duplicate key port, line 6, column 3}.
+     * Only the position is taken from the mark: printed whole, it quotes the line, which may hold
+     * a password.
+     */
+    private static String explain(YamlEngineException failure) {
+        if (failure instanceof MarkedYamlEngineException marked && marked.getProblem() != null) {
+            return marked.getProblem().strip() + marked.getProblemMark()
+                    .map(mark -> ", line " + (mark.getLine() + 1) + ", column " + (mark.getColumn() + 1))
+                    .orElse("");
+        }
+        String message = failure.getMessage();
         return message == null ? "unknown error" : message.lines().findFirst().orElse("unknown error").strip();
     }
 }

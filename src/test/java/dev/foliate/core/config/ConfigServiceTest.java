@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import de.exlll.configlib.Comment;
 import de.exlll.configlib.Configuration;
+import dev.foliate.testing.RecordingLogger;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -208,6 +209,41 @@ class ConfigServiceTest {
         assertTrue(failure.getMessage().startsWith("config.yml is not valid YAML"), failure.getMessage());
         assertEquals(1, failure.getMessage().lines().count(), failure.getMessage());
         assertEquals(broken, Files.readString(file));
+    }
+
+    /** Only the first line of the library's message would say where it is, not what is wrong. */
+    @Test
+    void brokenYamlSaysWhatIsWrongAndWhere() throws IOException {
+        Files.writeString(file, "debug: false\nother: 1\ndebug: true\n");
+
+        ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+        assertEquals("config.yml is not valid YAML (found duplicate key debug, line 3, column 1)", failure.getMessage());
+    }
+
+    /** The position is given, never the line itself: it may hold a password. */
+    @Test
+    void brokenYamlDoesNotQuoteTheLine() throws IOException {
+        Files.writeString(file, "debug: false\npassword: \"s3cret-pw\n");
+
+        ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+        assertFalse(failure.getMessage().contains("s3cret-pw"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("line"), failure.getMessage());
+    }
+
+    @Test
+    void anUnknownSectionIsReportedEvenWhenEmpty() throws Exception {
+        Files.writeString(file, "debug: false\nleftover: {}\n");
+        RecordingLogger logger = new RecordingLogger();
+        ConfigService<Settings> watched =
+                new ConfigService<>(directory, logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+
+        watched.enable();
+
+        assertEquals(
+                List.of("WARN config.yml: 'leftover' is not a setting of this plugin and was removed from the file"),
+                logger.lines());
     }
 
     @Test
