@@ -45,7 +45,9 @@ import org.slf4j.Logger;
  * <ol>
  *   <li><b>Load before the player exists.</b> The pre-login event runs off the tick threads, so it
  *       can wait for the database. The value is then held until the join. The read goes ahead of
- *       the other players' saves: someone is waiting for it.
+ *       the other players' saves: someone is waiting for it. A player whose last save has not
+ *       started yet (they just quit, or the database is down) starts from that save's value, with
+ *       no read at all.
  *   <li><b>Read from the cache only.</b> Events, commands and placeholders run on many threads and
  *       none of them may block: {@link #find} reads an immutable value from a concurrent map.
  *   <li><b>Write behind, in order.</b> A change replaces the cached value at once and is saved on
@@ -151,6 +153,12 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      */
     private final Set<UUID> lost = ConcurrentHashMap.newKeySet();
 
+    /** How long the shutdown waits for the saves before it leaves them to the database. */
+    private volatile long flushTimeoutSeconds = FLUSH_TIMEOUT_SECONDS;
+
+    /** The delay before each player's next retry, so that the shutdown can cut it short. */
+    private final Map<UUID, CompletableFuture<@Nullable Void>> retryWaits = new ConcurrentHashMap<>();
+
     /**
      * Runs a retry after a delay. Not the plugin's {@code Schedulers}: the server refuses its
      * async tasks while the plugin is disabled, and the saves of the shutdown must still be
@@ -227,14 +235,24 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             pendingJoins.clear();
             recentlyLeft.clear();
         }
-        Set<UUID> unsaved = new TreeSet<>();
-        if (!awaitWrites(FLUSH_TIMEOUT_SECONDS)) {
-            // The saves still being retried stop; those already running get the database's own
-            // grace period, but cannot be counted on.
-            abandoned = true;
-            unsaved.addAll(queues.keySet());
+        if (awaitWrites(flushTimeoutSeconds)) {
+            reportLost();
+            return;
         }
-        unsaved.addAll(lost);
+        // The saves waiting for a retry stop waiting and try once more; what is still queued or
+        // running gets the database's own grace period, which comes next in the shutdown. The
+        // report waits for the outcome: the database completes every operation as it stops, so
+        // the report is written then, with the players actually lost.
+        abandoned = true;
+        retryWaits.values().forEach(wait -> wait.complete(null));
+        CompletableFuture<?> _ = CompletableFuture.allOf(queues.values().toArray(CompletableFuture[]::new))
+                .handle((done, error) -> null)
+                .thenRun(this::reportLost);
+    }
+
+    /** Logs, in one line, the players whose latest value could not be saved. */
+    private void reportLost() {
+        Set<UUID> unsaved = new TreeSet<>(lost);
         if (!unsaved.isEmpty()) {
             logger.warn(
                     "The {}s of {} could not be saved: their latest changes are probably lost ({}{})",
@@ -373,6 +391,15 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             T current = online.get(id);
             if (current != null) {
                 remember(id, current);
+                return;
+            }
+            // A save of this player that has not started holds what the database will contain
+            // once it lands: no need to wait for it behind the other players' saves, or for its
+            // retries while the database is down.
+            PendingSave<T> waiting = waitingSaves.get(id);
+            Optional<T> unsaved = waiting == null ? Optional.empty() : waiting.peek();
+            if (unsaved.isPresent()) {
+                remember(id, unsaved.get());
                 return;
             }
             readStarted = ++sessionEvents;
@@ -617,8 +644,17 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             save.reopen();
         }
         retryStarted(id, cause);
-        return CompletableFuture.runAsync(() -> {}, retryDelays.apply(retryDelay(failures)))
-                .thenCompose(ignored -> persist(id, save, failures + 1));
+        CompletableFuture<@Nullable Void> wait = new CompletableFuture<>();
+        retryWaits.put(id, wait);
+        retryDelays.apply(retryDelay(failures)).execute(() -> wait.complete(null));
+        if (abandoned) {
+            // The shutdown stopped waiting meanwhile: one last try, at once.
+            wait.complete(null);
+        }
+        return wait.thenCompose(ignored -> {
+            retryWaits.remove(id, wait);
+            return persist(id, save, failures + 1);
+        });
     }
 
     /** Logs the start of an outage: the first player whose saves are retried. */
@@ -645,6 +681,11 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      */
     private static boolean worthRetrying(Throwable error, int failures) {
         return error instanceof SQLException sql && (SqlErrors.mayPass(sql) || failures < UNCERTAIN_RETRIES);
+    }
+
+    /** Shortens the shutdown's wait, for the tests. */
+    void flushTimeoutSeconds(long seconds) {
+        flushTimeoutSeconds = seconds;
     }
 
     /** Makes the retries run at once, or when a test says. */
@@ -769,6 +810,11 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         synchronized T start() {
             started = true;
             return value;
+        }
+
+        /** The value it will write, while it has not started: then it is the latest one. */
+        synchronized Optional<T> peek() {
+            return started ? Optional.empty() : Optional.of(value);
         }
 
         /** After a failure: the value is written again by a retry, with the changes made until then. */

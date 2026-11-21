@@ -666,6 +666,7 @@ class PlayerStoreTest {
             }
         });
         relogin.get(5, TimeUnit.SECONDS);
+        flush(); // the login may start from the quit's save before it lands
 
         assertEquals(1 + PlayerStore.UNCERTAIN_RETRIES, repository.attempts.get() - before - 1, "not given up after a few tries");
         assertEquals(1, logger.lines().stream().filter(line -> line.startsWith("ERROR Could not save")).count(), logger.lines().toString());
@@ -746,6 +747,86 @@ class PlayerStoreTest {
         assertTrue(outage.get(0).startsWith("WARN"), outage.toString());
         assertTrue(outage.get(1).startsWith("INFO"), outage.toString());
         assertEquals(50, stored(stuck).orElseThrow().visits());
+    }
+
+    /**
+     * A player who quits and logs in again while their quit's save waits for a storage thread
+     * starts from that save's value, without waiting behind every other player's saves.
+     */
+    @Test
+    void aLoginWhileTheQuitsSaveWaitsStartsFromItWithoutWaiting() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        store.update(id, visit -> withVisits(visit, 50));
+        flush();
+        CountDownLatch release = holdStorageThread();
+        try {
+            clock.set(7_000);
+            store.quit(id); // its save waits behind the hold
+
+            CompletableFuture<Void> login = CompletableFuture.runAsync(() -> {
+                try {
+                    store.beginLogin(id, "Alex");
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+            login.get(2, TimeUnit.SECONDS);
+            store.join(id, "Alex");
+        } finally {
+            release.countDown();
+        }
+        flush();
+
+        Visit visit = store.find(id).orElseThrow();
+        assertEquals(51, visit.visits());
+        assertEquals(51, stored(id).orElseThrow().visits());
+    }
+
+    /** While the database is down, a player whose save is being retried can still log in. */
+    @Test
+    void aPlayerWhoseSaveIsRetriedCanStillLogIn() throws Exception {
+        store.retryDelays(millis -> pendingRetries::add);
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        repository.failSaves(1, new CountDownLatch(1), id, true);
+
+        store.update(id, visit -> withVisits(visit, 50));
+        store.quit(id); // joins the save, which fails and waits for its retry
+        waitUntil(() -> pendingRetries.size() == 1);
+        store.beginLogin(id, "Alex"); // would wait for the retry, then time out
+        store.join(id, "Alex");
+        List<Runnable> retries = List.copyOf(pendingRetries);
+        pendingRetries.clear();
+        retries.forEach(Runnable::run);
+        flush();
+
+        assertEquals(51, store.find(id).orElseThrow().visits());
+        assertEquals(51, stored(id).orElseThrow().visits());
+    }
+
+    /**
+     * When the shutdown stops waiting, the saves still running get the database's own grace: the
+     * report waits for their outcome instead of counting them as lost beforehand.
+     */
+    @Test
+    void theShutdownReportWaitsForTheSavesTheDatabaseStillFinishes() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        store.flushTimeoutSeconds(1);
+        CountDownLatch release = holdStorageThread();
+        store.update(id, visit -> withVisits(visit, 50));
+
+        store.disable(); // gives up waiting after a second: the save is still queued
+        assertTrue(logger.lines().stream().noneMatch(line -> line.contains("could not be saved")), logger.lines().toString());
+        release.countDown();
+        database.disable(); // its grace lets the save land
+
+        assertTrue(logger.lines().stream().noneMatch(line -> line.contains("could not be saved")), logger.lines().toString());
+        database.enable();
+        assertEquals(50, stored(id).orElseThrow().visits());
     }
 
     /** What could not be saved is reported in one line when the store stops, not one per player. */
