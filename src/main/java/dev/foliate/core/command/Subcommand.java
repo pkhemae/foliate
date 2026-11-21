@@ -27,6 +27,15 @@ public interface Subcommand {
      * senders. The others can neither see nor run it. It is evaluated often, every time the server
      * works out which commands a sender has, and from any thread: keep it cheap and free of
      * side effects.
+     *
+     * <p>It sees the source as typed, BEFORE {@code /execute} changes it: Brigadier checks
+     * requirements while it parses, and {@code /execute as} or {@code /execute at} only switch the
+     * executor or the location when the command runs. So it must depend on the sender alone, never
+     * on {@link CommandSourceStack#getExecutor()} or {@link CommandSourceStack#getLocation()}: it
+     * would let {@code /execute as} get around a check, or refuse a command that would run as a
+     * player. Check those inside {@code executes}, from {@code context.getSource()}, and answer
+     * with a message when they do not fit. The same goes for any {@code requires} set in
+     * {@link #build}.
      */
     default boolean isAvailableTo(CommandSourceStack source) {
         return true;

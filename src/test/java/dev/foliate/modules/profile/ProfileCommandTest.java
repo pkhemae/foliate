@@ -1,6 +1,7 @@
 package dev.foliate.modules.profile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -53,8 +54,9 @@ class ProfileCommandTest {
         MessageService messages = new MessageService(
                 directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
-        dispatcher = TestCommands.foliate(
-                new ProfileCommand(id -> Optional.ofNullable(profiles.get(id)), messages, server));
+        dispatcher = TestCommands.registerExecuteAs(
+                TestCommands.foliate(new ProfileCommand(id -> Optional.ofNullable(profiles.get(id)), messages, server)),
+                server);
     }
 
     @AfterEach
@@ -112,14 +114,36 @@ class ProfileCommandTest {
         PlayerMock target = server.addPlayer("Target");
         profiles.put(target.getUniqueId(), profile(target, "Target", 10, 20, 3));
 
-        // What "/execute as Target run foliate profile" typed by Alex looks like.
-        assertThrows(
-                CommandSyntaxException.class,
-                () -> dispatcher.execute("foliate profile", new CommandSource(alex, target)));
+        dispatcher.execute("execute as Target run foliate profile", new CommandSource(alex));
+
+        assertEquals("[Foliate] You may not see another player's profile.", TestCommands.plain(alex.nextComponentMessage()));
+        assertNull(alex.nextComponentMessage());
 
         alex.addAttachment(plugin, ProfileCommand.PERMISSION_OTHERS, true);
-        dispatcher.execute("foliate profile", new CommandSource(alex, target));
+        dispatcher.execute("execute as Target run foliate profile", new CommandSource(alex));
         assertTrue(TestCommands.plain(alex.nextComponentMessage()).contains("Joins: 3"));
+    }
+
+    @Test
+    void runningTheCommandAsOneselfNeedsNothingMore() throws Exception {
+        PlayerMock alex = server.addPlayer("Alex");
+        profiles.put(alex.getUniqueId(), profile(alex, "Alex", 10, 20, 7));
+
+        dispatcher.execute("execute as Alex run foliate profile", new CommandSource(alex));
+
+        assertTrue(TestCommands.plain(alex.nextComponentMessage()).contains("Joins: 7"));
+    }
+
+    @Test
+    void consoleCanRunTheCommandAsAPlayer() throws Exception {
+        PlayerMock target = server.addPlayer("Target");
+        profiles.put(target.getUniqueId(), profile(target, "Target", 10, 20, 3));
+        ConsoleCommandSenderMock console = server.getConsoleSender();
+
+        dispatcher.execute("execute as Target run foliate profile", new CommandSource(console));
+
+        assertTrue(TestCommands.plain(console.nextComponentMessage()).contains("Joins: 3"));
+        assertNull(target.nextComponentMessage());
     }
 
     @Test

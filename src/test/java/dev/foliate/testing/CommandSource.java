@@ -5,13 +5,22 @@ import org.bukkit.Location;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A minimal {@link CommandSourceStack} for running a command through a Brigadier dispatcher in a
- * test: MockBukkit does not provide one. Give it the sender, and an executor when the command is
- * run as someone else (what {@code /execute as} does).
+ * test: MockBukkit does not provide one.
+ *
+ * <p>To run a command as someone else, type {@code execute as <player> run ...} through a
+ * dispatcher given {@link TestCommands#registerExecuteAs}, rather than building a source with that
+ * executor: on the server, Brigadier checks the requirements while it parses, with the source as
+ * typed, and {@code /execute as} only swaps the executor (through {@link #withExecutor}) when the
+ * command runs. A source with the executor already set would pass checks the server does not.
+ *
+ * @param executor the entity the command runs as: the sender itself for a player, none for the
+ *     console or a command block
  */
-public record CommandSource(CommandSender sender, Entity executor) implements CommandSourceStack {
+public record CommandSource(CommandSender sender, @Nullable Entity executor) implements CommandSourceStack {
 
     /** A command typed by the sender: for a player, the executor is that player. */
     public CommandSource(CommandSender sender) {
@@ -29,7 +38,7 @@ public record CommandSource(CommandSender sender, Entity executor) implements Co
     }
 
     @Override
-    public Entity getExecutor() {
+    public @Nullable Entity getExecutor() {
         return executor;
     }
 
@@ -50,6 +59,6 @@ public record CommandSource(CommandSender sender, Entity executor) implements Co
 
     @Override
     public CommandSourceStack withExecutor(Entity executor) {
-        return this;
+        return new CommandSource(sender, executor);
     }
 }

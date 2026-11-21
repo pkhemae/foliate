@@ -12,6 +12,7 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,7 +64,7 @@ class RootCommandTest {
 
     @Test
     void commandIsHiddenWhenItsOnlySubcommandIsUnavailable() {
-        Subcommand playersOnly = availableOnlyTo("menu", "test.menu", source -> source.getExecutor() != null);
+        Subcommand playersOnly = availableOnlyTo("menu", "test.menu", source -> source.getSender() instanceof Player);
         CommandDispatcher<CommandSourceStack> commands = TestCommands.foliate(playersOnly);
 
         assertThrows(
