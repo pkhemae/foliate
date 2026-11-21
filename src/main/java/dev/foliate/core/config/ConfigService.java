@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileSystemException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFileAttributeView;
@@ -162,7 +163,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     private T load() throws ConfigException {
         try {
             Files.createDirectories(file.getParent());
-            String onDisk = Files.exists(file) ? Files.readString(file) : null;
+            String onDisk = read();
             Map<String, Object> content = onDisk == null ? Map.of() : Yaml.parse(onDisk);
 
             Optional<Map<String, Object>> migrated = migrator.migrate(content);
@@ -189,7 +190,8 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
 
             String rendered = render(config);
             if (!rendered.equals(onDisk)) {
-                boolean written = save(rendered, backup == null ? null : new Backup(backup, Objects.requireNonNull(onDisk)));
+                boolean written = save(rendered, onDisk != null,
+                        backup == null ? null : new Backup(backup, Objects.requireNonNull(onDisk)));
                 reportUnknownSettings(content, rendered, written);
             }
             return config;
@@ -377,6 +379,23 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         });
     }
 
+    /**
+     * The text of the file, or null when there is none yet. Whether it exists is decided without
+     * following a link: a link whose target cannot be reached (a folder the server may not enter,
+     * a loop) is a read error, never a fresh install, which would run the plugin on the defaults in
+     * place of the administrator's settings. Only a link whose target does not exist yet is one.
+     */
+    private @Nullable String read() throws IOException {
+        if (!Files.isSymbolicLink(file) && !Files.exists(file)) {
+            return null;
+        }
+        try {
+            return Files.readString(file);
+        } catch (NoSuchFileException e) {
+            return null;
+        }
+    }
+
     /** The text of the file before a migration, to keep under another name. */
     private record Backup(Path path, String content) {}
 
@@ -386,9 +405,11 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
      * read-only, is left as it is: the settings it holds are valid and already loaded, so the
      * plugin runs with them and the console says why the file did not change.
      *
+     * @param existed whether the settings came from the file, rather than being the defaults of a
+     *     file not created yet
      * @return whether the file was written
      */
-    private boolean save(String rendered, @Nullable Backup backup) {
+    private boolean save(String rendered, boolean existed, @Nullable Backup backup) {
         try {
             Path target = target();
             if (Files.exists(target) && !Files.isWritable(target)) {
@@ -404,8 +425,12 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             write(target, rendered);
             return true;
         } catch (IOException e) {
-            logger.warn("{} could not be updated ({}): the settings were loaded, but the file was not brought up to date",
-                    fileName, FileErrors.reason(e));
+            if (existed) {
+                logger.warn("{} could not be updated ({}): the settings were loaded, but the file was not brought up to date",
+                        fileName, FileErrors.reason(e));
+            } else {
+                logger.warn("{} could not be created ({}): the default settings are used", fileName, FileErrors.reason(e));
+            }
             return false;
         }
     }

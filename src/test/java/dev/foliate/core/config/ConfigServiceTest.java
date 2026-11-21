@@ -521,6 +521,94 @@ class ConfigServiceTest {
         assertTrue(Files.readString(target).contains("config-version: 1"), "the target was not rewritten");
     }
 
+    /**
+     * A link whose target the server may not reach holds the administrator's settings all the
+     * same: running on the defaults instead, say on the default database, would be worse than not
+     * starting.
+     */
+    @Test
+    void linkToAFolderTheServerCannotEnterIsRefused() throws Exception {
+        assumePosix();
+        Path secrets = Files.createDirectories(directory.resolve("secrets"));
+        Files.writeString(secrets.resolve("foliate.yml"), "debug: true\n");
+        link(file, Path.of("secrets", "foliate.yml"));
+        Files.setPosixFilePermissions(secrets, PosixFilePermissions.fromString("---------"));
+        try {
+            assumeFalse(Files.isReadable(secrets.resolve("foliate.yml")), "running as a user who may read any file");
+
+            ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+            assertEquals("config.yml could not be read or written (permission denied)", failure.getMessage());
+        } finally {
+            Files.setPosixFilePermissions(secrets, PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    @Test
+    void reloadThroughALinkThatCannotBeFollowedKeepsTheRunningSettings() throws Exception {
+        assumePosix();
+        Path secrets = Files.createDirectories(directory.resolve("secrets"));
+        Files.writeString(secrets.resolve("foliate.yml"), "debug: true\n");
+        link(file, Path.of("secrets", "foliate.yml"));
+        service.enable();
+        Files.setPosixFilePermissions(secrets, PosixFilePermissions.fromString("---------"));
+        try {
+            assumeFalse(Files.isReadable(secrets.resolve("foliate.yml")), "running as a user who may read any file");
+
+            assertThrows(ConfigException.class, service::reload);
+
+            assertTrue(service.get().debug());
+        } finally {
+            Files.setPosixFilePermissions(secrets, PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    @Test
+    void linkThatLoopsIsRefused() throws Exception {
+        link(file, Path.of("config.yml"));
+
+        ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+        assertTrue(failure.getMessage().startsWith("config.yml could not be read or written ("), failure.getMessage());
+        assertFalse(failure.getMessage().contains(directory.toString()), failure.getMessage());
+    }
+
+    /** A link made before the file exists, such as to a secrets folder still empty, is a fresh install. */
+    @Test
+    void linkToAFileNotYetCreatedGetsTheDefaultsWrittenThrough() throws Exception {
+        Path target = Files.createDirectories(directory.resolve("secrets")).resolve("foliate.yml");
+        link(file, Path.of("secrets", "foliate.yml"));
+
+        service.enable();
+
+        assertFalse(service.get().debug());
+        assertTrue(Files.isSymbolicLink(file), "the link was replaced by a file");
+        assertTrue(Files.readString(target).contains("config-version: 1"), "the target was not written");
+    }
+
+    /** Nothing was loaded from the file: the console must not say the administrator's settings were. */
+    @Test
+    void fileThatCannotBeCreatedSaysTheDefaultsAreUsed() throws Exception {
+        link(file, Path.of("missing-folder", "foliate.yml"));
+        RecordingLogger logger = new RecordingLogger();
+        ConfigService<Settings> watched =
+                new ConfigService<>(directory, "config.yml", logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+
+        watched.enable();
+
+        assertEquals(
+                List.of("WARN config.yml could not be created (a file or folder is missing): the default settings are used"),
+                logger.lines());
+    }
+
+    private static void link(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | IOException e) {
+            assumeTrue(false, "symbolic links are not available here");
+        }
+    }
+
     /** A valid file the server may not write is used as it is, with a word in the console. */
     @Test
     void readOnlyFileIsLoadedAndLeftAsItIs() throws Exception {
