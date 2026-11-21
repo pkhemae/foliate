@@ -33,10 +33,16 @@ public final class TestCommands {
     }
 
     /**
-     * Adds a minimal {@code /execute as <player name> run <command>} to the dispatcher, built the
-     * way the server's is: {@code run} redirects to the root, and the executor is only swapped by
-     * the redirect's modifier, when the command runs. While Brigadier parses the rest, it checks
-     * every requirement with the source as typed, like the server does.
+     * Adds {@code /execute as <player name> run <command>} to the dispatcher: a simplified,
+     * single-player version of the server's. It keeps the property that matters here: Brigadier
+     * checks every requirement of the command after {@code run} with the source as typed, and the
+     * executor only changes when the command runs, through the modifier of {@code run}'s redirect
+     * to the root.
+     *
+     * <p>It is not built like the server's, where {@code run} is a plain redirect and
+     * {@code as <targets>} swaps the executor by forking. This one does not fork, and only resolves
+     * an online player by exact name: it cannot express {@code @a}, several targets or an executor
+     * that is not a player.
      *
      * @return the same dispatcher
      */
