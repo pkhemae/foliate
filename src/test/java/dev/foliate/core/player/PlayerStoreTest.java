@@ -626,6 +626,24 @@ class PlayerStoreTest {
         assertEquals(106, stored(id).orElseThrow().visits());
     }
 
+    /**
+     * A late load that keeps failing for an error that may not pass is given up: the player is no
+     * longer counted as loading, so their next join loads the value again.
+     */
+    @Test
+    void aLateLoadGivenUpLetsTheNextJoinLoadAgain() throws Exception {
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        repository.findsBroken = true;
+
+        store.join(id, "Alex");
+        waitUntil(() -> logger.lines().stream().anyMatch(line -> line.startsWith("ERROR Could not load")));
+        repository.findsBroken = false;
+        store.join(id, "Alex");
+        waitUntil(() -> store.find(id).isPresent());
+
+        assertEquals(5, store.find(id).orElseThrow().visits());
+    }
+
     /** A load after a join without pre-login that fails is tried again while the player is online. */
     @Test
     void aFailedLateLoadIsRetried() throws Exception {
@@ -1267,6 +1285,9 @@ class PlayerStoreTest {
         /** Whether the failures are those of an unreachable database, or an error that says nothing. */
         private volatile boolean unreachable = true;
 
+        /** Whether every read fails for an error that does not say whether it will pass. */
+        volatile boolean findsBroken;
+
         /** How many of the next reads fail as an unreachable database would. */
         final java.util.concurrent.atomic.AtomicInteger failFinds = new java.util.concurrent.atomic.AtomicInteger();
 
@@ -1280,6 +1301,9 @@ class PlayerStoreTest {
         @Override
         public Optional<Visit> find(Connection connection, UUID id) throws SQLException {
             savesAtLastFind = saves.get();
+            if (findsBroken) {
+                throw new SQLException("broken query", "42000");
+            }
             if (failFinds.getAndUpdate(left -> Math.max(0, left - 1)) > 0) {
                 throw new SQLException("Communications link failure", "08S01");
             }
