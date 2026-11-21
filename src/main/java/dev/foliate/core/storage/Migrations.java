@@ -8,11 +8,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Arrays;
-import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.Map;
+import java.util.TreeMap;
 import org.slf4j.Logger;
 
 /**
@@ -30,34 +29,42 @@ import org.slf4j.Logger;
  * <p>On MySQL and MariaDB, several servers of a network may share the database and start at the
  * same time: the migrations run under a named lock of the database server, so that one server
  * applies them while the others wait, then find them applied. SQLite is a file of one server.
+ *
+ * <p>On SQLite, foreign keys are off while the migrations run and checked before each one is
+ * committed, as SQLite asks for schema changes: rebuilding a table (create, copy, drop, rename)
+ * would otherwise delete the rows that refer to it, and the pragma that prevents it has no effect
+ * inside the transaction each script runs in.
  */
 final class Migrations {
 
     private static final String HISTORY_TABLE = "foliate_schema_history";
     /** How long a server waits for another one to finish migrating the shared database. */
     private static final int LOCK_TIMEOUT_SECONDS = 60;
-    /** Evaluated by the server: the history table and the current database, cut to MySQL's limit. */
-    private static final String LOCK_NAME = "LEFT(CONCAT('" + HISTORY_TABLE + ".', DATABASE()), 64)";
+    /**
+     * Evaluated by the server: the history table and a hash of the current database's name, cut to
+     * MySQL's limit of 64 characters. The hash keeps two long names with a common start apart,
+     * which cutting the name itself would not.
+     */
+    private static final String LOCK_NAME = "LEFT(CONCAT('" + HISTORY_TABLE + ".', SHA1(DATABASE())), 64)";
 
     private final Logger logger;
     private final List<String> scripts;
-    private final boolean sharedServer;
+    private final StorageSettings.Type type;
 
-    /** @param sharedServer true on MySQL and MariaDB, whose database other servers may share */
-    Migrations(Logger logger, List<String> scripts, boolean sharedServer) {
+    Migrations(Logger logger, List<String> scripts, StorageSettings.Type type) {
         this.logger = logger;
         this.scripts = scripts;
-        this.sharedServer = sharedServer;
+        this.type = type;
     }
 
     void apply(Connection connection) throws SQLException, IOException {
-        if (!sharedServer) {
-            applyAll(connection);
+        if (type == StorageSettings.Type.SQLITE) {
+            applyOnSqlite(connection);
             return;
         }
         // The lock belongs to the connection's session: taken and released on this connection.
         // It is named after the database, on the server, so that plugins on other databases of
-        // the same MySQL server do not wait for each other; MySQL allows 64 characters.
+        // the same MySQL server do not wait for each other.
         try (PreparedStatement take = connection.prepareStatement("SELECT GET_LOCK(" + LOCK_NAME + ", ?)")) {
             take.setInt(1, LOCK_TIMEOUT_SECONDS);
             try (ResultSet result = take.executeQuery()) {
@@ -86,6 +93,46 @@ final class Migrations {
         release(connection);
     }
 
+    private void applyOnSqlite(Connection connection) throws SQLException, IOException {
+        boolean foreignKeys = foreignKeys(connection);
+        setForeignKeys(connection, false);
+        try {
+            applyAll(connection);
+        } catch (SQLException | IOException | RuntimeException e) {
+            try {
+                setForeignKeys(connection, foreignKeys);
+            } catch (SQLException restoreFailure) {
+                e.addSuppressed(restoreFailure);
+            }
+            throw e;
+        }
+        setForeignKeys(connection, foreignKeys);
+    }
+
+    private static boolean foreignKeys(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement();
+                ResultSet result = statement.executeQuery("PRAGMA foreign_keys")) {
+            return result.next() && result.getInt(1) == 1;
+        }
+    }
+
+    private static void setForeignKeys(Connection connection, boolean on) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA foreign_keys = " + (on ? "ON" : "OFF"));
+        }
+    }
+
+    /** With foreign keys off, a script could leave rows that refer to nothing: refused here. */
+    private static void checkForeignKeys(Connection connection, String script) throws SQLException {
+        try (Statement statement = connection.createStatement();
+                ResultSet broken = statement.executeQuery("PRAGMA foreign_key_check")) {
+            if (broken.next()) {
+                throw new SQLException("Database migration " + script + " leaves rows of " + broken.getString(1)
+                        + " that refer to missing rows of " + broken.getString(3));
+            }
+        }
+    }
+
     /**
      * A failure here fails the start of the database, whose pool is then closed: closing the
      * connection releases the lock anyway, so it never stays on a pooled connection.
@@ -102,6 +149,7 @@ final class Migrations {
     private void applyAll(Connection connection) throws SQLException, IOException {
         boolean autoCommit = connection.getAutoCommit();
         connection.setAutoCommit(false);
+        Exception failure = null;
         try {
             try (Statement statement = connection.createStatement()) {
                 statement.execute("CREATE TABLE IF NOT EXISTS " + HISTORY_TABLE
@@ -109,36 +157,74 @@ final class Migrations {
             }
             connection.commit();
 
-            Set<Integer> applied = appliedVersions(connection);
+            Map<Integer, String> applied = appliedScripts(connection);
+            checkHistory(applied);
             for (int version = 1; version <= scripts.size(); version++) {
-                if (applied.contains(version)) {
+                if (applied.containsKey(version)) {
                     continue;
                 }
                 String script = scripts.get(version - 1);
                 try {
                     run(connection, script);
+                    if (type == StorageSettings.Type.SQLITE) {
+                        checkForeignKeys(connection, script);
+                    }
                     record(connection, version, script);
                     connection.commit();
                     logger.info("Applied database migration {}", script);
                 } catch (SQLException | IOException e) {
-                    connection.rollback();
+                    // The migration's failure is the one to report: the connection may be gone,
+                    // and then the rollback fails too.
+                    try {
+                        connection.rollback();
+                    } catch (SQLException rollbackFailure) {
+                        e.addSuppressed(rollbackFailure);
+                    }
                     throw e;
                 }
             }
+        } catch (SQLException | IOException | RuntimeException e) {
+            failure = e;
+            throw e;
         } finally {
-            connection.setAutoCommit(autoCommit);
+            try {
+                connection.setAutoCommit(autoCommit);
+            } catch (SQLException restoreFailure) {
+                if (failure == null) {
+                    throw restoreFailure;
+                }
+                failure.addSuppressed(restoreFailure);
+            }
         }
     }
 
-    private static Set<Integer> appliedVersions(Connection connection) throws SQLException {
-        Set<Integer> versions = new HashSet<>();
-        try (Statement statement = connection.createStatement();
-                ResultSet rows = statement.executeQuery("SELECT version FROM " + HISTORY_TABLE)) {
-            while (rows.next()) {
-                versions.add(rows.getInt(1));
+    /**
+     * A version recorded under another script's name means the list of scripts was reordered or a
+     * script renamed: running the rest would apply them on top of a schema they do not expect.
+     */
+    private void checkHistory(Map<Integer, String> applied) throws SQLException {
+        for (Map.Entry<Integer, String> recorded : applied.entrySet()) {
+            int version = recorded.getKey();
+            if (version > scripts.size()) {
+                logger.warn("The database has migration {} ({}), which this version of the plugin does not know:"
+                        + " it was used by a newer version", version, recorded.getValue());
+            } else if (!scripts.get(version - 1).equals(recorded.getValue())) {
+                throw new SQLException("Database migration " + version + " was applied as " + recorded.getValue()
+                        + " but this version of the plugin names it " + scripts.get(version - 1)
+                        + ": shipped migrations must never be renamed or reordered");
             }
         }
-        return versions;
+    }
+
+    private static Map<Integer, String> appliedScripts(Connection connection) throws SQLException {
+        Map<Integer, String> scripts = new TreeMap<>();
+        try (Statement statement = connection.createStatement();
+                ResultSet rows = statement.executeQuery("SELECT version, script FROM " + HISTORY_TABLE)) {
+            while (rows.next()) {
+                scripts.put(rows.getInt(1), rows.getString(2));
+            }
+        }
+        return scripts;
     }
 
     private static void run(Connection connection, String script) throws SQLException, IOException {
@@ -157,21 +243,56 @@ final class Migrations {
     }
 
     /**
-     * Splits a script into statements. Deliberately simple: comments start with {@code --} and run
-     * to the end of the line, and statements are separated by semicolons. A script must therefore
-     * not contain {@code --} or a semicolon inside a quoted value, nor stored procedures.
+     * Splits a script into statements, on the semicolons that are not quoted. Outside quotes,
+     * {@code --} starts a comment that runs to the end of the line, and <code>/* ... *&#47;</code> is a
+     * comment too. A quote inside a value is escaped by doubling it, the one way both SQLite and
+     * MySQL understand. Stored procedures and triggers, whose bodies hold semicolons of their own,
+     * are not supported.
      */
     static List<String> statements(String script) {
-        String withoutComments = script.lines()
-                .map(line -> {
-                    int comment = line.indexOf("--");
-                    return comment < 0 ? line : line.substring(0, comment);
-                })
-                .collect(Collectors.joining("\n"));
-        return Arrays.stream(withoutComments.split(";"))
-                .map(String::strip)
-                .filter(statement -> !statement.isEmpty())
-                .toList();
+        List<String> statements = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        char quote = 0;
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (quote != 0) {
+                current.append(c);
+                // A doubled quote is an escaped one, and the value goes on.
+                if (c == quote) {
+                    if (i + 1 < script.length() && script.charAt(i + 1) == quote) {
+                        current.append(script.charAt(++i));
+                    } else {
+                        quote = 0;
+                    }
+                }
+            } else if (c == '\'' || c == '"' || c == '`') {
+                quote = c;
+                current.append(c);
+            } else if (c == '-' && i + 1 < script.length() && script.charAt(i + 1) == '-') {
+                while (i + 1 < script.length() && script.charAt(i + 1) != '\n') {
+                    i++;
+                }
+            } else if (c == '/' && i + 1 < script.length() && script.charAt(i + 1) == '*') {
+                int end = script.indexOf("*/", i + 2);
+                i = end < 0 ? script.length() : end + 1;
+                // Kept apart from what surrounds it, as the comment did.
+                current.append(' ');
+            } else if (c == ';') {
+                add(statements, current);
+            } else {
+                current.append(c);
+            }
+        }
+        add(statements, current);
+        return List.copyOf(statements);
+    }
+
+    private static void add(List<String> statements, StringBuilder statement) {
+        String stripped = statement.toString().strip();
+        if (!stripped.isEmpty()) {
+            statements.add(stripped);
+        }
+        statement.setLength(0);
     }
 
     private static void record(Connection connection, int version, String script) throws SQLException {

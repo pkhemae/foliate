@@ -56,6 +56,34 @@ class DatabaseTest {
         assertEquals(1, countRows("foliate_schema_history"));
     }
 
+    /** The same scripts must behave the same on SQLite and MySQL, where foreign keys are always on. */
+    @Test
+    void sqliteChecksForeignKeysAndWritesAheadOfTheFile() throws Exception {
+        database.enable();
+
+        assertEquals("1", pragma("foreign_keys"));
+        assertEquals("wal", pragma("journal_mode"));
+    }
+
+    /** A second pool and set of threads would leak the first ones. */
+    @Test
+    void enablingTwiceIsRejected() throws Exception {
+        database.enable();
+
+        assertThrows(IllegalStateException.class, database::enable);
+        assertTrue(database.isRunning());
+    }
+
+    private String pragma(String name) throws SQLException {
+        return database.call(connection -> {
+            try (Statement statement = connection.createStatement();
+                    ResultSet result = statement.executeQuery("PRAGMA " + name)) {
+                result.next();
+                return result.getString(1);
+            }
+        });
+    }
+
     @Test
     void migrationsAreAppliedOnlyOnce() throws Exception {
         database.enable();
