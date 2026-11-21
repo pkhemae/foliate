@@ -30,11 +30,12 @@ import org.slf4j.Logger;
 public final class ProfileModule implements Module, SubcommandProvider {
 
     /**
-     * The SQL scripts of this module, in the order they apply: to give to the {@code Database}. To
-     * change the table, append a script here and nowhere else: the plugin and the tests read this
-     * list.
+     * The SQL scripts of this module, under {@code migrations/profile/}, in the order they apply:
+     * to give to the {@code Database}. To change the table, add a script to that folder and append
+     * it here, and nowhere else: the plugin and the tests read this list, and the scripts of other
+     * modules do not depend on its length.
      */
-    public static final List<String> MIGRATIONS = List.of("001_create_profiles.sql");
+    public static final List<String> MIGRATIONS = List.of("profile/001_create_profiles.sql");
 
     private final Database database;
     private final MessageService messages;

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.foliate.testing.RecordingLogger;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
@@ -15,6 +16,7 @@ import java.sql.Statement;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.helpers.NOPLogger;
@@ -146,17 +148,51 @@ class MigrationsTest {
         }
     }
 
-    /** Running the rest on a schema they do not expect could damage it. */
+    /**
+     * Two modules each own their scripts. When the first appends one, the second's must neither
+     * move nor run again: scripts are known by name, not by their position in the plugin's list.
+     */
     @Test
-    void aRenamedOrReorderedMigrationStopsTheStart() throws Exception {
+    void aModuleThatAddsAScriptLeavesTheOthersAlone() throws Exception {
+        List<String> notes = List.of("001_create_notes.sql");
+        List<String> visits = List.of("001_create_visits.sql");
+        try (Connection connection = sqlite()) {
+            new Migrations(NOPLogger.NOP_LOGGER, concat(notes, visits), StorageSettings.Type.SQLITE).apply(connection);
+
+            List<String> notesThen = concat(notes, List.of("003_parents.sql"));
+            new Migrations(NOPLogger.NOP_LOGGER, concat(notesThen, visits), StorageSettings.Type.SQLITE).apply(connection);
+            // The order of the modules does not matter either.
+            new Migrations(NOPLogger.NOP_LOGGER, concat(visits, notesThen), StorageSettings.Type.SQLITE).apply(connection);
+
+            assertEquals(0, count(connection, "parents"));
+            assertEquals(3, count(connection, "foliate_migrations"));
+        }
+    }
+
+    /** Renamed, or left behind by a module that was removed: worth a line, not a failed start. */
+    @Test
+    void aScriptTheDatabaseRanButNoModuleListsIsReported() throws Exception {
+        RecordingLogger logger = new RecordingLogger();
         try (Connection connection = sqlite()) {
             new Migrations(NOPLogger.NOP_LOGGER, List.of("001_create_notes.sql"), StorageSettings.Type.SQLITE).apply(connection);
 
-            SQLException failure = assertThrows(SQLException.class, () ->
-                    new Migrations(NOPLogger.NOP_LOGGER, List.of("001_create_visits.sql"), StorageSettings.Type.SQLITE).apply(connection));
-
-            assertTrue(failure.getMessage().contains("renamed or reordered"), failure.getMessage());
+            new Migrations(logger, List.of("001_create_visits.sql"), StorageSettings.Type.SQLITE).apply(connection);
         }
+
+        assertTrue(
+                logger.lines().stream().anyMatch(line -> line.startsWith("WARN The database ran the migration 001_create_notes.sql")),
+                logger.lines().toString());
+    }
+
+    /** The history knows scripts by name: the second one would never run. */
+    @Test
+    void aScriptListedTwiceIsRefused() {
+        assertThrows(IllegalArgumentException.class, () -> new Migrations(
+                NOPLogger.NOP_LOGGER, List.of("001_create_notes.sql", "001_create_notes.sql"), StorageSettings.Type.SQLITE));
+    }
+
+    private static List<String> concat(List<String> first, List<String> second) {
+        return Stream.concat(first.stream(), second.stream()).toList();
     }
 
     /**

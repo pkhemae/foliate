@@ -53,7 +53,7 @@ class DatabaseTest {
 
         assertTrue(database.isRunning());
         assertEquals(0, countRows("notes"));
-        assertEquals(1, countRows("foliate_schema_history"));
+        assertEquals(1, countRows("foliate_migrations"));
     }
 
     /** The same scripts must behave the same on SQLite and MySQL, where foreign keys are always on. */
@@ -92,7 +92,7 @@ class DatabaseTest {
         database = new Database(directory, () -> config.get().storage(), MIGRATIONS, NOPLogger.NOP_LOGGER);
         database.enable();
 
-        assertEquals(1, countRows("foliate_schema_history"));
+        assertEquals(1, countRows("foliate_migrations"));
     }
 
     @Test
