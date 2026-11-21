@@ -35,27 +35,35 @@ import org.slf4j.Logger;
  * per-player data needs on Folia, written once; a feature gives it the SQL of its table
  * ({@link PlayerRepository}) and what happens at a join and a quit ({@link PlayerLifecycle}).
  *
+ * <p>What it guarantees, each in the class that keeps it:
+ *
  * <ol>
  *   <li><b>Load before the player exists.</b> The pre-login event runs off the tick threads, so it
- *       can wait for the database. The value is then held until the join. The read goes ahead of
- *       the other players' saves: someone is waiting for it. A player whose last save has not
- *       started yet (they just quit, or the database is down) starts from that save's value, with
- *       no read at all.
+ *       can wait for the database. The value is then held until the join ({@link SessionTracker}).
+ *       The read goes ahead of the other players' saves: someone is waiting for it. A player whose
+ *       last save has not started yet (they just quit, or the database is down) starts from that
+ *       save's value, with no read at all.
  *   <li><b>Read from the cache only.</b> Events, commands and placeholders run on many threads and
  *       none of them may block: {@link #find} reads an immutable value from a concurrent map.
  *   <li><b>Write behind, in order.</b> A change replaces the cached value at once, and its save
- *       is queued behind the player's previous reads and saves ({@link SaveQueue}).
+ *       is queued behind the player's previous reads and saves ({@link SaveQueue},
+ *       {@link PlayerQueues}).
  *   <li><b>Write the latest value only.</b> Changes made while a save waits for a storage thread
  *       join it instead of queuing saves of their own ({@link SaveQueue}).
  *   <li><b>Retry what failed.</b> A save that fails for a reason known to pass is tried again
  *       until it succeeds, any other error {@value #UNCERTAIN_RETRIES} more times, then given up
  *       ({@link SaveQueue}).
  *   <li><b>Never invent data.</b> When the stored value is not known yet, wait for it: saving a
- *       fresh one would erase the real one.
+ *       fresh one would erase the real one. A player who joined without a pre-login has no value
+ *       until it is loaded.
  *   <li><b>Flush on shutdown.</b> The last saves are waited for before the database closes, and
  *       the players whose value could not be saved in time are reported in one line
  *       ({@link SaveQueue}).
  * </ol>
+ *
+ * <p>This class keeps the public API, the events, and the flows of a session: login, join, change,
+ * quit and shutdown. They run under one lock, {@link #sessions}, which {@link SaveQueue} and
+ * {@link SessionTracker} are given rather than having locks of their own.
  *
  * <p>A store is a component of a module, not a module: the module calls {@link #enable()} and
  * {@link #disable()} from its own, after checking that the database is running.
@@ -68,7 +76,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     /** How many times an error that may or may not pass is tried again before giving up. */
     static final int UNCERTAIN_RETRIES = Retries.UNCERTAIN_RETRIES;
 
-    /** How long a value loaded at pre-login waits for its join. */
+    /** How long a value loaded at pre-login waits for its join. For tests. */
     static final long LOGIN_TTL_MILLIS = SessionTracker.LOGIN_TTL_MILLIS;
 
     private final String subject;
@@ -87,7 +95,9 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      * Makes "the player quit" and "their late value is cached" atomic: whichever comes second must
      * see the other, or a value would be cached for a player who is gone. {@link #update} and the
      * join take it too, so that saves are queued in the order the changes were made, and so does
-     * {@link #disable()}: once it holds it, nothing is cached or queued any more.
+     * {@link #disable()}: once it holds it, nothing is cached or queued any more. The save queue
+     * and the session tracker are used under it, and the save queue takes it too when a failed
+     * save closes or reopens the save that a write or a login may be looking at.
      */
     private final Object sessions = new Object();
 
