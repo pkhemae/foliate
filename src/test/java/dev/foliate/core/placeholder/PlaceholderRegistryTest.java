@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.foliate.testing.RecordingLogger;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class PlaceholderRegistryTest {
@@ -67,5 +68,25 @@ class PlaceholderRegistryTest {
         assertNull(registry.resolve("broken", null));
 
         assertEquals(List.of("ERROR Placeholder 'broken' failed and has no value until it is fixed"), logger.lines());
+    }
+
+    /** A placeholder that recovers and fails again later, say at a second outage, is reported again. */
+    @Test
+    void aFailureAfterARecoveryIsReportedAgain() {
+        AtomicBoolean failing = new AtomicBoolean(true);
+        registry.register("flaky", player -> {
+            if (failing.get()) {
+                throw new IllegalStateException("down");
+            }
+            return "up";
+        });
+
+        registry.resolve("flaky", null);
+        failing.set(false);
+        assertEquals("up", registry.resolve("flaky", null));
+        failing.set(true);
+        registry.resolve("flaky", null);
+
+        assertEquals(2, logger.lines().size(), logger.lines().toString());
     }
 }

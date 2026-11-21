@@ -71,8 +71,9 @@ public final class PlaceholderRegistry {
 
     /**
      * Resolves a placeholder, or returns null when it is unknown or has no value. A placeholder
-     * that throws has no value: the failure is logged once per name, not at every request, and
-     * never reaches the caller, such as PlaceholderAPI, which would print it each time.
+     * that throws has no value: the failure is logged once, not at every request, and again only
+     * after the placeholder has worked in between. It never reaches the caller, such as
+     * PlaceholderAPI, which would print it each time.
      */
     public @Nullable String resolve(String name, @Nullable OfflinePlayer player) {
         String key = name.toLowerCase(Locale.ROOT);
@@ -81,7 +82,10 @@ public final class PlaceholderRegistry {
             return null;
         }
         try {
-            return entry.value.apply(player);
+            String result = entry.value.apply(player);
+            // Recovered: a later failure is a new one, worth a line of its own.
+            reportedFailures.remove(key);
+            return result;
         } catch (RuntimeException e) {
             if (reportedFailures.add(key)) {
                 logger.error("Placeholder '{}' failed and has no value until it is fixed", key, e);
