@@ -173,6 +173,46 @@ class MessageServiceTest {
         assertEquals("[Alex] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
     }
 
+    /** A prefix that ends with an open colour, as many are written, colours the message after it. */
+    @Test
+    void colourLeftOpenByThePrefixCarriesOnIntoTheMessage() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "prefix: \"<gray>[P] <yellow>\"\n");
+
+        messages.reload();
+
+        Component rendered = messages.render(Locale.ENGLISH, "greeting", Placeholder.unparsed("player", "Alex"));
+        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText().serialize(rendered));
+        assertEquals(NamedTextColor.YELLOW, colorOf(rendered, "Hello Alex"));
+    }
+
+    @Test
+    void prefixIsInsertedWhateverTheCaseOfItsTagAndWhenSelfClosing() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "a: \"<PREFIX>x\"\nb: \"<prefix/>y\"\n");
+
+        messages.reload();
+
+        assertEquals("[P] x", plain(Locale.ENGLISH, "a", "Alex"));
+        assertEquals("[P] y", plain(Locale.ENGLISH, "b", "Alex"));
+    }
+
+    @Test
+    void escapedPrefixTagStaysText() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "a: \"\\\\<prefix> and \\\\\\\\<prefix>\"\n");
+
+        messages.reload();
+
+        // An escaped tag is text; an escaped backslash is one backslash, followed by the prefix.
+        assertEquals("<prefix> and \\[P] ", plain(Locale.ENGLISH, "a", "Alex"));
+    }
+
+    /** What the code passes is never searched for the prefix: a parsed argument cannot make it recurse. */
+    @Test
+    void prefixTagInAParsedArgumentStaysText() {
+        Component rendered = messages.render(Locale.ENGLISH, "greeting", Placeholder.parsed("player", "<prefix>"));
+
+        assertEquals("[P] Hello <prefix>", PlainTextComponentSerializer.plainText().serialize(rendered));
+    }
+
     @Test
     void invalidFileOnReloadKeepsThePreviousMessages() throws Exception {
         Files.writeString(directory.resolve("lang/en.yml"), "greeting: [unclosed\n");
@@ -547,6 +587,26 @@ class MessageServiceTest {
         }
         component.children().forEach(child -> colors.addAll(colors(child)));
         return colors;
+    }
+
+    /** The colour a piece of text is shown in, inherited from the components around it. */
+    private static net.kyori.adventure.text.format.TextColor colorOf(Component component, String text) {
+        return colorOf(component, text, null);
+    }
+
+    private static net.kyori.adventure.text.format.TextColor colorOf(
+            Component component, String text, net.kyori.adventure.text.format.TextColor inherited) {
+        net.kyori.adventure.text.format.TextColor color = component.color() != null ? component.color() : inherited;
+        if (component instanceof net.kyori.adventure.text.TextComponent part && part.content().contains(text)) {
+            return color;
+        }
+        for (Component child : component.children()) {
+            net.kyori.adventure.text.format.TextColor found = colorOf(child, text, color);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     private static InputStream bundled(String name) {

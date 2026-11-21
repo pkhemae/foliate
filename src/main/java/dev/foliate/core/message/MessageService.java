@@ -30,7 +30,6 @@ import net.kyori.adventure.identity.Identity;
 import net.kyori.adventure.pointer.Pointered;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
-import net.kyori.adventure.text.minimessage.tag.Tag;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.title.Title;
@@ -64,6 +63,9 @@ public final class MessageService implements Module {
     private static final String OFFERED_FILE = ".built-in";
 
     private static final String PREFIX_KEY = "prefix";
+
+    /** How a message asks for the prefix. MiniMessage tag names ignore case. */
+    private static final List<String> PREFIX_TAGS = List.of("<" + PREFIX_KEY + ">", "<" + PREFIX_KEY + "/>");
     private static final String EXTENSION = ".yml";
 
     /** {@code en}, {@code pt_BR}, {@code fr-CA}: what a language file may be called. */
@@ -255,21 +257,57 @@ public final class MessageService implements Module {
 
         // When two resolvers know the same tag the last one wins: shared tags go first, so that
         // what the caller passes for this message always takes precedence.
-        TagResolver.Builder resolver = TagResolver.builder().resolvers(sharedResolvers);
+        TagResolver resolver = TagResolver.builder().resolvers(sharedResolvers).resolvers(arguments).build();
         List<String> prefix = current.find(locale, PREFIX_KEY);
-        if (prefix != null) {
-            // The prefix is MiniMessage written by the administrator, parsed on its own and
-            // inserted as a component: with the shared tags and this message's arguments, but
-            // without itself, so a <prefix> inside the prefix stays text instead of recursing
-            // forever. Parsed only when the message uses it.
-            String prefixTemplate = String.join("\n", prefix);
-            TagResolver withoutPrefix =
-                    TagResolver.builder().resolvers(sharedResolvers).resolvers(arguments).build();
-            resolver.tag(PREFIX_KEY, (queue, context) ->
-                    Tag.selfClosingInserting(deserialize(viewer, prefixTemplate, withoutPrefix)));
+        String text = prefix == null ? template : insertPrefix(template, String.join("\n", prefix));
+        return deserialize(viewer, text, resolver);
+    }
+
+    /**
+     * Puts the prefix's own text in place of each {@code <prefix>} tag of a message, before the
+     * message is parsed, as if the administrator had written it there: a colour the prefix leaves
+     * open carries on into the message, and the prefix sees the shared tags and the message's
+     * arguments. Done in one pass that does not look at what it inserts, and with no tag named
+     * {@code prefix} when parsing: a {@code <prefix>} inside the prefix, or in a value passed with
+     * {@link Placeholder#parsed}, is shown as text instead of recursing forever.
+     *
+     * <p>Only the message, written by the administrator, is searched: values passed by the code
+     * are resolved by MiniMessage afterwards and never pass through here, so a player cannot
+     * inject anything by typing {@code <prefix>}. A tag escaped as {@code \<prefix>} stays text.
+     * The tag is found wherever it is written, inside the quoted argument of another tag too
+     * ({@code <hover:show_text:'<prefix>'>}), where a prefix holding that same quote would end the
+     * argument early.
+     */
+    private static String insertPrefix(String template, String prefix) {
+        StringBuilder text = new StringBuilder(template.length() + prefix.length());
+        int backslashes = 0;
+        int i = 0;
+        while (i < template.length()) {
+            char c = template.charAt(i);
+            if (c == '<' && backslashes % 2 == 0) {
+                int length = prefixTagLength(template, i);
+                if (length > 0) {
+                    text.append(prefix);
+                    i += length;
+                    backslashes = 0;
+                    continue;
+                }
+            }
+            backslashes = c == '\\' ? backslashes + 1 : 0;
+            text.append(c);
+            i++;
         }
-        resolver.resolvers(arguments);
-        return deserialize(viewer, template, resolver.build());
+        return text.toString();
+    }
+
+    /** The length of {@code <prefix>} or {@code <prefix/>}, in any case, at that index; 0 if absent. */
+    private static int prefixTagLength(String template, int index) {
+        for (String tag : PREFIX_TAGS) {
+            if (template.regionMatches(true, index, tag, 0, tag.length())) {
+                return tag.length();
+            }
+        }
+        return 0;
     }
 
     private Component deserialize(@Nullable Pointered viewer, String template, TagResolver resolver) {
