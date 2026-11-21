@@ -4,8 +4,9 @@ package dev.foliate.core.module;
  * A self-contained part of the plugin with its own lifecycle.
  *
  * <p>{@link #enable()} runs on the server startup thread and {@link #disable()} on whichever thread
- * disables the plugin: the shutdown thread when the server stops. {@link #reload()} runs on whichever thread asked for the reload, which must not be a
- * tick thread: it may do blocking I/O, but has to go through the schedulers to touch the world.
+ * disables the plugin: the shutdown thread when the server stops. {@link #reload()} runs on
+ * whichever thread asked for the reload, which must not be a tick thread: it may do blocking I/O,
+ * but has to go through the schedulers to touch the world.
  */
 public interface Module {
 
