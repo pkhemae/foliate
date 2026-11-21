@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
@@ -13,6 +14,11 @@ import org.slf4j.Logger;
  * <p>Lifecycle methods are serialised by a lock, so a reload triggered by two senders at once runs
  * twice in a row rather than concurrently. They run on the calling thread: {@link #reloadAll()}
  * must be called off the tick threads, since modules do blocking I/O there.
+ *
+ * <p>{@link #disableAll()} does not wait for a reload to finish on its own: it interrupts the
+ * thread running {@link #reloadAll()} first, which then stops at the latest once the module it is
+ * reloading returns. Shutting down during a reload therefore waits for one module's reload, and
+ * not at all for one that waits interruptibly, such as for a region that has stopped ticking.
  */
 public final class ModuleManager {
 
@@ -27,6 +33,13 @@ public final class ModuleManager {
     private final List<Module> enabled = new ArrayList<>();
     private State state = State.NEW;
     private volatile List<String> enabledNames = List.of();
+
+    /** Guards {@link #reloading} and {@link #stopping}, apart from the lifecycle lock. */
+    private final Object reloadLock = new Object();
+    /** The thread inside {@link #reloadAll()}, which {@link #disableAll()} interrupts. */
+    private @Nullable Thread reloading;
+    /** Set once {@link #disableAll()} has started: a reload that has not begun yet must not. */
+    private boolean stopping;
 
     public ModuleManager(Logger logger) {
         this.logger = logger;
@@ -89,33 +102,87 @@ public final class ModuleManager {
     /**
      * Reloads every enabled module. Must not be called from a tick thread.
      *
+     * <p>Stops early when the thread is interrupted, which {@link #disableAll()} does: the module
+     * being reloaded is expected to give up (see {@link Module#reload()}), and the ones after it
+     * are left as they were and reported as failed. This is logged as information, not as errors:
+     * no module is at fault. The interrupt status is kept for the caller.
+     *
      * @return the failures by module name, empty when everything reloaded
-     * @throws IllegalStateException when the modules are not enabled: there would be nothing to
-     *     reload, and an empty result would read as a success
+     * @throws IllegalStateException when the modules are not enabled, or are being disabled: there
+     *     would be nothing to reload, and an empty result would read as a success
      */
     public synchronized Map<String, Throwable> reloadAll() {
-        if (state != State.ENABLED) {
-            throw new IllegalStateException("The modules are not enabled");
+        synchronized (reloadLock) {
+            if (state != State.ENABLED || stopping) {
+                throw new IllegalStateException("The modules are not enabled");
+            }
+            reloading = Thread.currentThread();
         }
-        Map<String, Throwable> failures = new LinkedHashMap<>();
-        for (Module module : enabled) {
-            try {
-                module.reload();
-            } catch (Exception | LinkageError e) {
-                log("Module '{}' failed to reload, previous state kept", module, e);
-                failures.put(module.name(), e);
+        try {
+            Map<String, Throwable> failures = new LinkedHashMap<>();
+            List<String> skipped = new ArrayList<>();
+            for (Module module : enabled) {
+                if (Thread.currentThread().isInterrupted()) {
+                    failures.put(module.name(), new InterruptedException("the reload was interrupted before this module"));
+                    skipped.add(module.name());
+                    continue;
+                }
+                try {
+                    module.reload();
+                } catch (Exception | LinkageError e) {
+                    failures.put(module.name(), e);
+                    if (Thread.currentThread().isInterrupted()) {
+                        // The interrupt cut it short, not a fault of the module: an interrupted
+                        // file read, for one, fails with a message that would send an
+                        // administrator looking for a problem that does not exist.
+                        logger.info("Reload of module '{}' cut short, previous state kept: {}", module.name(), e.toString());
+                    } else {
+                        log("Module '{}' failed to reload, previous state kept", module, e);
+                    }
+                }
+            }
+            if (Thread.currentThread().isInterrupted()) {
+                logger.info(
+                        "Reload {}{}",
+                        isStopping() ? "stopped by shutdown: the plugin is being disabled" : "interrupted",
+                        skipped.isEmpty() ? "" : "; not reloaded: " + String.join(", ", skipped));
+            }
+            return failures;
+        } finally {
+            synchronized (reloadLock) {
+                reloading = null;
             }
         }
-        return failures;
     }
 
-    public synchronized void disableAll() {
-        for (Module module : enabled.reversed()) {
-            disable(module);
+    /**
+     * Disables every enabled module, in reverse order. A reload in progress is interrupted first,
+     * see the class description, and none can start afterwards.
+     */
+    public void disableAll() {
+        synchronized (reloadLock) {
+            stopping = true;
+            Thread reload = reloading;
+            if (reload != null) {
+                // Only while the thread is inside reloadAll: the lock keeps the interrupt from
+                // reaching whatever that thread runs once the reload is over.
+                reload.interrupt();
+            }
         }
-        enabled.clear();
-        state = State.DISABLED;
-        publishEnabledNames();
+        synchronized (this) {
+            for (Module module : enabled.reversed()) {
+                disable(module);
+            }
+            enabled.clear();
+            state = State.DISABLED;
+            publishEnabledNames();
+        }
+    }
+
+    private boolean isStopping() {
+        synchronized (reloadLock) {
+            return stopping;
+        }
     }
 
     /** Names of the modules currently enabled, safe to read from any thread. */

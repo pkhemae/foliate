@@ -11,6 +11,8 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.util.concurrent.CompletableFuture;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.CommandSender;
+import org.bukkit.plugin.IllegalPluginAccessException;
+import org.bukkit.plugin.Plugin;
 import org.slf4j.Logger;
 
 /** {@code reload}: reloads every module off the tick threads and reports what failed. */
@@ -19,12 +21,15 @@ public final class ReloadCommand implements Subcommand {
     /** Declared in the plugin.yml with the other nodes. */
     static final String PERMISSION = "foliate.command.reload";
 
+    private final Plugin plugin;
     private final ModuleManager modules;
     private final MessageService messages;
     private final Schedulers schedulers;
     private final Logger logger;
 
-    public ReloadCommand(ModuleManager modules, MessageService messages, Schedulers schedulers, Logger logger) {
+    public ReloadCommand(
+            Plugin plugin, ModuleManager modules, MessageService messages, Schedulers schedulers, Logger logger) {
+        this.plugin = plugin;
         this.modules = modules;
         this.messages = messages;
         this.schedulers = schedulers;
@@ -82,12 +87,25 @@ public final class ReloadCommand implements Subcommand {
                 Placeholder.unparsed("error", reason));
     }
 
-    /** Runs a reply where its recipient expects it, see {@link Schedulers#sender}. */
+    /**
+     * Runs a reply where its recipient expects it, see {@link Schedulers#sender}. Skipped when the
+     * plugin was disabled while the reload ran, which interrupts it (see {@link ModuleManager}):
+     * the reply could not be scheduled or would never run, and what failed then is only the
+     * shutdown cutting the reload short.
+     */
     private void reply(CommandSender sender, Runnable reply) {
+        if (!plugin.isEnabled()) {
+            return;
+        }
         try {
             schedulers.sender(sender).executeOrRun(reply);
         } catch (EntityRetiredException gone) {
             // The sender left before the reload finished: nobody to tell.
+        } catch (IllegalPluginAccessException disabled) {
+            // Disabled between the check above and now: the same case.
+            if (plugin.isEnabled()) {
+                throw disabled;
+            }
         }
     }
 }

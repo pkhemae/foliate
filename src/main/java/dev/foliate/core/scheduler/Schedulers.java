@@ -19,9 +19,13 @@ import org.bukkit.entity.Entity;
  *
  * <p>{@code BukkitScheduler} must never be used: it does not work on Folia.
  *
- * <p>Nothing can be scheduled once the plugin is disabling: the server rejects global and async
- * tasks and silently drops region and entity ones. Work left for {@code onDisable} has to run
- * synchronously, on the thread that calls it.
+ * <p>Nothing runs for the plugin once it is disabled. The server throws on new global and async
+ * tasks, and on new delayed or repeating region and entity ones. What it still accepts, tasks
+ * given to {@code execute} in a region or entity context, and what was queued before, is skipped
+ * when its turn comes: the server does it for entity tasks, {@link FoliaSchedulers} for region and
+ * global ones, which Folia would still run. A task already running when the plugin is disabled
+ * finishes, alongside {@code onDisable} when the regions still tick. Work left for
+ * {@code onDisable} has to run synchronously, on the thread that calls it.
  *
  * <p>An interface so that code depending on it can be tested with a deterministic fake instead of
  * a server.

@@ -2,19 +2,29 @@ package dev.foliate.core.module;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.foliate.testing.RecordingLogger;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.slf4j.helpers.NOPLogger;
 
 class ModuleManagerTest {
 
     private final List<String> events = new ArrayList<>();
-    private final ModuleManager manager = new ModuleManager(NOPLogger.NOP_LOGGER);
+    private final RecordingLogger logger = new RecordingLogger();
+    private final ModuleManager manager = new ModuleManager(logger);
 
     @Test
     void enablesInOrderAndDisablesInReverse() {
@@ -193,6 +203,153 @@ class ModuleManagerTest {
 
         assertThrows(IllegalStateException.class, manager::enableAll);
         assertEquals(List.of("a"), manager.enabledNames());
+    }
+
+    /**
+     * Stopping the server during a reload must not wait for a reload stuck on a region that no
+     * longer ticks: the reload is interrupted and stops there.
+     */
+    @Test
+    void disablingDuringAReloadInterruptsItAndSkipsTheModulesLeft() throws Exception {
+        List<String> calls = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch waiting = new CountDownLatch(1);
+        manager.register(new WaitingModule("waiting", waiting, calls));
+        manager.register(new CallModule("after", calls));
+        manager.enableAll();
+        AtomicBoolean interruptKept = new AtomicBoolean();
+        CompletableFuture<Map<String, Throwable>> reload = CompletableFuture.supplyAsync(() -> {
+            Map<String, Throwable> failures = manager.reloadAll();
+            interruptKept.set(Thread.interrupted());
+            return failures;
+        }, ModuleManagerTest::onNewThread);
+        assertTrue(waiting.await(5, TimeUnit.SECONDS));
+
+        assertTimeoutPreemptively(Duration.ofSeconds(5), manager::disableAll);
+
+        Map<String, Throwable> failures = reload.get(5, TimeUnit.SECONDS);
+        assertEquals(List.of("waiting", "after"), List.copyOf(failures.keySet()));
+        assertInstanceOf(InterruptedException.class, failures.get("after"));
+        assertTrue(interruptKept.get(), "the interrupt status is kept for the caller");
+        assertEquals(List.of("reload waiting", "disable after", "disable waiting"), calls);
+        // No module is at fault: nothing reads as an error.
+        List<String> lines = logger.lines();
+        assertTrue(lines.stream().noneMatch(line -> line.startsWith("ERROR")), lines.toString());
+        assertTrue(
+                lines.contains("INFO Reload stopped by shutdown: the plugin is being disabled; not reloaded: after"),
+                lines.toString());
+    }
+
+    @Test
+    void reloadWaitingForTheLockWhenDisablingStartsDoesNotRun() throws Exception {
+        List<String> calls = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch waiting = new CountDownLatch(1);
+        manager.register(new WaitingModule("waiting", waiting, calls));
+        manager.enableAll();
+        CompletableFuture<Map<String, Throwable>> first =
+                CompletableFuture.supplyAsync(manager::reloadAll, ModuleManagerTest::onNewThread);
+        assertTrue(waiting.await(5, TimeUnit.SECONDS));
+        CompletableFuture<@Nullable Throwable> queued = new CompletableFuture<>();
+        Thread second = new Thread(() -> {
+            try {
+                manager.reloadAll();
+                queued.complete(null);
+            } catch (RuntimeException e) {
+                queued.complete(e);
+            }
+        });
+        second.start();
+        while (second.getState() != Thread.State.BLOCKED) {
+            Thread.onSpinWait();
+        }
+
+        manager.disableAll();
+
+        first.get(5, TimeUnit.SECONDS);
+        assertInstanceOf(IllegalStateException.class, queued.get(5, TimeUnit.SECONDS));
+        assertEquals(List.of("reload waiting", "disable waiting"), calls);
+    }
+
+    /** The interrupt is for the reload: a thread that has finished reloading keeps running in peace. */
+    @Test
+    void disablingAfterAReloadDoesNotInterruptItsThread() throws Exception {
+        manager.register(new RecordingModule("a"));
+        manager.enableAll();
+        CountDownLatch reloaded = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CompletableFuture<Boolean> undisturbed = CompletableFuture.supplyAsync(() -> {
+            manager.reloadAll();
+            reloaded.countDown();
+            try {
+                return release.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }, ModuleManagerTest::onNewThread);
+        assertTrue(reloaded.await(5, TimeUnit.SECONDS));
+
+        manager.disableAll();
+        release.countDown();
+
+        assertTrue(undisturbed.get(5, TimeUnit.SECONDS));
+    }
+
+    /** A thread of its own, so that an interrupt cannot linger on a pooled thread other tests use. */
+    private static void onNewThread(Runnable task) {
+        new Thread(task).start();
+    }
+
+    /** Records its calls in a list that several threads may write to. */
+    private static class CallModule implements Module {
+
+        private final String name;
+        final List<String> calls;
+
+        CallModule(String name, List<String> calls) {
+            this.name = name;
+            this.calls = calls;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public void enable() {}
+
+        @Override
+        public void reload() throws Exception {
+            calls.add("reload " + name);
+        }
+
+        @Override
+        public void disable() {
+            calls.add("disable " + name);
+        }
+    }
+
+    /** Waits for good when reloaded, as a reload waiting for a halted region does, until interrupted. */
+    private static final class WaitingModule extends CallModule {
+
+        private final CountDownLatch waiting;
+
+        WaitingModule(String name, CountDownLatch waiting, List<String> calls) {
+            super(name, calls);
+            this.waiting = waiting;
+        }
+
+        @Override
+        public void reload() throws Exception {
+            super.reload();
+            waiting.countDown();
+            try {
+                new CountDownLatch(1).await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new Exception("interrupted, nothing changed", e);
+            }
+        }
     }
 
     /** Records every lifecycle call, and can be told to throw from one of them. */

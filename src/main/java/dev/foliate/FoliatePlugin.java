@@ -83,7 +83,7 @@ public class FoliatePlugin extends JavaPlugin {
         // module, and only while it runs.
         List<Subcommand> subcommands = new ArrayList<>();
         subcommands.add(new InfoCommand(modules, messages, getPluginMeta().getVersion(), Platform.describe()));
-        subcommands.add(new ReloadCommand(modules, messages, schedulers, getSLF4JLogger()));
+        subcommands.add(new ReloadCommand(this, modules, messages, schedulers, getSLF4JLogger()));
         for (SubcommandProvider feature : modules.enabledOf(SubcommandProvider.class)) {
             subcommands.addAll(feature.subcommands());
         }
@@ -128,9 +128,11 @@ public class FoliatePlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        // Region tickers are already stopped and nothing can be scheduled any more: what is left
-        // runs synchronously and must not touch the world. Timers go first, so none fires while a
-        // module is releasing its resources.
+        // Nothing scheduled from here on runs (see Schedulers): what is left runs synchronously,
+        // here, and must not touch the world. The regions have stopped ticking only when Folia stops; when the plugin
+        // alone is disabled (a plugin manager, Paper's /reload, a failed start), a task or event of
+        // ours already under way may still be running, see Module#disable. Timers go first, so
+        // none starts again while a module is releasing its resources.
         if (schedulers != null) {
             schedulers.shutdown();
         }

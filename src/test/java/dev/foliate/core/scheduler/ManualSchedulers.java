@@ -11,6 +11,7 @@ import java.util.function.Supplier;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.IllegalPluginAccessException;
 
 /**
  * {@link Schedulers} for tests: nothing runs until the test calls {@link #tick}, and everything
@@ -38,6 +39,7 @@ public final class ManualSchedulers implements Schedulers {
     private final TaskContext async = new ManualContext("async", () -> false);
     private final TaskContext global = new ManualContext("global", () -> false);
     private long now;
+    private volatile boolean refusingTimers;
 
     /**
      * Makes an entity count as gone although it still looks alive: the state of a player who is
@@ -45,6 +47,14 @@ public final class ManualSchedulers implements Schedulers {
      */
     public void retire(Entity entity) {
         retired.add(entity);
+    }
+
+    /**
+     * Makes every context throw on {@code runTimer} from now on, as the server does once the plugin
+     * is disabled.
+     */
+    public void refuseTimers() {
+        refusingTimers = true;
     }
 
     /** Advances time by the given number of ticks, running the tasks that come due. */
@@ -129,6 +139,9 @@ public final class ManualSchedulers implements Schedulers {
 
         @Override
         public TaskHandle runTimer(Duration initialDelay, Duration period, Runnable task) {
+            if (refusingTimers) {
+                throw new IllegalPluginAccessException("Plugin attempted to register task while disabled");
+            }
             return schedule(task, () -> {}, ticks(initialDelay), ticks(period));
         }
 
