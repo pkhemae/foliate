@@ -51,8 +51,8 @@ import org.slf4j.Logger;
  *   <li><b>Write the latest value only.</b> Changes made while a save waits for a storage thread
  *       join it instead of queuing saves of their own ({@link SaveQueue}).
  *   <li><b>Retry what failed.</b> A save that fails for a reason known to pass is tried again
- *       until it succeeds, any other error {@value #UNCERTAIN_RETRIES} more times, then given up
- *       ({@link SaveQueue}).
+ *       until it succeeds, any other database error {@value #UNCERTAIN_RETRIES} more times;
+ *       anything else is given up at once ({@link SaveQueue}).
  *   <li><b>Never invent data.</b> When the stored value is not known yet, wait for it: saving a
  *       fresh one would erase the real one. A player who joined without a pre-login has no value
  *       until it is loaded.

@@ -32,10 +32,11 @@ import org.slf4j.Logger;
  *       unreachable, busy or timed out) keeps the player's latest value and is tried again, ever
  *       less often, until it succeeds ({@link Retries}). The player's later reads and saves wait
  *       behind it. An outage is logged when the first player's saves start failing and when the
- *       last one's succeed, not once per save ({@link OutageLog}). Any other error is tried
- *       {@value Retries#UNCERTAIN_RETRIES} more times, then logged with its stack trace and given
- *       up: a save that can never succeed (a broken constraint) must not hold the player's queue,
- *       and their logins, forever.
+ *       last one's succeed, not once per save ({@link OutageLog}). Any other database error is
+ *       tried {@value Retries#UNCERTAIN_RETRIES} more times, then logged with its stack trace and
+ *       given up; anything else (an error of the repository's own code) is logged and given up at
+ *       once: a save that can never succeed (a broken constraint) must not hold the player's
+ *       queue, and their logins, forever.
  * </ol>
  *
  * <ol start="7">
