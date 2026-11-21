@@ -1,12 +1,15 @@
 package dev.foliate;
 
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
+import dev.foliate.servertest.ServerTestPlugin;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
@@ -31,8 +34,8 @@ import org.junit.jupiter.api.Test;
  * (a type, a method, a lambda) and a mention in a comment does not. One kind of dependency leaves
  * no trace in a class file: javac copies a {@code static final} constant into the class that uses
  * it. The imports of the sources are therefore checked against the same layout too. The server
- * test's classes are left out: they test everything, and the plugin cannot depend on them, since
- * they are not on its classpath.
+ * test's classes are left out of the layout: they test everything, and the plugin cannot depend on
+ * them, since they are not on its classpath. They have one rule of their own: no bundled library.
  */
 class ArchitectureTest {
 
@@ -49,13 +52,32 @@ class ArchitectureTest {
     /** Parents whose children are parts of their own: {@code modules.profile}, {@code hooks.zmenu}. */
     private static final Set<String> GROUPS = Set.of("modules", "hooks");
 
+    /**
+     * The packages of the libraries the plugin bundles (see {@code shadowJar}). In the plugin's jar
+     * they are relocated under its own package, and the plugin's classes with them; the server
+     * test's classes are not, so a reference to one of them would compile and then fail on the
+     * server, where the library is only found at its relocated name.
+     */
+    private static final String[] BUNDLED_LIBRARIES = {
+        "fr.mrmicky.fastboard..", "com.zaxxer.hikari..", "de.exlll.configlib..", "org.snakeyaml.engine..",
+    };
+
     private static JavaClasses plugin;
 
-    /** The plugin's classes only: the folder FoliatePlugin was compiled to, without the tests'. */
+    private static JavaClasses serverTest;
+
+    /**
+     * The plugin's classes only: the folder FoliatePlugin was compiled to, without the tests'. The
+     * server test's, the same way, from the folder ServerTestPlugin was compiled to.
+     */
     @BeforeAll
-    static void importThePlugin() throws URISyntaxException {
-        plugin = new ClassFileImporter().importPath(
-                Path.of(FoliatePlugin.class.getProtectionDomain().getCodeSource().getLocation().toURI()));
+    static void importTheClasses() throws URISyntaxException {
+        plugin = new ClassFileImporter().importPath(classesFolderOf(FoliatePlugin.class));
+        serverTest = new ClassFileImporter().importPath(classesFolderOf(ServerTestPlugin.class));
+    }
+
+    private static Path classesFolderOf(Class<?> type) throws URISyntaxException {
+        return Path.of(type.getProtectionDomain().getCodeSource().getLocation().toURI());
     }
 
     @Test
@@ -117,12 +139,24 @@ class ArchitectureTest {
         assertEquals(List.of(), violations, "These imports break the layout, see the Architecture page of the wiki");
     }
 
+    /** The server test reaches a bundled library through the plugin only, whose references the relocation follows. */
+    @Test
+    void theServerTestNeverUsesABundledLibraryDirectly() {
+        noClasses()
+                .should().dependOnClassesThat().resideInAnyPackage(BUNDLED_LIBRARIES)
+                .because("the server test jar does not relocate the server test's classes, see serverTestJar")
+                .check(serverTest);
+    }
+
     @Test
     void theRulesSeeTheCodeTheyGuard() {
         // A guard that imports nothing would pass forever: from a jar instead of the classes
         // folder, the importer finds nothing.
         assertTrue(plugin.containPackage(BASE + ".core.module"));
         assertTrue(plugin.size() > 10, plugin.size() + " classes");
+        // The server test's folder holds only its classes, not the plugin's next to them.
+        assertTrue(serverTest.contain(ServerTestPlugin.class));
+        assertFalse(serverTest.contain(FoliatePlugin.class));
     }
 
     /** What a part of {@code unit} may depend on: itself, core, and the contracts unless it is core. */
