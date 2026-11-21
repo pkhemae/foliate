@@ -1,14 +1,11 @@
 package dev.foliate.core.yaml;
 
 import java.util.ArrayDeque;
-import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
-import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.snakeyaml.engine.v2.api.Dump;
 import org.snakeyaml.engine.v2.api.DumpSettings;
 import org.snakeyaml.engine.v2.api.Load;
@@ -47,6 +44,13 @@ public final class Yaml {
      */
     static final int MAX_DEPTH = 64;
 
+    /**
+     * How many values a document may hold once its aliases are expanded: keys, values, sections
+     * and lists all count. Hundreds of times what a file of the plugin holds, and few enough to
+     * copy without a thought.
+     */
+    static final long MAX_VALUES = 100_000;
+
     private Yaml() {}
 
     /**
@@ -80,16 +84,25 @@ public final class Yaml {
      * Refuses, before the document is turned into values, what would make that recursion endless
      * or too deep for the stack: a collection nested more than {@value #MAX_DEPTH} levels deep, or
      * one that contains itself through an alias ({@code a: &x {b: *x}}). Only the events of the
-     * parser are read here, which it produces without recursion, whatever the depth. A second
-     * document in the same file is refused here too, where it can be told apart from other
-     * mistakes without reading the library's message.
+     * parser are read here, which it produces without recursion, whatever the depth.
+     *
+     * <p>Also refused here, where each can be told apart from other mistakes without reading the
+     * library's message:
+     *
+     * <ul>
+     *   <li>more values than {@value #MAX_VALUES} once every alias is replaced by what it names.
+     *       Each level of {@code x1: &x1 {a: *x0, b: *x0}} doubles the document, and reading it
+     *       copies every value: a few hundred bytes could run the server out of memory;
+     *   <li>more aliases of collections than the engine accepts;
+     *   <li>a second document in the same file.
+     * </ul>
      */
     private static void checkShape(LoadSettings settings, String document) throws YamlException {
-        // The latest node defined with each anchor name, and the collections still open: an alias
-        // to one of these is inside the very collection it names.
-        Map<String, Object> anchors = new HashMap<>();
-        Deque<Object> open = new ArrayDeque<>();
-        Set<Object> openNodes = Collections.newSetFromMap(new IdentityHashMap<>());
+        // The latest node defined with each anchor name: what an alias to it stands for.
+        Map<String, Node> anchors = new HashMap<>();
+        Deque<Node> open = new ArrayDeque<>();
+        long values = 0;
+        int aliasesOfCollections = 0;
         int documents = 0;
         for (Event event : new Parse(settings).parseString(document)) {
             switch (event) {
@@ -101,10 +114,19 @@ public final class Yaml {
                     }
                 }
                 case AliasEvent alias -> {
-                    Object node = anchors.get(alias.getAlias().getValue());
-                    if (node != null && openNodes.contains(node)) {
+                    Node node = anchors.get(alias.getAlias().getValue());
+                    if (node == null) {
+                        // Unknown anchor: the engine refuses it, with its own position.
+                        values++;
+                    } else if (node.open) {
                         throw new YamlException("not valid YAML (a value contains itself: an alias * inside the & it names"
                                 + position(event) + ")");
+                    } else {
+                        if (node.collection && ++aliasesOfCollections > settings.getMaxAliasesForCollections()) {
+                            throw new YamlException("not valid YAML (more than " + settings.getMaxAliasesForCollections()
+                                    + " aliases (*) of sections or lists" + position(event) + ")");
+                        }
+                        values += node.size;
                     }
                 }
                 case CollectionStartEvent start -> {
@@ -112,15 +134,46 @@ public final class Yaml {
                         throw new YamlException(
                                 "nested too deeply (more than " + MAX_DEPTH + " levels" + position(event) + ")");
                     }
-                    Object node = new Object();
+                    Node node = new Node(true, values);
+                    values++;
                     start.getAnchor().ifPresent(anchor -> anchors.put(anchor.getValue(), node));
                     open.push(node);
-                    openNodes.add(node);
                 }
-                case CollectionEndEvent end -> openNodes.remove(open.pop());
-                case NodeEvent scalar -> scalar.getAnchor().ifPresent(anchor -> anchors.put(anchor.getValue(), new Object()));
+                case CollectionEndEvent end -> {
+                    Node node = open.pop();
+                    node.open = false;
+                    node.size = values - node.start;
+                }
+                case NodeEvent scalar -> {
+                    Node node = new Node(false, values);
+                    values++;
+                    scalar.getAnchor().ifPresent(anchor -> anchors.put(anchor.getValue(), node));
+                }
                 default -> {}
             }
+            if (values > MAX_VALUES) {
+                throw new YamlException("too large once its aliases (*) are expanded (more than " + MAX_VALUES
+                        + " values" + position(event) + ")");
+            }
+        }
+    }
+
+    /**
+     * A node of the document, as the shape check sees it: a value, or a collection, which is open
+     * until its end and then knows how many values it holds, aliases expanded.
+     */
+    private static final class Node {
+
+        final boolean collection;
+        /** The number of values counted before this node. */
+        final long start;
+        boolean open;
+        long size = 1;
+
+        Node(boolean collection, long start) {
+            this.collection = collection;
+            this.start = start;
+            this.open = collection;
         }
     }
 

@@ -2,8 +2,10 @@ package dev.foliate.core.yaml;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -71,6 +73,53 @@ class YamlTest {
         YamlException failure = assertThrows(YamlException.class, () -> Yaml.parse(document));
 
         assertEquals("nested too deeply (more than 64 levels)", failure.getMessage());
+    }
+
+    /**
+     * Each level aliases the one before it twice: a few hundred bytes stand for millions of values,
+     * which copying them ran out of memory on. Refused before anything is built.
+     */
+    @Test
+    void aliasesThatMultiplyTheDocumentAreRefused() {
+        for (int levels : new int[] {17, 20}) {
+            String document = doubling(levels);
+
+            YamlException failure = assertTimeoutPreemptively(
+                    Duration.ofSeconds(5), () -> assertThrows(YamlException.class, () -> Yaml.parse(document)));
+
+            assertTrue(failure.getMessage().startsWith(
+                    "too large once its aliases (*) are expanded (more than 100000 values, line "), failure.getMessage());
+        }
+    }
+
+    @Test
+    void aliasesThatStayWithinTheBudgetAreFine() throws Exception {
+        // Level k holds 2^(k+1) values: 2 + 4 + ... + 2^11.
+        assertEquals((1 << 12) - 2, Yaml.flatten(Yaml.parse(doubling(10))).size());
+    }
+
+    /** The engine's own limit, which used to come out as "a value cannot be read". */
+    @Test
+    void moreThanFiftyAliasesOfCollectionsAreRefusedInPlainWords() {
+        StringBuilder document = new StringBuilder("a: &a [1]\n");
+        for (int i = 0; i < 51; i++) {
+            document.append("b").append(i).append(": *a\n");
+        }
+
+        YamlException failure = assertThrows(YamlException.class, () -> Yaml.parse(document.toString()));
+
+        assertEquals("not valid YAML (more than 50 aliases (*) of sections or lists, line 52, column 6)",
+                failure.getMessage());
+    }
+
+    /** {@code x0} holds two values; each next level holds the one before it twice. */
+    private static String doubling(int levels) {
+        StringBuilder document = new StringBuilder("x0: &x0 {a: 1, b: 2}\n");
+        for (int level = 1; level <= levels; level++) {
+            document.append("x").append(level).append(": &x").append(level)
+                    .append(" {a: *x").append(level - 1).append(", b: *x").append(level - 1).append("}\n");
+        }
+        return document.toString();
     }
 
     /** The engine stops at 3 MB, with a message that used to come out as "a value cannot be read". */
