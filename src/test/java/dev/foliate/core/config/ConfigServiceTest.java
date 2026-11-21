@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import de.exlll.configlib.Comment;
@@ -464,6 +465,82 @@ class ConfigServiceTest {
 
         assertEquals(OWNER_ONLY, Files.getPosixFilePermissions(directory.resolve("config.yml.v1.bak")));
         assertEquals(OWNER_ONLY, Files.getPosixFilePermissions(file));
+    }
+
+    /** A config.yml linked from elsewhere, such as a secrets folder, stays a link. */
+    @Test
+    void linkedFileIsWrittenThroughToItsTarget() throws Exception {
+        Path target = Files.createDirectories(directory.resolve("secrets")).resolve("foliate.yml");
+        Files.writeString(target, "debug: true\n");
+        try {
+            Files.createSymbolicLink(file, Path.of("secrets", "foliate.yml"));
+        } catch (UnsupportedOperationException | IOException e) {
+            assumeTrue(false, "symbolic links are not available here");
+        }
+
+        service.enable();
+
+        assertTrue(service.get().debug());
+        assertTrue(Files.isSymbolicLink(file), "the link was replaced by a file");
+        assertTrue(Files.readString(target).contains("config-version: 1"), "the target was not rewritten");
+    }
+
+    /** A valid file the server may not write is used as it is, with a word in the console. */
+    @Test
+    void readOnlyFileIsLoadedAndLeftAsItIs() throws Exception {
+        assumePosix();
+        String mine = "debug: true\n";
+        Files.writeString(file, mine);
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("r--r--r--"));
+        assumeFalse(Files.isWritable(file), "running as a user who may write any file");
+        RecordingLogger logger = new RecordingLogger();
+        ConfigService<Settings> watched =
+                new ConfigService<>(directory, logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+
+        watched.enable();
+
+        assertTrue(watched.get().debug());
+        assertEquals(mine, Files.readString(file));
+        assertEquals(
+                List.of("WARN config.yml is read-only: the settings were loaded, but the file was not brought up to date"),
+                logger.lines());
+    }
+
+    @Test
+    void fileInAFolderThatCannotBeWrittenIsLoadedWithAWarning() throws Exception {
+        assumePosix();
+        Files.writeString(file, "debug: true\n");
+        Set<PosixFilePermission> before = Files.getPosixFilePermissions(directory);
+        Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("r-x------"));
+        try {
+            assumeFalse(Files.isWritable(directory), "running as a user who may write any folder");
+            RecordingLogger logger = new RecordingLogger();
+            ConfigService<Settings> watched =
+                    new ConfigService<>(directory, logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+
+            watched.enable();
+
+            assertTrue(watched.get().debug());
+            assertEquals(1, logger.lines().size(), logger.lines().toString());
+            String warning = logger.lines().getFirst();
+            assertTrue(warning.startsWith("WARN config.yml could not be updated (permission denied)"), warning);
+            assertFalse(warning.contains(directory.toString()), warning);
+        } finally {
+            Files.setPosixFilePermissions(directory, before);
+        }
+    }
+
+    /** The message reaches whoever ran /foliate reload, who has no business knowing the server's folders. */
+    @Test
+    void aFileThatCannotBeReadIsReportedWithoutItsPath() throws IOException {
+        assumePosix();
+        Files.writeString(file, "debug: true\n");
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("---------"));
+        assumeFalse(Files.isReadable(file), "running as a user who may read any file");
+
+        ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+        assertEquals("config.yml could not be read or written (permission denied)", failure.getMessage());
     }
 
     private static void assumePosix() {

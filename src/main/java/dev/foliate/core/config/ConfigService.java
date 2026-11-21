@@ -16,12 +16,16 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
@@ -29,6 +33,7 @@ import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -60,6 +65,9 @@ import org.slf4j.Logger;
 public final class ConfigService<T extends ConfigRoot> implements Module {
 
     private static final String FILE_NAME = "config.yml";
+
+    /** How many symbolic links to follow to the file before giving up, as the system does. */
+    private static final int MAX_LINKS = 40;
 
     /** How the settings are named in the file. */
     private static final NameFormatter NAMES = NameFormatters.LOWER_KEBAB_CASE;
@@ -162,14 +170,10 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             }
             config.validate();
 
-            if (backup != null) {
-                writeLike(file, backup, Objects.requireNonNull(onDisk, "a backup is only made of a file"));
-                logger.info("{} was written by an older version: migrated, previous file kept as {}", FILE_NAME, backup.getFileName());
-            }
             String rendered = render(config);
             if (!rendered.equals(onDisk)) {
-                reportUnknownSettings(content, rendered);
-                write(rendered);
+                boolean written = save(rendered, backup == null ? null : new Backup(backup, Objects.requireNonNull(onDisk)));
+                reportUnknownSettings(content, rendered, written);
             }
             return config;
         } catch (ConfigException e) {
@@ -182,9 +186,25 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             throw new ConfigException(FILE_NAME + " is invalid: " + describe(e));
         } catch (CharacterCodingException e) {
             throw new ConfigException(FILE_NAME + " is not saved as UTF-8: save it again as UTF-8 in a text editor", e);
-        } catch (IOException | UncheckedIOException e) {
-            throw new ConfigException(FILE_NAME + " could not be read or written: " + e.getMessage(), e);
+        } catch (IOException e) {
+            throw new ConfigException(FILE_NAME + " could not be read or written (" + reason(e) + ")", e);
+        } catch (UncheckedIOException e) {
+            throw new ConfigException(FILE_NAME + " could not be read or written (" + reason(Objects.requireNonNull(e.getCause())) + ")", e);
         }
+    }
+
+    /**
+     * What went wrong with a file, without its path: the messages of {@link IOException} name the
+     * file in full, and they reach whoever ran the reload, who has no business knowing the server's
+     * folders.
+     */
+    static String reason(IOException failure) {
+        return switch (failure) {
+            case AccessDeniedException denied -> "permission denied";
+            case NoSuchFileException missing -> "a file or folder is missing";
+            case FileSystemException other when other.getReason() != null -> other.getReason();
+            default -> "the file system refused it";
+        };
     }
 
     /**
@@ -319,7 +339,8 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         return out.toString(StandardCharsets.UTF_8);
     }
 
-    private void reportUnknownSettings(Map<String, Object> content, String rendered) throws YamlException {
+    private void reportUnknownSettings(Map<String, Object> content, String rendered, boolean written)
+            throws YamlException {
         Set<String> known = settings(Yaml.parse(rendered));
         Set<String> unknown = settings(content);
         unknown.removeAll(known);
@@ -327,7 +348,8 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         unknown.removeIf(setting -> known.stream().anyMatch(path -> path.startsWith(setting + ".")));
         // A whole unknown section shows up as its leaves; a known list shows up as one key.
         for (String setting : unknown) {
-            logger.warn("{}: '{}' is not a setting of this plugin and was removed from the file", FILE_NAME, setting);
+            logger.warn("{}: '{}' is not a setting of this plugin{}",
+                    FILE_NAME, setting, written ? " and was removed from the file" : "");
         }
     }
 
@@ -352,14 +374,74 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         });
     }
 
-    /** Writes through a temporary file, so a crash mid-write cannot leave a truncated config. */
-    private void write(String rendered) throws IOException {
-        Path temporary = file.resolveSibling(FILE_NAME + ".tmp");
-        writeLike(file, temporary, rendered);
+    /** The text of the file before a migration, to keep under another name. */
+    private record Backup(Path path, String content) {}
+
+    /**
+     * Brings the file up to date, after keeping the previous one when it is migrated. A file the
+     * server may not write, because the administrator made it read-only or the folder is mounted
+     * read-only, is left as it is: the settings it holds are valid and already loaded, so the
+     * plugin runs with them and the console says why the file did not change.
+     *
+     * @return whether the file was written
+     */
+    private boolean save(String rendered, @Nullable Backup backup) {
         try {
-            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+            Path target = target();
+            if (Files.exists(target) && !Files.isWritable(target)) {
+                logger.warn("{} is read-only: the settings were loaded, but the file was not brought up to date",
+                        FILE_NAME);
+                return false;
+            }
+            if (backup != null) {
+                writeLike(target, backup.path(), backup.content());
+                logger.info("{} was written by an older version: migrated, previous file kept as {}",
+                        FILE_NAME, backup.path().getFileName());
+            }
+            write(target, rendered);
+            return true;
+        } catch (IOException e) {
+            logger.warn("{} could not be updated ({}): the settings were loaded, but the file was not brought up to date",
+                    FILE_NAME, reason(e));
+            return false;
+        }
+    }
+
+    /**
+     * The file to write: the file itself, or the one it links to. Replacing a link with a file
+     * would cut it from where the administrator keeps the real one, such as a folder of secrets.
+     */
+    private Path target() throws IOException {
+        Path target = file;
+        for (int links = 0; Files.isSymbolicLink(target); links++) {
+            if (links == MAX_LINKS) {
+                throw new FileSystemException(FILE_NAME, null, "too many levels of symbolic links");
+            }
+            target = target.resolveSibling(Files.readSymbolicLink(target));
+        }
+        return target;
+    }
+
+    /**
+     * Writes through a temporary file next to the target, so a crash mid-write cannot leave a
+     * truncated config.
+     */
+    private static void write(Path target, String rendered) throws IOException {
+        Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
+        try {
+            writeLike(target, temporary, rendered);
+            try {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            try {
+                Files.deleteIfExists(temporary);
+            } catch (IOException ignored) {
+                // The folder refused the file in the first place.
+            }
+            throw e;
         }
     }
 
@@ -367,17 +449,21 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
      * Writes a file that stands for {@code model}, such as its replacement or its backup, with the
      * permissions of {@code model} when it exists: the file holds the database password, and one
      * that only its owner may read must not come back readable by all. The permissions are set
-     * before the text is written, so the text is never readable by more people than the model's.
-     * The owner and the group are copied when the server is allowed to, which it usually is not.
-     * Nothing is copied where the file system has no POSIX permissions.
+     * once the text is written, and until then are the owner's alone: the text is never readable
+     * by more people than the model's. The owner and the group are copied when the server is allowed to,
+     * which it usually is not. Nothing is copied where the file system has no POSIX permissions.
      */
     private static void writeLike(Path model, Path destination, String content) throws IOException {
         Files.deleteIfExists(destination);
         Files.createFile(destination);
         PosixFileAttributeView from = Files.getFileAttributeView(model, PosixFileAttributeView.class);
         PosixFileAttributeView to = Files.getFileAttributeView(destination, PosixFileAttributeView.class);
-        if (from != null && to != null && Files.exists(model)) {
-            PosixFileAttributes attributes = from.readAttributes();
+        PosixFileAttributes attributes = from != null && to != null && Files.exists(model) ? from.readAttributes() : null;
+        if (to != null && attributes != null) {
+            to.setPermissions(EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
+        }
+        Files.writeString(destination, content);
+        if (to != null && attributes != null) {
             to.setPermissions(attributes.permissions());
             try {
                 to.setOwner(attributes.owner());
@@ -386,6 +472,5 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
                 // Only a privileged user may give a file away: it stays the server's.
             }
         }
-        Files.writeString(destination, content);
     }
 }
