@@ -10,11 +10,14 @@ import dev.foliate.core.config.ConfigException;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.scheduler.ManualSchedulers;
+import dev.foliate.testing.RecordingLogger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.tag.Tag;
+import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -44,6 +47,13 @@ class ScoreboardModuleTest {
     private ScoreboardModule scoreboard;
     private final ManualSchedulers schedulers = new ManualSchedulers();
     private final List<FakeBoard> boards = new ArrayList<>();
+    private final RecordingLogger logger = new RecordingLogger();
+    /**
+     * Makes the {@code <flaky>} tag fail as an expansion built against another version of its
+     * plugin does. MiniMessage renders a tag whose resolver throws an exception as plain text, but
+     * lets an error through.
+     */
+    private boolean expansionBroken;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -54,6 +64,12 @@ class ScoreboardModuleTest {
         messages = new MessageService(
                 directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
+        messages.addSharedResolver(TagResolver.resolver("flaky", (arguments, context) -> {
+            if (expansionBroken) {
+                throw new NoClassDefFoundError("a class the expansion was built against");
+            }
+            return Tag.preProcessParsed("fine");
+        }));
         scoreboard = newModule(() -> {});
         scoreboard.enable();
     }
@@ -74,6 +90,62 @@ class ScoreboardModuleTest {
         assertTrue(board.lines.contains("Player: Alex"), board.lines.toString());
         assertTrue(board.lines.contains("Online: 1"), board.lines.toString());
         assertTrue(player.isOnline());
+    }
+
+    /** Joining runs on the player's own thread: no need to wait for the first refresh. */
+    @Test
+    void boardIsDrawnAsSoonAsThePlayerJoinsThenAtEachRefresh() {
+        server.addPlayer("Alex");
+
+        FakeBoard board = boards.getLast();
+        assertEquals("Foliate", board.title);
+        assertEquals(1, board.draws);
+
+        schedulers.tick(19);
+        assertEquals(1, board.draws);
+        schedulers.tick(1);
+        assertEquals(2, board.draws);
+    }
+
+    @Test
+    void aTemplateThatFailsIsLoggedOnceAndLeavesTheBoardsAsTheyWere() throws Exception {
+        configure("scoreboard:\n  title: \"<flaky>\"\n");
+        server.addPlayer("Alex");
+        server.addPlayer("Sam");
+        expansionBroken = true;
+
+        schedulers.tick(100);
+
+        assertEquals(1, errors().size(), errors().toString());
+        assertTrue(boards.stream().allMatch(board -> board.title.equals("fine")), boards.toString());
+    }
+
+    @Test
+    void aTemplateFailingAgainAfterDrawingIsLoggedAgain() throws Exception {
+        configure("scoreboard:\n  title: \"<flaky>\"\n");
+        server.addPlayer("Alex");
+        expansionBroken = true;
+        schedulers.tick(20);
+
+        expansionBroken = false;
+        schedulers.tick(20);
+        expansionBroken = true;
+        schedulers.tick(60);
+
+        assertEquals(2, errors().size(), errors().toString());
+    }
+
+    @Test
+    void aTemplateStillFailingAfterAReloadIsLoggedAgain() throws Exception {
+        configure("scoreboard:\n  title: \"<flaky>\"\n");
+        server.addPlayer("Alex");
+        expansionBroken = true;
+        schedulers.tick(20);
+
+        scoreboard.reload();
+        schedulers.tick(60);
+
+        assertEquals(2, errors().size(), errors().toString());
     }
 
     @Test
@@ -284,7 +356,11 @@ class ScoreboardModuleTest {
             FakeBoard board = new FakeBoard();
             boards.add(board);
             return board;
-        }, supportCheck);
+        }, supportCheck, logger);
+    }
+
+    private List<String> errors() {
+        return logger.lines().stream().filter(line -> line.startsWith("ERROR")).toList();
     }
 
     private static final class FakeBoard implements ScoreboardDisplay {
@@ -304,6 +380,11 @@ class ScoreboardModuleTest {
         @Override
         public void delete() {
             deleted = true;
+        }
+
+        @Override
+        public String toString() {
+            return title + (deleted ? " (deleted)" : "");
         }
     }
 }
