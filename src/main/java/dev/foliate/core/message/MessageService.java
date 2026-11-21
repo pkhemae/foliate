@@ -1,5 +1,6 @@
 package dev.foliate.core.message;
 
+import dev.foliate.core.io.FileErrors;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.yaml.Yaml;
 import dev.foliate.core.yaml.YamlException;
@@ -360,7 +361,7 @@ public final class MessageService implements Module {
                     Objects.requireNonNull(builtIn.get(Locale.ENGLISH), "English is built in"),
                     defaultLocale);
         } catch (IOException e) {
-            throw new MessageException("Language files could not be read: " + e.getMessage(), e);
+            throw new MessageException("The lang folder could not be read (" + FileErrors.reason(e) + ")", e);
         }
     }
 
@@ -403,7 +404,7 @@ public final class MessageService implements Module {
             copyBuiltInLanguages(bundledFiles);
         } catch (IOException e) {
             // A folder the server may not write to (mounted read-only) holds what it holds.
-            logger.warn("The built-in languages could not be copied to the lang folder: {}", e.toString());
+            logger.warn("The built-in languages could not be copied to the lang folder ({})", FileErrors.reason(e));
         }
     }
 
@@ -444,7 +445,7 @@ public final class MessageService implements Module {
         } catch (CharacterCodingException e) {
             throw new MessageException("lang/" + fileName + " is not saved as UTF-8: save it again as UTF-8", e);
         } catch (IOException e) {
-            throw new MessageException("lang/" + fileName + " could not be read (" + e.getMessage() + ")", e);
+            throw new MessageException("lang/" + fileName + " could not be read (" + FileErrors.reason(e) + ")", e);
         }
     }
 

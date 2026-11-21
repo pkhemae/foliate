@@ -7,6 +7,7 @@ import de.exlll.configlib.NameFormatters;
 import de.exlll.configlib.SerializeWith;
 import de.exlll.configlib.YamlConfigurationProperties;
 import de.exlll.configlib.YamlConfigurationStore;
+import dev.foliate.core.io.FileErrors;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.yaml.Yaml;
 import dev.foliate.core.yaml.YamlException;
@@ -16,11 +17,9 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileSystemException;
 import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFileAttributeView;
@@ -205,24 +204,10 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         } catch (CharacterCodingException e) {
             throw new ConfigException(fileName + " is not saved as UTF-8: save it again as UTF-8 in a text editor", e);
         } catch (IOException e) {
-            throw new ConfigException(fileName + " could not be read or written (" + reason(e) + ")", e);
+            throw new ConfigException(fileName + " could not be read or written (" + FileErrors.reason(e) + ")", e);
         } catch (UncheckedIOException e) {
-            throw new ConfigException(fileName + " could not be read or written (" + reason(Objects.requireNonNull(e.getCause())) + ")", e);
+            throw new ConfigException(fileName + " could not be read or written (" + FileErrors.reason(Objects.requireNonNull(e.getCause())) + ")", e);
         }
-    }
-
-    /**
-     * What went wrong with a file, without its path: the messages of {@link IOException} name the
-     * file in full, and they reach whoever ran the reload, who has no business knowing the server's
-     * folders.
-     */
-    static String reason(IOException failure) {
-        return switch (failure) {
-            case AccessDeniedException denied -> "permission denied";
-            case NoSuchFileException missing -> "a file or folder is missing";
-            case FileSystemException other when other.getReason() != null -> other.getReason();
-            default -> "the file system refused it";
-        };
     }
 
     /**
@@ -420,7 +405,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             return true;
         } catch (IOException e) {
             logger.warn("{} could not be updated ({}): the settings were loaded, but the file was not brought up to date",
-                    fileName, reason(e));
+                    fileName, FileErrors.reason(e));
             return false;
         }
     }

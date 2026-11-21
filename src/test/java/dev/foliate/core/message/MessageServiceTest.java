@@ -4,14 +4,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -360,6 +364,19 @@ class MessageServiceTest {
         assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
                 .serialize(fresh.render(Locale.GERMAN, "greeting", Placeholder.unparsed("player", "Alex"))));
         assertThrows(MessageException.class, fresh::reload);
+    }
+
+    /** The message reaches whoever ran /foliate reload: it names the file, not the server's folders. */
+    @Test
+    void languageFileThatCannotBeReadIsReportedWithoutItsPath() throws Exception {
+        Path english = directory.resolve("lang/en.yml");
+        assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"), "POSIX permissions only");
+        Files.setPosixFilePermissions(english, PosixFilePermissions.fromString("---------"));
+        assumeFalse(Files.isReadable(english), "running as a user who may read any file");
+
+        MessageException failure = assertThrows(MessageException.class, messages::reload);
+
+        assertEquals("lang/en.yml could not be read (permission denied)", failure.getMessage());
     }
 
     /** It used to overflow the stack, which no part of the plugin catches. */
