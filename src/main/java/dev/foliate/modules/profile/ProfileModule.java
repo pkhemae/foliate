@@ -1,7 +1,7 @@
 package dev.foliate.modules.profile;
 
-import dev.foliate.contracts.profile.ProfileLookup;
-import dev.foliate.contracts.profile.ProfileSummary;
+import dev.foliate.core.command.Subcommand;
+import dev.foliate.core.command.SubcommandProvider;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
+import org.bukkit.Server;
 import org.bukkit.plugin.Plugin;
 import org.slf4j.Logger;
 
@@ -26,7 +27,7 @@ import org.slf4j.Logger;
  * source set). To keep another kind of data per player,
  * give a store its own repository and lifecycle, as this module does.
  */
-public final class ProfileModule implements Module, ProfileLookup {
+public final class ProfileModule implements Module, SubcommandProvider {
 
     /**
      * The SQL scripts of this module, in the order they apply: to give to the {@code Database}. To
@@ -36,6 +37,8 @@ public final class ProfileModule implements Module, ProfileLookup {
     public static final List<String> MIGRATIONS = List.of("001_create_profiles.sql");
 
     private final Database database;
+    private final MessageService messages;
+    private final Server server;
     private final PlaceholderRegistry placeholders;
     private final PlayerStore<PlayerProfile> store;
     private final ProfileRepository repository = new ProfileRepository();
@@ -48,6 +51,8 @@ public final class ProfileModule implements Module, ProfileLookup {
             Logger logger,
             Clock clock) {
         this.database = database;
+        this.messages = messages;
+        this.server = plugin.getServer();
         this.placeholders = placeholders;
         this.store = new PlayerStore<>(
                 "profile",
@@ -108,15 +113,10 @@ public final class ProfileModule implements Module, ProfileLookup {
         return store;
     }
 
-    /**
-     * {@inheritDoc} The summary's {@code onlineSince} is the profile's {@code lastSeen}: while the
-     * player is online it holds the time of this join, until the quit moves it to the time they
-     * left. A change made through {@link #update} must keep it so.
-     */
+    /** {@code /foliate profile}, which shows the cached profile of an online player. */
     @Override
-    public Optional<ProfileSummary> lookup(UUID id) {
-        return find(id).map(profile ->
-                new ProfileSummary(profile.name(), profile.firstSeen(), profile.lastSeen(), profile.joins()));
+    public List<Subcommand> subcommands() {
+        return List.of(new ProfileCommand(this::find, messages, server));
     }
 
     /** What happens to a profile when its player joins and leaves. */

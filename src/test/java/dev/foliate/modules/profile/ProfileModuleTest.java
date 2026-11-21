@@ -7,7 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.foliate.PluginConfig;
-import dev.foliate.contracts.profile.ProfileSummary;
+import dev.foliate.core.command.Subcommand;
+import dev.foliate.testing.CommandSource;
+import dev.foliate.testing.PluginYml;
+import dev.foliate.testing.TestCommands;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleSkippedException;
@@ -20,6 +23,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
@@ -170,16 +174,19 @@ class ProfileModuleTest {
                 "the profile of Alex counts 1 joins after visit 2", new ProfileCheck(profiles).problemWith(player, 2));
     }
 
+    /** The module offers its command, which reads the profiles the module caches. */
     @Test
-    void lookupGivesTheCachedProfileFieldForField() throws Exception {
+    void theProfileCommandShowsTheCachedProfile() throws Exception {
         UUID id = store(new PlayerProfile(UUID.randomUUID(), "Alex", 10, 20, 4));
-        clock.set(500);
-        server.addPlayer(new PlayerMock(server, "Alex", id));
+        PlayerMock player = new PlayerMock(server, "Alex", id);
+        server.addPlayer(player);
+        PluginYml.registerPermissions(server);
+        List<Subcommand> subcommands = profiles.subcommands();
 
-        ProfileSummary summary = profiles.lookup(id).orElseThrow();
+        TestCommands.foliate(subcommands.toArray(Subcommand[]::new)).execute("foliate profile", new CommandSource(player));
 
-        assertEquals(new ProfileSummary("Alex", 10, 500, 5), summary);
-        assertTrue(profiles.lookup(UUID.randomUUID()).isEmpty());
+        assertEquals(List.of("profile"), subcommands.stream().map(Subcommand::name).toList());
+        assertTrue(TestCommands.plain(player.nextComponentMessage()).contains("Joins: 5"));
     }
 
     @Test

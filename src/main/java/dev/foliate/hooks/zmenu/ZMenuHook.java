@@ -1,6 +1,8 @@
 package dev.foliate.hooks.zmenu;
 
 import dev.foliate.contracts.menu.Menus;
+import dev.foliate.core.command.Subcommand;
+import dev.foliate.core.command.SubcommandProvider;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.scheduler.EntityRetiredException;
@@ -32,7 +34,7 @@ import org.jspecify.annotations.Nullable;
  * <p>To add a menu, drop its file in {@code src/main/resources/inventories/} and add its name to
  * {@link #MENUS}.
  */
-public final class ZMenuHook implements Module, Menus {
+public final class ZMenuHook implements Module, Menus, SubcommandProvider {
 
     public static final String PLUGIN_NAME = "zMenu";
 
@@ -74,6 +76,12 @@ public final class ZMenuHook implements Module, Menus {
     @Override
     public String name() {
         return "zmenu";
+    }
+
+    /** {@code /foliate menu}, which opens the example menu. */
+    @Override
+    public List<Subcommand> subcommands() {
+        return List.of(new MenuCommand(this));
     }
 
     @Override

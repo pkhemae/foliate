@@ -2,6 +2,7 @@ package dev.foliate.commands;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.scheduler.EntityRetiredException;
@@ -13,6 +14,9 @@ import org.slf4j.Logger;
 
 /** {@code reload}: reloads every module off the tick threads and reports what failed. */
 public final class ReloadCommand implements Subcommand {
+
+    /** Declared in the plugin.yml with the other nodes. */
+    static final String PERMISSION = "foliate.command.reload";
 
     private final ModuleManager modules;
     private final MessageService messages;
@@ -33,7 +37,7 @@ public final class ReloadCommand implements Subcommand {
 
     @Override
     public String permission() {
-        return Permissions.COMMAND_RELOAD;
+        return PERMISSION;
     }
 
     @Override

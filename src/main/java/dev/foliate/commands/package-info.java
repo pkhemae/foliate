@@ -1,4 +1,8 @@
-/** Commands and the permissions that guard them. */
+/**
+ * The subcommands about the plugin as a whole, such as {@code info} and {@code reload}. A
+ * subcommand of one feature lives with that feature, which offers it as a
+ * {@link dev.foliate.core.command.SubcommandProvider}.
+ */
 @NullMarked
 package dev.foliate.commands;
 

@@ -1,4 +1,4 @@
-package dev.foliate.commands;
+package dev.foliate.core.command;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
@@ -16,7 +16,10 @@ public interface Subcommand {
     /** The word typed after the root command. */
     String name();
 
-    /** The permission node required to see and run it; one of {@link Permissions}. */
+    /**
+     * The permission node required to see and run it. Declare it next to the subcommand, as a
+     * {@code PERMISSION} constant, and in the plugin.yml: a test checks that the two agree.
+     */
     String permission();
 
     /**
