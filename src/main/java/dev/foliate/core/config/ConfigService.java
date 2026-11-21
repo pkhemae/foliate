@@ -26,6 +26,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
@@ -476,29 +477,39 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     /**
      * Writes a file that stands for {@code model}, such as its replacement or its backup, with the
      * permissions of {@code model} when it exists: the file holds the database password, and one
-     * that only its owner may read must not come back readable by all. The permissions are set
-     * once the text is written, and until then are the owner's alone: the text is never readable
-     * by more people than the model's. The owner and the group are copied when the server is allowed to,
-     * which it usually is not. Nothing is copied where the file system has no POSIX permissions.
+     * that only its owner may read must not come back readable by all.
+     *
+     * <p>The file is created readable by its owner alone, in the same call that creates it, so that
+     * nobody else can open it before the text is written; only then are the model's group, owner and
+     * permissions given to it, in that order. The group and the owner are copied when the server is
+     * allowed to, each on its own: a server that may not give the file away (it usually may not)
+     * may still give it the model's group, when it is a member, so that whoever shares that group
+     * keeps access. Nothing is copied where the file system has no POSIX permissions.
      */
     private static void writeLike(Path model, Path destination, String content) throws IOException {
         Files.deleteIfExists(destination);
-        Files.createFile(destination);
         PosixFileAttributeView from = Files.getFileAttributeView(model, PosixFileAttributeView.class);
-        PosixFileAttributeView to = Files.getFileAttributeView(destination, PosixFileAttributeView.class);
-        PosixFileAttributes attributes = from != null && to != null && Files.exists(model) ? from.readAttributes() : null;
-        if (to != null && attributes != null) {
-            to.setPermissions(EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
+        PosixFileAttributes attributes = from != null && Files.exists(model) ? from.readAttributes() : null;
+        if (attributes == null) {
+            Files.createFile(destination);
+            Files.writeString(destination, content);
+            return;
         }
+        Files.createFile(destination, PosixFilePermissions.asFileAttribute(
+                EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)));
         Files.writeString(destination, content);
-        if (to != null && attributes != null) {
-            to.setPermissions(attributes.permissions());
-            try {
-                to.setOwner(attributes.owner());
-                to.setGroup(attributes.group());
-            } catch (IOException | SecurityException e) {
-                // Only a privileged user may give a file away: it stays the server's.
-            }
+        PosixFileAttributeView to =
+                Objects.requireNonNull(Files.getFileAttributeView(destination, PosixFileAttributeView.class));
+        try {
+            to.setGroup(attributes.group());
+        } catch (IOException | SecurityException e) {
+            // Not a member of the model's group: the file keeps the server's.
         }
+        try {
+            to.setOwner(attributes.owner());
+        } catch (IOException | SecurityException e) {
+            // Only a privileged user may give a file away: it stays the server's.
+        }
+        to.setPermissions(attributes.permissions());
     }
 }
