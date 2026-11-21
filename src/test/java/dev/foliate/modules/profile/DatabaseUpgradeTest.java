@@ -66,7 +66,11 @@ class DatabaseUpgradeTest {
                     new PlayerProfile(UUID.fromString("9b2e6a71-0c3d-4f58-a1e9-5f7d2c8b4a36"),
                             "Steve_The_Miner1", 1_763_000_000_000L, 1_763_000_000_000L, 1),
                     new PlayerProfile(UUID.fromString("d41f8c09-6e2b-47a3-8c5d-0b9e3f1a7d24"),
-                            "Notch", 1_700_000_000_000L, 1_763_650_000_000L, 3)));
+                            "Notch", 1_700_000_000_000L, 1_763_650_000_000L, 3),
+                    new PlayerProfile(UUID.fromString("5e7a2b90-1f4c-4d8e-b6a3-7c9d0e1f2a3b"),
+                            "Alex", 1_650_000_000_000L, 1_690_000_000_000L, 57),
+                    new PlayerProfile(UUID.fromString("8a6d3e15-2b7f-4c90-9e41-6f0a1b2c3d4e"),
+                            "notch", 1_762_000_000_000L, 1_762_100_000_000L, 2)));
 
     /**
      * The scripts that earlier versions ran and this one no longer lists, because their module was

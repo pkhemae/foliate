@@ -1,7 +1,7 @@
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
 CREATE TABLE foliate_migrations (script VARCHAR(191) PRIMARY KEY, applied_at BIGINT NOT NULL);
-INSERT INTO foliate_migrations VALUES('profile/001_create_profiles.sql',1795287114079);
+INSERT INTO foliate_migrations VALUES('profile/001_create_profiles.sql',1795289867932);
 CREATE TABLE foliate_profiles (
     id VARCHAR(36) PRIMARY KEY,
     name VARCHAR(32) NOT NULL,
@@ -12,4 +12,6 @@ CREATE TABLE foliate_profiles (
 INSERT INTO foliate_profiles VALUES('3c0f1d4e-8a52-4b7e-9f10-2d6b5a7c9e01','Alex',1731000000000,1763700000000,214);
 INSERT INTO foliate_profiles VALUES('9b2e6a71-0c3d-4f58-a1e9-5f7d2c8b4a36','Steve_The_Miner1',1763000000000,1763000000000,1);
 INSERT INTO foliate_profiles VALUES('d41f8c09-6e2b-47a3-8c5d-0b9e3f1a7d24','Notch',1700000000000,1763650000000,3);
+INSERT INTO foliate_profiles VALUES('5e7a2b90-1f4c-4d8e-b6a3-7c9d0e1f2a3b','Alex',1650000000000,1690000000000,57);
+INSERT INTO foliate_profiles VALUES('8a6d3e15-2b7f-4c90-9e41-6f0a1b2c3d4e','notch',1762000000000,1762100000000,2);
 COMMIT;

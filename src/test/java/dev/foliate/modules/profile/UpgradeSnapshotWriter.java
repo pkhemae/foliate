@@ -25,8 +25,10 @@ import org.slf4j.helpers.NOPLogger;
 class UpgradeSnapshotWriter {
 
     /**
-     * Values that a column too narrow would not hold: the longest Minecraft name, and epochs in
-     * milliseconds, which need a BIGINT. A module that brings a table stores rows of its own below.
+     * Values that a column too narrow would not hold (the longest Minecraft name, and epochs in
+     * milliseconds, which need a BIGINT), and what real tables hold that a unique index would
+     * refuse: the same name on two players, and names that differ by case only. A module that
+     * brings a table stores rows of its own below, as varied as its real data.
      */
     private static final List<PlayerProfile> PROFILES = List.of(
             new PlayerProfile(UUID.fromString("3c0f1d4e-8a52-4b7e-9f10-2d6b5a7c9e01"),
@@ -34,7 +36,14 @@ class UpgradeSnapshotWriter {
             new PlayerProfile(UUID.fromString("9b2e6a71-0c3d-4f58-a1e9-5f7d2c8b4a36"),
                     "Steve_The_Miner1", 1_763_000_000_000L, 1_763_000_000_000L, 1),
             new PlayerProfile(UUID.fromString("d41f8c09-6e2b-47a3-8c5d-0b9e3f1a7d24"),
-                    "Notch", 1_700_000_000_000L, 1_763_650_000_000L, 3));
+                    "Notch", 1_700_000_000_000L, 1_763_650_000_000L, 3),
+            // Another player under the name Alex had before: a name is only updated at login, so
+            // it stays on the player who left it.
+            new PlayerProfile(UUID.fromString("5e7a2b90-1f4c-4d8e-b6a3-7c9d0e1f2a3b"),
+                    "Alex", 1_650_000_000_000L, 1_690_000_000_000L, 57),
+            // A name that differs from another one by its case only, which MySQL compares as equal.
+            new PlayerProfile(UUID.fromString("8a6d3e15-2b7f-4c90-9e41-6f0a1b2c3d4e"),
+                    "notch", 1_762_000_000_000L, 1_762_100_000_000L, 2));
 
     @TempDir
     Path configDirectory;
