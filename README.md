@@ -58,8 +58,10 @@ Run it on a local Folia server, with PlaceholderAPI and zMenu installed for you:
 ./gradlew runFolia
 ```
 
-The server asks you to accept the Minecraft EULA in `run/eula.txt` on first start. The jar to
-install elsewhere is the one in `build/libs/` without `-plain` in its name.
+The server asks you to accept the Minecraft EULA in `run/eula.txt` on first start. It ticks its
+regions on two threads whatever the machine, so that distant regions run in parallel as on a
+production server. The jar to install elsewhere is the one in `build/libs/` without `-plain` in its
+name.
 
 ## Documentation
 
