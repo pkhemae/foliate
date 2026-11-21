@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -128,18 +129,29 @@ public final class ZMenuHook implements Module, SubcommandProvider {
                 swap.get();
             }
         } catch (ExecutionException e) {
-            if (e.getCause() instanceof MenuLoadFailure failure) {
-                throw failure.asMenuException();
-            }
-            throw new IllegalStateException(e.getCause());
+            throw swapFailure(e.getCause());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new MenuException(
-                    claimed.compareAndSet(false, true)
-                            ? "interrupted before the menus were reloaded: nothing changed"
-                            : "interrupted while the menus were being reloaded: check them again in a moment",
-                    e);
+            if (claimed.compareAndSet(false, true)) {
+                throw new MenuException("interrupted before the menus were reloaded: nothing changed", e);
+            }
+            // The swap is already running on a tick thread, which the interrupt cannot stop: wait
+            // for it, so that the module is never disabled while it is still registering menus.
+            // Its outcome is the reload's. It ends with its tick, so this cannot hang.
+            try {
+                swap.join();
+            } catch (CompletionException failed) {
+                throw swapFailure(failed.getCause());
+            }
         }
+    }
+
+    /** The failure of the swap task, as the reload reports it. */
+    private static MenuException swapFailure(@Nullable Throwable cause) {
+        if (cause instanceof MenuLoadFailure failure) {
+            return failure.asMenuException();
+        }
+        throw new IllegalStateException(cause);
     }
 
     @Override

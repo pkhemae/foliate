@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.entity.Player;
@@ -54,6 +55,8 @@ class ZMenuHookTest {
     private volatile Duration loadTime = Duration.ZERO;
     private final List<Inventory> registered = new ArrayList<>();
     private final List<String> opened = new ArrayList<>();
+    /** Counted down when the fake zMenu starts loading a menu. */
+    private volatile CountDownLatch loading = new CountDownLatch(1);
 
     @BeforeEach
     void setUp() throws Exception {
@@ -233,6 +236,38 @@ class ZMenuHookTest {
         assertEquals(List.of(), registered, "disabling removed the menus, and none was loaded again");
     }
 
+    /**
+     * The plugin disabled while the server runs, by a plugin manager, as a reload's swap is already
+     * running on the global region: the interrupt cannot stop the swap, so the reload waits for it.
+     * Otherwise disable() would delete the menus first, and the swap register fresh ones that stay
+     * in zMenu.
+     */
+    @Test
+    void disablingWhileASwapRunsLeavesNoMenuBehind() throws Exception {
+        ManualSchedulers schedulers = new ManualSchedulers();
+        ZMenuHook live = new ZMenuHook(plugin, schedulers, messages, this::fakeZMenu, Duration.ofSeconds(10));
+        ModuleManager modules = new ModuleManager(NOPLogger.NOP_LOGGER);
+        modules.register(live);
+        modules.enableAll();
+        loading = new CountDownLatch(1);
+        loadTime = Duration.ofSeconds(1);
+        CompletableFuture<Map<String, Throwable>> reload = new CompletableFuture<>();
+        new Thread(() -> reload.complete(modules.reloadAll())).start();
+        while (schedulers.pendingTasks() == 0) {
+            Thread.onSpinWait();
+        }
+        // The global region, still ticking, starts the swap.
+        Thread region = new Thread(() -> schedulers.tick(1));
+        region.start();
+        assertTrue(loading.await(5, TimeUnit.SECONDS));
+
+        modules.disableAll();
+        region.join();
+
+        reload.get(5, TimeUnit.SECONDS);
+        assertEquals(List.of(), registered, "a menu was registered in zMenu after the module was disabled");
+    }
+
     private static String plain(PlayerMock player) {
         return PlainTextComponentSerializer.plainText().serialize(player.nextComponentMessage());
     }
@@ -244,6 +279,7 @@ class ZMenuHookTest {
                 getClass().getClassLoader(), new Class<?>[] {InventoryManager.class}, (proxy, method, arguments) -> {
                     switch (method.getName()) {
                         case "loadInventoryOrSaveResource" -> {
+                            loading.countDown();
                             Thread.sleep(loadTime.toMillis());
                             if (zMenuRejectsFiles) {
                                 throw new InventoryException("size must be a multiple of 9");
