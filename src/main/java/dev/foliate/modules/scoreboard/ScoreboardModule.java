@@ -41,7 +41,9 @@ import org.slf4j.Logger;
  * against another version of its plugin, which fails with an error that MiniMessage lets through
  * (an exception only turns the tag into plain text), or the board library failing. Since every
  * refresh would fail the same way, the failure is logged once, not on every refresh for every
- * player: again only after a board has drawn successfully since, or after a reload.
+ * player: again only after any board has drawn successfully since, or after a reload. A board
+ * logs at most once until it draws again itself, so one that keeps failing while others draw
+ * fine does not log on every refresh.
  */
 public final class ScoreboardModule implements Module, Listener {
 
@@ -250,8 +252,10 @@ public final class ScoreboardModule implements Module, Listener {
             }
             return;
         }
-        if (board.failing) {
-            board.failing = false;
+        // Any board drawing lifts the mute, whichever failed. A board that keeps failing does not
+        // log again until it has drawn itself: its own flag stays set.
+        board.failing = false;
+        if (failureLogged.get()) {
             failureLogged.set(false);
         }
     }

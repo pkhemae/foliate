@@ -19,6 +19,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.Tag;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
@@ -54,6 +55,8 @@ class ScoreboardModuleTest {
      * lets an error through.
      */
     private boolean expansionBroken;
+    /** The name of the one player for whom the {@code <flaky>} tag fails, when set. */
+    private String brokenFor = "";
 
     @BeforeEach
     void setUp() throws Exception {
@@ -65,7 +68,7 @@ class ScoreboardModuleTest {
                 directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         messages.addSharedResolver(TagResolver.resolver("flaky", (arguments, context) -> {
-            if (expansionBroken) {
+            if (expansionBroken || (context.target() instanceof Player viewer && viewer.getName().equals(brokenFor))) {
                 throw new NoClassDefFoundError("a class the expansion was built against");
             }
             return Tag.preProcessParsed("fine");
@@ -146,6 +149,37 @@ class ScoreboardModuleTest {
         schedulers.tick(60);
 
         assertEquals(2, errors().size(), errors().toString());
+    }
+
+    /** The board that failed is gone: another one drawing is enough to log the next failure. */
+    @Test
+    void aFailureAfterAnotherBoardDrewIsLoggedAgain() throws Exception {
+        configure("scoreboard:\n  title: \"<flaky>\"\n");
+        expansionBroken = true;
+        PlayerMock alex = server.addPlayer("Alex");
+        assertEquals(1, errors().size(), errors().toString());
+        alex.disconnect();
+
+        expansionBroken = false;
+        server.addPlayer("Sam");
+        schedulers.tick(100);
+        expansionBroken = true;
+        schedulers.tick(20);
+
+        assertEquals(2, errors().size(), errors().toString());
+    }
+
+    /** A board failing for one player only must not log on every refresh while others draw. */
+    @Test
+    void aBoardThatKeepsFailingWhileOthersDrawIsLoggedOnce() throws Exception {
+        configure("scoreboard:\n  title: \"<flaky>\"\n");
+        server.addPlayer("Sam");
+        brokenFor = "Alex";
+        server.addPlayer("Alex");
+
+        schedulers.tick(100);
+
+        assertEquals(1, errors().size(), errors().toString());
     }
 
     @Test
