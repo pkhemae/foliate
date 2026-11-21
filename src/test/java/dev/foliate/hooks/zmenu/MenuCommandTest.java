@@ -44,7 +44,7 @@ class MenuCommandTest {
                 directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         dispatcher = TestCommands.registerExecuteAs(
-                TestCommands.foliate(new MenuCommand((player, menu) -> opened.add(player.getName() + " " + menu), messages)),
+                TestCommands.dispatcher(new MenuCommand((player, menu) -> opened.add(player.getName() + " " + menu), messages)),
                 server);
     }
 

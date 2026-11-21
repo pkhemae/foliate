@@ -26,7 +26,7 @@ public final class TestCommands {
     private TestCommands() {}
 
     /** A dispatcher that knows {@code /foliate}, made of these subcommands. */
-    public static CommandDispatcher<CommandSourceStack> foliate(Subcommand... subcommands) {
+    public static CommandDispatcher<CommandSourceStack> dispatcher(Subcommand... subcommands) {
         CommandDispatcher<CommandSourceStack> dispatcher = new CommandDispatcher<>();
         dispatcher.getRoot().addChild(new RootCommand("foliate", List.of(subcommands)).build());
         return dispatcher;
