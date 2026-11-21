@@ -37,7 +37,8 @@ class MessageKeysTest {
     private static final Map<String, List<Integer>> KEY_ARGUMENTS = Map.of(
             "send", List.of(1),
             "sendActionBar", List.of(1),
-            "render", List.of(1),
+            // render(viewer, key) and, for text with no viewer, render(key): only a literal counts.
+            "render", List.of(0, 1),
             "renderLines", List.of(1),
             "showTitle", List.of(1, 2));
 

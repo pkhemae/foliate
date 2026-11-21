@@ -213,9 +213,8 @@ public final class ServerTest {
         if (!player.isOnline()) {
             return "the client left before the checks were done";
         }
-        if (checks.isEmpty()) {
-            return "no module has a check for a connected player";
-        }
+        // No check at all is fine: a plugin without the example modules still has a player who
+        // joins, stays connected and comes back, which the visits check whatever modules exist.
         for (PlayerCheck check : checks) {
             String problem = check.problemWith(player, visit);
             if (problem != null) {

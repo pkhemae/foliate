@@ -239,19 +239,74 @@ class MessageServiceTest {
 
     /** A folder the server may not write to (mounted read-only) holds what it holds: it starts. */
     @Test
-    void aFolderThatCannotBeWrittenStillStarts(@TempDir Path readOnly) throws Exception {
+    void aFolderThatCannotBeWrittenUsesTheBuiltInMessages(@TempDir Path readOnly) throws Exception {
         java.io.File folder = readOnly.toFile();
         assertTrue(folder.setWritable(false));
         try {
-            MessageService fresh = new MessageService(readOnly, MessageServiceTest::bundled, NOPLogger.NOP_LOGGER);
+            RecordingLogger logger = new RecordingLogger();
+            MessageService fresh = new MessageService(readOnly, MessageServiceTest::bundled, logger);
 
             fresh.enable();
+            fresh.reload();
 
             assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
                     .serialize(fresh.render("greeting", Placeholder.unparsed("player", "Alex"))));
+            assertTrue(
+                    logger.lines().stream().anyMatch(line -> line.startsWith("WARN messages.yml could not be written (")),
+                    logger.lines().toString());
         } finally {
             folder.setWritable(true);
         }
+    }
+
+    /** The messages do not count on another module to have made the plugin folder. */
+    @Test
+    void aMissingDataFolderIsCreated(@TempDir Path elsewhere) throws Exception {
+        Path folder = elsewhere.resolve("Foliate");
+        MessageService fresh = new MessageService(folder, MessageServiceTest::bundled, NOPLogger.NOP_LOGGER);
+
+        fresh.enable();
+
+        assertEquals(BUNDLED, Files.readString(folder.resolve(MessageService.FILE)));
+    }
+
+    /** A file kept elsewhere and linked into the folder, as some hosts do, is read through the link. */
+    @Test
+    void aLinkedFileIsReadThroughItsTarget(@TempDir Path elsewhere) throws Exception {
+        Path target = elsewhere.resolve("shared-messages.yml");
+        Files.writeString(target, "greeting: \"Linked <player>\"\n");
+        Files.delete(file());
+        Files.createSymbolicLink(file(), target);
+
+        messages.reload();
+
+        assertEquals("Linked Alex", plain("greeting", "Alex"));
+    }
+
+    /** A link to a file that does not exist yet is a first start: the built-in file is written through it. */
+    @Test
+    void aLinkToAMissingFileGetsTheBuiltInFile(@TempDir Path elsewhere) throws Exception {
+        Path target = elsewhere.resolve("shared-messages.yml");
+        Files.delete(file());
+        Files.createSymbolicLink(file(), target);
+
+        messages.reload();
+
+        assertEquals(BUNDLED, Files.readString(target));
+        assertTrue(Files.isSymbolicLink(file()), "the link was replaced");
+    }
+
+    @Test
+    void aFileNotSavedAsUtf8IsReportedOnReloadAndReplacedAtStartup() throws Exception {
+        Files.write(file(), new byte[] {'a', ':', ' ', (byte) 0xFF, '\n'});
+
+        MessageException failure = assertThrows(MessageException.class, messages::reload);
+        MessageService fresh = service(NOPLogger.NOP_LOGGER);
+        fresh.enable();
+
+        assertEquals("messages.yml is not saved as UTF-8: save it again as UTF-8", failure.getMessage());
+        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render("greeting", Placeholder.unparsed("player", "Alex"))));
     }
 
     @Test

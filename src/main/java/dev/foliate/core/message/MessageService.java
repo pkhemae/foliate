@@ -9,7 +9,7 @@ import java.io.InputStream;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -152,14 +152,16 @@ public final class MessageService implements Module {
      * joined with newlines.
      */
     public Component render(Pointered viewer, String key, TagResolver... arguments) {
-        List<String> lines = find(key);
-        return lines == null ? Component.text(key) : deserialize(viewer, String.join("\n", lines), arguments);
+        Map<String, List<String>> current = messages;
+        List<String> lines = find(current, key);
+        return lines == null ? Component.text(key) : deserialize(current, viewer, String.join("\n", lines), arguments);
     }
 
     /** Renders a message for no one in particular, such as a kick message written before the player exists. */
     public Component render(String key, TagResolver... arguments) {
-        List<String> lines = find(key);
-        return lines == null ? Component.text(key) : deserialize(null, String.join("\n", lines), arguments);
+        Map<String, List<String>> current = messages;
+        List<String> lines = find(current, key);
+        return lines == null ? Component.text(key) : deserialize(current, null, String.join("\n", lines), arguments);
     }
 
     /**
@@ -167,11 +169,12 @@ public final class MessageService implements Module {
      * multi-line text need. A message written as a single text gives a single line.
      */
     public List<Component> renderLines(Pointered viewer, String key, TagResolver... arguments) {
-        List<String> lines = find(key);
+        Map<String, List<String>> current = messages;
+        List<String> lines = find(current, key);
         if (lines == null) {
             return List.of(Component.text(key));
         }
-        return lines.stream().map(line -> deserialize(viewer, line, arguments)).toList();
+        return lines.stream().map(line -> deserialize(current, viewer, line, arguments)).toList();
     }
 
     /**
@@ -179,18 +182,20 @@ public final class MessageService implements Module {
      * {@code config.yml}, with the same shared tags and prefix as regular messages.
      */
     public Component parse(Pointered viewer, String miniMessageText, TagResolver... arguments) {
-        return deserialize(viewer, miniMessageText, arguments);
+        return deserialize(messages, viewer, miniMessageText, arguments);
     }
 
-    private @Nullable List<String> find(String key) {
-        List<String> lines = messages.get(key);
+    private @Nullable List<String> find(Map<String, List<String>> current, String key) {
+        List<String> lines = current.get(key);
         if (lines == null && reportedMissingKeys.add(key)) {
             logger.warn("Message '{}' is not defined in {}", key, FILE);
         }
         return lines;
     }
 
-    private Component deserialize(@Nullable Pointered viewer, String template, TagResolver[] arguments) {
+    /** Renders with the message and the prefix of one load, so a reload in between cannot mix two. */
+    private Component deserialize(
+            Map<String, List<String>> current, @Nullable Pointered viewer, String template, TagResolver[] arguments) {
         if (template.isEmpty()) {
             return Component.empty();
         }
@@ -198,7 +203,7 @@ public final class MessageService implements Module {
         // When two resolvers know the same tag the last one wins: shared tags go first, so that
         // what the caller passes for this message always takes precedence.
         TagResolver resolver = TagResolver.builder().resolvers(sharedResolvers).resolvers(arguments).build();
-        List<String> prefix = messages.get(PREFIX_KEY);
+        List<String> prefix = current.get(PREFIX_KEY);
         String text = prefix == null ? template : insertPrefix(template, String.join("\n", prefix));
         return deserialize(viewer, text, resolver);
     }
@@ -259,18 +264,14 @@ public final class MessageService implements Module {
     private Map<String, List<String>> load(boolean strict) throws MessageException {
         String bundled = readBundled();
         Map<String, List<String>> builtIn = parse(FILE + " (built in)", bundled);
-        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
-            try {
-                Files.writeString(file, bundled);
-            } catch (IOException e) {
-                // A folder the server may not write to (mounted read-only) holds what it holds.
-                logger.warn("{} could not be written ({}): using the built-in messages", FILE, FileErrors.reason(e));
-                return builtIn;
-            }
-        }
         Map<String, List<String>> onDisk;
         try {
-            onDisk = parse(FILE, read());
+            String content = read();
+            if (content == null) {
+                copyBuiltIn(bundled);
+                return builtIn;
+            }
+            onDisk = parse(FILE, content);
         } catch (MessageException e) {
             if (strict) {
                 throw e;
@@ -285,10 +286,32 @@ public final class MessageService implements Module {
         return Map.copyOf(merged);
     }
 
-    /** Reads the file; a file that cannot be read is handled like one that is broken. */
-    private String read() throws MessageException {
+    /**
+     * Puts the built-in file in the folder, on the first start or after it was deleted: through
+     * a symbolic link whose target does not exist yet, too.
+     */
+    private void copyBuiltIn(String bundled) {
+        try {
+            Path folder = file.getParent();
+            if (folder != null) {
+                Files.createDirectories(folder);
+            }
+            Files.writeString(file, bundled);
+        } catch (IOException e) {
+            // A folder the server may not write to (mounted read-only) holds what it holds.
+            logger.warn("{} could not be written ({}): using the built-in messages", FILE, FileErrors.reason(e));
+        }
+    }
+
+    /**
+     * Reads the file; null when there is none. A file that cannot be read is handled like one that
+     * is broken: a folder in its place, a link to where the server may not look, a lost permission.
+     */
+    private @Nullable String read() throws MessageException {
         try {
             return Files.readString(file);
+        } catch (NoSuchFileException e) {
+            return null;
         } catch (CharacterCodingException e) {
             throw new MessageException(FILE + " is not saved as UTF-8: save it again as UTF-8", e);
         } catch (IOException e) {
