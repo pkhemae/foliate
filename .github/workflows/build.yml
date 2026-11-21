@@ -222,8 +222,15 @@ jobs:
       - name: A reserved name is refused, before anything is rewritten
         if: steps.template.outputs.still == 'true'
         run: |
-          if ./gradlew renameTemplate -PnewName=Static -PnewGroup=com.example.skylands -PnewRepository=acme/skylands; then
+          if out=$(./gradlew renameTemplate -PnewName=Static -PnewGroup=com.example.skylands -PnewRepository=acme/skylands 2>&1); then
+            echo "$out"
             echo "::error::renameTemplate accepted Static"
+            exit 1
+          fi
+          # Refused by the keyword check, not by another one that would hide it.
+          if ! grep -q "'static' is reserved in Java" <<< "$out"; then
+            echo "$out"
+            echo "::error::renameTemplate refused Static for another reason"
             exit 1
           fi
           if [ -n "$(git status --porcelain)" ]; then
