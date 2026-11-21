@@ -25,4 +25,13 @@ All notable changes to this project are listed here. The format follows
 
 ### Upgrading from a development build
 
-- The migrations history changed in #122: scripts are recorded by name, in `foliate_migrations`, instead of by position in `foliate_schema_history`. A `data.db` made by a development build from before that change no longer starts: delete it (on MySQL or MariaDB, drop `foliate_profiles` and `foliate_schema_history`) and let the plugin create it again. No version was released with the old history, so there is no automatic upgrade.
+- The migrations history changed in #122: scripts are recorded by name, in `foliate_migrations`, instead of by position in `foliate_schema_history`. A database made by a development build from before that change no longer starts. No version was released with the old history, so the plugin does not upgrade it by itself, but the profiles can be kept: with the server stopped, run these statements on the database (`sqlite3 plugins/Foliate/data.db`, or the MySQL or MariaDB client). They work before the first failed start and after it.
+
+  ```sql
+  CREATE TABLE IF NOT EXISTS foliate_migrations (script VARCHAR(191) PRIMARY KEY, applied_at BIGINT NOT NULL);
+  INSERT INTO foliate_migrations (script, applied_at)
+      SELECT 'profile/001_create_profiles.sql', applied_at FROM foliate_schema_history WHERE version = 1;
+  DROP TABLE foliate_schema_history;
+  ```
+
+  A MySQL or MariaDB database made before #52 also needs `ALTER TABLE foliate_profiles MODIFY name VARCHAR(32) NOT NULL;`, since that change widened the column inside the first script. SQLite does not enforce the width. The simple alternative is to delete `data.db` (on MySQL or MariaDB, drop `foliate_profiles` and `foliate_schema_history`) and let the plugin start from an empty database, losing the profiles.
