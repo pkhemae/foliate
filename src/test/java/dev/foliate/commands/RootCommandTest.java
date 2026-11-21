@@ -319,6 +319,36 @@ class RootCommandTest {
         assertTrue(plain(console.nextComponentMessage()).contains("Name a player: /foliate profile <player>"));
     }
 
+    /**
+     * Without an executor (a command block, a console with restricted permissions) there is no
+     * one else's profile to show: the sender is asked for a name, not refused by Brigadier.
+     */
+    @Test
+    void senderWithoutAnExecutorIsAskedForANameWhateverItsPermissions() throws Exception {
+        PlayerMock withoutOthers = server.addPlayer("Alex");
+
+        dispatcher.execute("foliate profile", new CommandSource(withoutOthers, null));
+
+        assertTrue(plain(withoutOthers.nextComponentMessage()).contains("Name a player: /foliate profile <player>"));
+    }
+
+    /** A player the sender cannot see, such as one who vanished, is neither suggested nor shown. */
+    @Test
+    void hiddenPlayersAreNeitherSuggestedNorShown() throws Exception {
+        PlayerMock operator = operator();
+        PlayerMock hidden = server.addPlayer("Alice");
+        profiles.put(hidden.getUniqueId(), new ProfileSummary("Alice", 10, 20, 3));
+        operator.hidePlayer(MockBukkit.createMockPlugin(), hidden);
+
+        var suggestions = dispatcher
+                .getCompletionSuggestions(dispatcher.parse("foliate profile a", new CommandSource(operator)))
+                .get();
+        dispatcher.execute("foliate profile Alice", new CommandSource(operator));
+
+        assertTrue(suggestions.isEmpty(), suggestions.getList().toString());
+        assertEquals("[Foliate] Alice is not online.", plain(operator.nextComponentMessage()));
+    }
+
     @Test
     void consoleCanShowAnOnlinePlayersProfile() throws Exception {
         PlayerMock target = server.addPlayer("Target");
