@@ -4,7 +4,6 @@ import dev.foliate.core.storage.Database;
 import dev.foliate.core.storage.SqlErrors;
 import java.sql.SQLException;
 import java.time.Clock;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -136,11 +135,8 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      */
     private volatile boolean abandoned;
 
-    /**
-     * The players whose save is being retried, so that an outage is logged when it starts and
-     * ends only, whatever the other players' saves do meanwhile. Guarded by itself.
-     */
-    private final Set<UUID> retrying = new HashSet<>();
+    /** Logs when the saves start failing, and when they land again. */
+    private final OutageLog outage;
 
     /**
      * Players whose latest value could not be saved because the database stopped or the shutdown
@@ -188,6 +184,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         this.loadFailed = loadFailed;
         this.logger = logger;
         this.clock = clock;
+        this.outage = new OutageLog(subject, logger);
     }
 
     /**
@@ -590,7 +587,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     private CompletableFuture<@Nullable Void> saved(UUID id, PendingSave<T> save) {
         waitingSaves.remove(id, save);
         lost.remove(id);
-        retryEnded(id, true);
+        outage.retryEnded(id, true);
         return CompletableFuture.completedFuture(null);
     }
 
@@ -602,7 +599,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                 save.start();
                 waitingSaves.remove(id, save);
             }
-            retryEnded(id, false);
+            outage.retryEnded(id, false);
             if (stopping) {
                 // Reported with the others when the store stops.
                 lost.add(id);
@@ -629,7 +626,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             // the database may be refusing this very value.
             save.reopen(!(cause instanceof SQLException sql && SqlErrors.mayPass(sql)));
         }
-        retryStarted(id, cause);
+        outage.retryStarted(id, cause);
         CompletableFuture<@Nullable Void> wait = new CompletableFuture<>();
         retryWaits.put(id, wait);
         retries.after(failures, () -> wait.complete(null));
@@ -641,24 +638,6 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             retryWaits.remove(id, wait);
             return persist(id, save, failures + 1);
         });
-    }
-
-    /** Logs the start of an outage: the first player whose saves are retried. */
-    private void retryStarted(UUID id, Throwable cause) {
-        synchronized (retrying) {
-            if (retrying.add(id) && retrying.size() == 1) {
-                logger.warn("Could not save the {} of {}, retrying: {}", subject, id, Retries.describe(cause));
-            }
-        }
-    }
-
-    /** Logs the end of an outage, when the last player whose saves were retried is saved. */
-    private void retryEnded(UUID id, boolean saved) {
-        synchronized (retrying) {
-            if (retrying.remove(id) && retrying.isEmpty() && saved) {
-                logger.info("Player {}s are saved again", subject);
-            }
-        }
     }
 
     /** Shortens the shutdown's wait, for the tests. */
