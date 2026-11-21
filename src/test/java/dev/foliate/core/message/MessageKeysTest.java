@@ -1,7 +1,9 @@
 package dev.foliate.core.message;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import dev.foliate.core.command.PlayerTarget;
 import dev.foliate.core.yaml.Yaml;
@@ -29,7 +31,7 @@ import org.junit.jupiter.api.Test;
  * <p>Read from the sources: the calls of {@link MessageService} whose key is a string literal,
  * such as {@code messages.send(player, "menu.unknown", ...)}, and the sections given to a
  * {@link PlayerTarget}, which reads its refusals under them. A key held in a variable cannot be
- * checked here.
+ * checked here; a section must therefore be written inline, and anything else fails.
  */
 class MessageKeysTest {
 
@@ -50,6 +52,7 @@ class MessageKeysTest {
      * the audience methods of the same name, which take no text.
      */
     private static final Pattern CALL = Pattern.compile("\\.\\s*(\\w+)\\s*\\(");
+
     /** A {@link PlayerTarget}, whose fourth argument is the section of its messages. */
     private static final Pattern PLAYER_TARGET = Pattern.compile("new\\s+PlayerTarget\\s*\\(");
 
@@ -66,6 +69,51 @@ class MessageKeysTest {
         Map<String, String> missing = new TreeMap<>(used);
         missing.keySet().removeAll(defined);
         assertEquals(Map.of(), missing, "keys used in the code (key=file) but missing from messages.yml");
+    }
+
+    /**
+     * The refusals of each {@link PlayerTarget}. Its section must be a string literal: one held in a
+     * constant would escape the check, and so would a section swapped with the permission before
+     * it, which is always a constant ({@code PluginYmlTest} refuses a node written inline).
+     */
+    @Test
+    void everyPlayerTargetFindsItsMessages() throws Exception {
+        Set<String> defined = definedKeys();
+        Map<String, String> sections = playerTargetSections();
+
+        assertFalse(sections.isEmpty(), "the scan found no PlayerTarget: it is not working");
+        Map<String, String> missing = new TreeMap<>();
+        sections.forEach((section, file) -> {
+            for (String key : PlayerTarget.messageKeys(section)) {
+                if (!defined.contains(key)) {
+                    missing.put(key, file);
+                }
+            }
+        });
+        assertEquals(Map.of(), missing, "keys of a PlayerTarget (key=file) missing from messages.yml");
+    }
+
+    /** The section given to each {@code new PlayerTarget(...)}, and the file that gives it. */
+    private static Map<String, String> playerTargetSections() throws IOException {
+        Map<String, String> sections = new TreeMap<>();
+        try (Stream<Path> files = Files.walk(SOURCES)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                String source = read(file);
+                Matcher target = PLAYER_TARGET.matcher(source);
+                while (target.find()) {
+                    List<String> arguments = arguments(source, target.end());
+                    String section = PLAYER_TARGET_SECTION < arguments.size() ? arguments.get(PLAYER_TARGET_SECTION) : "";
+                    Matcher literal = LITERAL.matcher(section);
+                    if (!literal.matches()) {
+                        fail(SOURCES.relativize(file) + ": the fourth argument of new PlayerTarget(...) is '" + section
+                                + "'. Write the section of the messages inline, as a string literal such as"
+                                + " \"command.profile\", after the permission, so that its keys can be checked.");
+                    }
+                    sections.putIfAbsent(literal.group(1), SOURCES.relativize(file).toString());
+                }
+            }
+        }
+        return sections;
     }
 
     /** Each key used with a literal, and the first file that uses it. */
@@ -86,18 +134,6 @@ class MessageKeysTest {
                             Matcher literal = LITERAL.matcher(arguments.get(position));
                             if (literal.matches()) {
                                 used.putIfAbsent(literal.group(1), SOURCES.relativize(file).toString());
-                            }
-                        }
-                    }
-                }
-                Matcher target = PLAYER_TARGET.matcher(source);
-                while (target.find()) {
-                    List<String> arguments = arguments(source, target.end());
-                    if (PLAYER_TARGET_SECTION < arguments.size()) {
-                        Matcher literal = LITERAL.matcher(arguments.get(PLAYER_TARGET_SECTION));
-                        if (literal.matches()) {
-                            for (String key : PlayerTarget.messageKeys(literal.group(1))) {
-                                used.putIfAbsent(key, SOURCES.relativize(file).toString());
                             }
                         }
                     }

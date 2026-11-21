@@ -78,8 +78,10 @@ public final class PlayerTarget {
     /**
      * @param othersPermission the node that allows targeting another player: the subcommand's
      *     {@code PERMISSION_OTHERS} constant, so that it is declared next to it and in the plugin.yml
-     * @param section the section of {@code messages.yml} that holds the refusals, such as
-     *     {@code "command.profile"}: see {@link #messageKeys}
+     * @param section the section of {@code messages.yml} that holds the refusals (see
+     *     {@link #messageKeys}), written inline as a string literal such as
+     *     {@code "command.profile"}: a test then checks that its keys exist, and fails on anything
+     *     else, a section swapped with the permission included
      */
     public PlayerTarget(Server server, MessageService messages, String othersPermission, String section) {
         this.server = server;
