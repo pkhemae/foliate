@@ -51,9 +51,9 @@ val serverTest: Boolean = providers.gradleProperty("serverTest").map(String::toB
 // job starts the client once the log says the server test is waiting.
 val clientTest: Boolean = providers.gradleProperty("clientTest").map(String::toBoolean).getOrElse(false)
 
-// -PclientLanguages=en,fr makes the connected-client test expect one visit per entry, each by a
-// client set to that language: a player who comes back, and the messages of their own language.
-val clientLanguages: String = providers.gradleProperty("clientLanguages").getOrElse("")
+// -PclientVisits=2 makes the connected-client test expect that many visits of the same player:
+// two are what a player who comes back needs.
+val clientVisits: String = providers.gradleProperty("clientVisits").getOrElse("1")
 
 // -PclientTyped="foliate menu" makes each visit expect the client to type that command, which the
 // CI job does through the client mod hmc-specifics.
@@ -283,7 +283,7 @@ tasks.withType<RunServer>().configureEach {
     if (serverTest) {
         jvmArgs("-Dfoliate.servertest.expect=$expectedModules")
         if (clientTest) {
-            jvmArgs("-Dfoliate.servertest.client=true", "-Dfoliate.servertest.client.languages=$clientLanguages", "-Dfoliate.servertest.client.typed=$clientTyped")
+            jvmArgs("-Dfoliate.servertest.client=true", "-Dfoliate.servertest.client.visits=$clientVisits", "-Dfoliate.servertest.client.typed=$clientTyped")
             doFirst {
                 // The server is switched to offline mode, which would stay on a developer's
                 // machine: this is for CI runners, which are thrown away.
