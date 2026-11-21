@@ -101,7 +101,7 @@ dependencies {
     compileOnly(libs.placeholderapi)
     compileOnly(libs.zmenu.api) { isTransitive = false }
 
-    // Bundled in the jar and relocated by shadowJar.
+    // Bundled in the jar and relocated by shadowJar. Each one has its notice in THIRD-PARTY-NOTICES.
     implementation(libs.configlib.yaml)
     implementation(libs.snakeyaml.engine)
     implementation(libs.fastboard)
@@ -208,6 +208,13 @@ tasks {
         // copy another plugin ships.
         enableAutoRelocation = true
         relocationPrefix = "$basePackage.libs"
+        // Their licences ask for their notices to travel with them. A library added to the bundle
+        // gets its entry in THIRD-PARTY-NOTICES.
+        from("THIRD-PARTY-NOTICES") {
+            into("META-INF")
+        }
+        // HikariCP's build-time generator of its proxies, which needs Javassist: never used at run time.
+        exclude("com/zaxxer/hikari/util/JavassistProxyFactory*.class")
     }
 
     assemble {
