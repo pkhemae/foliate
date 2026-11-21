@@ -9,8 +9,11 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import org.slf4j.Logger;
@@ -20,11 +23,12 @@ import org.slf4j.Logger;
  * own transaction, and records them by name in a history table.
  *
  * <p>A script is known by its name, such as {@code profile/001_create_profiles.sql}: each module
- * keeps its scripts in a folder of its own and lists them in the order they apply. The lists of
- * the modules are given together, in any order: what one module adds never moves another one's
- * scripts, and only the scripts missing from the history run, in the order of their list. Never
- * edit or rename a script that has shipped: servers that already ran it would not run it again,
- * or would run it twice. Scripts must stay portable across SQLite and MySQL.
+ * keeps its scripts in a folder of its own and lists them in the order they apply, appending new
+ * ones at the end. The lists of the modules are given together, in any order, since a module never
+ * uses another one's tables: what one module adds never moves another one's scripts, and only the
+ * scripts missing from the history run, in the order of their list. Never edit or rename a script
+ * that has shipped: servers that already ran it would not run it again, or would run it twice.
+ * Scripts must stay portable across SQLite and MySQL.
  *
  * <p>Keep each script to one change. MySQL commits schema statements as it runs them, so there a
  * script that fails halfway cannot be rolled back, and it is not recorded as applied either.
@@ -41,6 +45,8 @@ import org.slf4j.Logger;
 final class Migrations {
 
     private static final String HISTORY_TABLE = "foliate_migrations";
+    /** The longest name a key of MySQL can hold in any row format: 191 characters of 4 bytes. */
+    private static final int MAX_NAME_LENGTH = 191;
     /** How long a server waits for another one to finish migrating the shared database. */
     private static final int LOCK_TIMEOUT_SECONDS = 60;
     /**
@@ -66,11 +72,18 @@ final class Migrations {
         this.type = type;
     }
 
-    /** @throws IllegalArgumentException when two scripts have the same name */
+    /**
+     * @throws IllegalArgumentException when two scripts have the same name, ignoring case as MySQL
+     *     compares them, or a name is longer than the history can record
+     */
     static void requireUniqueNames(List<String> scripts) {
         Set<String> names = new HashSet<>();
         for (String script : scripts) {
-            if (!names.add(script)) {
+            if (script.length() > MAX_NAME_LENGTH) {
+                throw new IllegalArgumentException(
+                        "The migration " + script + " has a name longer than " + MAX_NAME_LENGTH + " characters");
+            }
+            if (!names.add(script.toLowerCase(Locale.ROOT))) {
                 throw new IllegalArgumentException("The migration " + script + " is listed twice");
             }
         }
@@ -172,12 +185,13 @@ final class Migrations {
         try {
             try (Statement statement = connection.createStatement()) {
                 statement.execute("CREATE TABLE IF NOT EXISTS " + HISTORY_TABLE
-                        + " (script VARCHAR(200) PRIMARY KEY, applied_at BIGINT NOT NULL)");
+                        + " (script VARCHAR(" + MAX_NAME_LENGTH + ") PRIMARY KEY, applied_at BIGINT NOT NULL)");
             }
             connection.commit();
 
             Set<String> applied = appliedScripts(connection);
             reportUnknown(applied);
+            requireAppendedOnly(applied);
             for (String script : scripts) {
                 if (applied.contains(script)) {
                     continue;
@@ -225,8 +239,33 @@ final class Migrations {
         unknown.removeAll(scripts);
         for (String script : unknown) {
             logger.warn("The database ran the migration {}, which this version of the plugin does not list:"
-                    + " a module was removed, or the plugin was downgraded", script);
+                    + " it was renamed (and runs again under its new name), its module was removed,"
+                    + " or the plugin was downgraded", script);
         }
+    }
+
+    /**
+     * A script missing from the history before one of the same module that already ran was
+     * inserted instead of appended: it would run after the later one here, and before it on a new
+     * database, and the two would end up with different schemas.
+     */
+    private void requireAppendedOnly(Set<String> applied) throws SQLException {
+        Map<String, String> missingByModule = new HashMap<>();
+        for (String script : scripts) {
+            String module = moduleOf(script);
+            if (!applied.contains(script)) {
+                missingByModule.putIfAbsent(module, script);
+            } else if (missingByModule.containsKey(module)) {
+                throw new SQLException("Database migration " + missingByModule.get(module) + " is listed before "
+                        + script + ", which already ran: append new migrations at the end of their module's list");
+            }
+        }
+    }
+
+    /** The folder of a script, which is its module's: {@code profile} for {@code profile/001_x.sql}. */
+    private static String moduleOf(String script) {
+        int slash = script.lastIndexOf('/');
+        return slash < 0 ? "" : script.substring(0, slash);
     }
 
     private static Set<String> appliedScripts(Connection connection) throws SQLException {

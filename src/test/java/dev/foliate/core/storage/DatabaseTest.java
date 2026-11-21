@@ -84,6 +84,13 @@ class DatabaseTest {
         });
     }
 
+    /** Caught when the plugin is put together, not when the database starts. */
+    @Test
+    void aMigrationListedTwiceIsRefusedAtOnce() {
+        assertThrows(IllegalArgumentException.class, () -> new Database(
+                directory, () -> config.get().storage(), List.of("001_create_notes.sql", "001_create_notes.sql"), NOPLogger.NOP_LOGGER));
+    }
+
     @Test
     void migrationsAreAppliedOnlyOnce() throws Exception {
         database.enable();
