@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Starts the Folia test server in offline mode, joins it with a real Minecraft client run by
-# HeadlessMC, and waits for the plugin's self-test to give its verdict. See
+# HeadlessMC, and waits for the plugin's server test to give its verdict. See
 # https://headlesshq.github.io/headlessmc/ and issue #29.
 #
 # Runs from the repository root, on a CI runner, with Java 25 on the PATH and JAVA_HOME set.
@@ -18,14 +18,14 @@ LANGUAGES="${LANGUAGES:-en_us,fr_fr}"
 # With TYPED=true the client is a Fabric client with the mod hmc-specifics, which lets this script
 # make it type a command; without it the client is the vanilla one and only joins.
 TYPED="${TYPED:-false}"
-# Opens the example menu: the self-test proves the command was typed by the menu opening.
+# Opens the example menu: the server test proves the command was typed by the menu opening.
 TYPED_COMMAND="foliate menu"
 # The mod for the Minecraft version of the build, pinned: change both with that version.
 SPECIFICS_VERSION="3.0.1"
 SPECIFICS_SHA256="7f0e13aee05184520c80cde986d6510f11cfb62c00a5ebc17b2f16f416468b92"
 SERVER_LOG=run/logs/latest.log
-# Logged by the self-test (SelfTest.WAITING) when it waits for a player.
-WAITING="SELF-TEST WAITING FOR A PLAYER"
+# Logged by the server test (ServerTest.WAITING) when it waits for a player.
+WAITING="SERVER TEST WAITING FOR A PLAYER"
 JOINED="logged in with entity id"
 LEFT="left the game"
 
@@ -79,8 +79,8 @@ stop_client() {
 }
 
 show_logs() {
-  echo "::group::What the server logged about the player and the self-test"
-  grep -E "$JOINED|joined the game|issued server command|lost connection|left the game|SELF-TEST|Checked for a connected|Typed by|Foliate\\]" \
+  echo "::group::What the server logged about the player and the server test"
+  grep -E "$JOINED|joined the game|issued server command|lost connection|left the game|SERVER TEST|Checked for a connected|Typed by|Foliate\\]" \
     "$SERVER_LOG" 2>/dev/null | tail -n 40 || true
   echo "::endgroup::"
 }
@@ -104,7 +104,7 @@ java -jar headlessmc.jar launch --dry-run -lwjgl --offline $LOADER "$MC_VERSION"
 echo "::endgroup::"
 
 rm -f "$SERVER_LOG"
-./gradlew runFolia -PselfTest=true -PclientTest=true -PacceptEula=true "-Phooks=$HOOKS" "-PclientLanguages=$(echo "$LANGUAGES" | sed 's/_[a-z_]*//g')" \
+./gradlew runFolia -PserverTest=true -PclientTest=true -PacceptEula=true "-Phooks=$HOOKS" "-PclientLanguages=$(echo "$LANGUAGES" | sed 's/_[a-z_]*//g')" \
   "-PclientTyped=$([ "$TYPED" = true ] && echo "$TYPED_COMMAND")" \
   < /dev/null > server.out 2>&1 &
 server_pid=$!
@@ -158,7 +158,7 @@ launch_client() {
 visit=0
 for language in ${LANGUAGES//,/ }; do
   visit=$((visit + 1))
-  # The self-test says it is waiting again once the previous player is gone.
+  # The server test says it is waiting again once the previous player is gone.
   for _ in $(seq 1 60); do
     [ "$(count "$WAITING")" -ge "$visit" ] && break
     kill -0 "$server_pid" 2>/dev/null || { echo "The server stopped before visit $visit"; exit 1; }
@@ -185,7 +185,7 @@ for language in ${LANGUAGES//,/ }; do
   stop_client
 done
 
-# The server stops itself once the self-test has its verdict, and Gradle's exit status is that
+# The server stops itself once the server test has its verdict, and Gradle's exit status is that
 # verdict.
 status=0
 wait "$server_pid" || status=$?

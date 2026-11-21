@@ -1,6 +1,6 @@
 package dev.foliate.modules.scoreboard;
 
-import dev.foliate.selftest.PlayerCheck;
+import dev.foliate.servertest.PlayerCheck;
 import java.util.UUID;
 import org.bukkit.entity.Player;
 import org.jspecify.annotations.Nullable;

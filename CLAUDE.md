@@ -11,7 +11,7 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
 3. Small Conventional Commits, in English.
 4. Verify behaviour on Folia, not only with `./gradlew build`: Paper and MockBukkit run everything
    on one thread and cannot detect region violations. `./gradlew runFolia` starts a server to try
-   things by hand; `./gradlew runFolia -PselfTest=true` runs the automated smoke test. What needs
+   things by hand; `./gradlew runFolia -PserverTest=true` runs the automated smoke test. What needs
    a connected player is checked by a CI job that joins with a headless client (the script is in
    `.github/scripts/`); HeadlessMC only allows an offline account in CI, so it is not run locally.
 5. Push and open a PR containing `Closes #<issue>`. CI must be green.

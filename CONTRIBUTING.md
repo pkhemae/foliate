@@ -18,7 +18,7 @@ Thank you for helping. This page is the short version; the [wiki](https://github
    ```
 
    ```bash
-   ./gradlew runFolia -PselfTest=true
+   ./gradlew runFolia -PserverTest=true
    ```
 
    The second command boots a real Folia server. The first time, it stops and asks you to accept

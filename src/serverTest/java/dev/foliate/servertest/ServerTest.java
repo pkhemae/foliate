@@ -1,4 +1,4 @@
-package dev.foliate.selftest;
+package dev.foliate.servertest;
 
 import dev.foliate.contracts.menu.Menus;
 import dev.foliate.core.module.ModuleManager;
@@ -37,34 +37,34 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
- * Exercises the plugin on a real server, then stops the server. {@link SelfTestPlugin} starts it,
- * in the jar that {@code ./gradlew runFolia -PselfTest=true} installs instead of the plugin's; the
+ * Exercises the plugin on a real server, then stops the server. {@link ServerTestPlugin} starts it,
+ * in the jar that {@code ./gradlew runFolia -PserverTest=true} installs instead of the plugin's; the
  * build then fails unless the log contains {@link #PASSED}.
  *
- * <p>Never install that jar on a production server: the self-test loads the spawn chunk, reloads
+ * <p>Never install that jar on a production server: the server test loads the spawn chunk, reloads
  * every module and stops the server.
  *
  * <p>Unit tests run everything on one thread, so they cannot catch what breaks on Folia: work on
  * the wrong region, a timer that survives its cancellation, a scheduler call that only fails on a
  * real server, a command that was never registered. This checks exactly those, once, against the real thing.
  *
- * <p>With {@code -Dfoliate.selftest.client=true} ({@code -PclientTest=true}) it then waits for a
+ * <p>With {@code -Dfoliate.servertest.client=true} ({@code -PclientTest=true}) it then waits for a
  * real client to join, which the CI job starts, and checks what only a connected player shows: the
  * modules' checks ({@link PlayerCheck}), the example menu opening (it knows that one command),
  * and the client still being connected a few seconds later. It then kicks the client and checks
  * that no module kept anything of the player.
  */
-public final class SelfTest {
+public final class ServerTest {
 
-    public static final String PASSED = "FOLIATE SELF-TEST PASSED";
-    public static final String FAILED = "FOLIATE SELF-TEST FAILED";
+    public static final String PASSED = "FOLIATE SERVER TEST PASSED";
+    public static final String FAILED = "FOLIATE SERVER TEST FAILED";
     /** Logged when the checks that need no player are done: the CI job then starts its client. */
-    public static final String WAITING = "FOLIATE SELF-TEST WAITING FOR A PLAYER";
+    public static final String WAITING = "FOLIATE SERVER TEST WAITING FOR A PLAYER";
 
-    private static final String EXPECTED_MODULES_PROPERTY = "foliate.selftest.expect";
-    private static final String CLIENT_PROPERTY = "foliate.selftest.client";
-    private static final String LANGUAGES_PROPERTY = "foliate.selftest.client.languages";
-    private static final String TYPED_PROPERTY = "foliate.selftest.client.typed";
+    private static final String EXPECTED_MODULES_PROPERTY = "foliate.servertest.expect";
+    private static final String CLIENT_PROPERTY = "foliate.servertest.client";
+    private static final String LANGUAGES_PROPERTY = "foliate.servertest.client.languages";
+    private static final String TYPED_PROPERTY = "foliate.servertest.client.typed";
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
     /** Starting a client takes much longer than starting the server. */
     private static final Duration CLIENT_TIMEOUT = Duration.ofMinutes(12);
@@ -81,7 +81,7 @@ public final class SelfTest {
     private final List<PlayerCheck> checks;
     private final Logger logger;
     private final AtomicBoolean finished = new AtomicBoolean();
-    /** The join the self-test is waiting for: replaced once a visit is over. */
+    /** The join the server test is waiting for: replaced once a visit is over. */
     private final AtomicReference<CompletableFuture<Player>> nextPlayer =
             new AtomicReference<>(new CompletableFuture<>());
     private final boolean withClient = Boolean.getBoolean(CLIENT_PROPERTY);
@@ -99,7 +99,7 @@ public final class SelfTest {
     private volatile @Nullable Entity marker;
     private volatile @Nullable Runnable releaseChunk;
 
-    SelfTest(Plugin plugin, Schedulers schedulers, ModuleManager modules, Database database, List<PlayerCheck> checks) {
+    ServerTest(Plugin plugin, Schedulers schedulers, ModuleManager modules, Database database, List<PlayerCheck> checks) {
         this.plugin = plugin;
         this.server = plugin.getServer();
         this.schedulers = schedulers;
@@ -110,7 +110,7 @@ public final class SelfTest {
     }
 
     /**
-     * Reports a failure that happened before the self-test could start, and stops the server so
+     * Reports a failure that happened before the server test could start, and stops the server so
      * the smoke test does not wait for a verdict that would never come.
      */
     static void abort(Plugin plugin, String failure) {
@@ -247,7 +247,7 @@ public final class SelfTest {
         UUID id = player.getUniqueId();
         String name = player.getName();
         return schedulers.entity(player)
-                .run(() -> player.kick(Component.text("Self-test done")))
+                .run(() -> player.kick(Component.text("Server test done")))
                 .thenCompose(ignored -> eventually(() -> schedulers.async().supply(() -> {
                     if (server.getPlayer(id) != null) {
                         return name + " is still listed as online";

@@ -190,13 +190,13 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
 
     /**
      * What is stored in the database for a player, whatever is cached. Blocks on the calling
-     * thread: for the tests and the self-test, after {@link #awaitWrites}, never on a tick thread.
+     * thread: for the tests and the server test, after {@link #awaitWrites}, never on a tick thread.
      */
     Optional<T> stored(UUID id) throws SQLException {
         return database.call(connection -> repository.find(connection, id));
     }
 
-    /** What the values are, in singular ("profile"), for the self-test's messages. */
+    /** What the values are, in singular ("profile"), for the server test's messages. */
     String subject() {
         return subject;
     }

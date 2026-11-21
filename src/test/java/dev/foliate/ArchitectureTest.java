@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>It reads every mention of the plugin's packages in the source files (imports, wildcard or
  * static, and qualified names), so a violation is reported with the file before it can spread.
- * The self-test's source set is left out of that rule: it tests everything, and the plugin cannot
+ * The server test's source set is left out of that rule: it tests everything, and the plugin cannot
  * depend on it, since it is not on the plugin's classpath.
  */
 class ArchitectureTest {
@@ -32,7 +32,7 @@ class ArchitectureTest {
     private static final String BASE = ArchitectureTest.class.getPackageName();
 
     private static final Path MAIN = Path.of("src/main/java", BASE.split("\\."));
-    private static final Path SELFTEST = Path.of("src/selftest/java", BASE.split("\\."));
+    private static final Path SERVER_TEST = Path.of("src/serverTest/java", BASE.split("\\."));
     /** Any mention of a plugin class or package: an import (wildcard or static) or a qualified name. */
     private static final Pattern REFERENCE = Pattern.compile("\\b" + Pattern.quote(BASE) + "\\.([\\w.]*[\\w*])");
 
@@ -57,21 +57,21 @@ class ArchitectureTest {
     }
 
     /**
-     * In the self-test's source set, a package the plugin also has is covered by the plugin's
+     * In the server test's source set, a package the plugin also has is covered by the plugin's
      * package-info: a second one would be a second {@code package-info.class} in the same jar.
      */
     @Test
     void everyPackageHasANullMarkedPackageInfo() throws IOException {
         List<String> missing = new ArrayList<>();
-        for (Path root : List.of(MAIN, SELFTEST)) {
+        for (Path root : List.of(MAIN, SERVER_TEST)) {
             try (Stream<Path> files = Files.walk(root)) {
                 for (Path folder : files.filter(Files::isDirectory).toList()) {
                     try (Stream<Path> inside = Files.list(folder)) {
                         boolean holdsClasses = inside.anyMatch(path -> path.toString().endsWith(".java")
                                 && !path.getFileName().toString().equals("package-info.java"));
                         Path info = folder.resolve("package-info.java");
-                        if (root == SELFTEST && !Files.exists(info)) {
-                            info = MAIN.resolve(SELFTEST.relativize(folder)).resolve("package-info.java");
+                        if (root == SERVER_TEST && !Files.exists(info)) {
+                            info = MAIN.resolve(SERVER_TEST.relativize(folder)).resolve("package-info.java");
                         }
                         if (holdsClasses && (!Files.exists(info) || !Files.readString(info).contains("@NullMarked"))) {
                             missing.add(root.getParent().relativize(folder).toString());
@@ -84,11 +84,11 @@ class ArchitectureTest {
     }
 
     @Test
-    void theSelfTestAddsNoPackageInfoToAPackageOfThePlugin() throws IOException {
-        try (Stream<Path> files = Files.walk(SELFTEST)) {
+    void theServerTestAddsNoPackageInfoToAPackageOfThePlugin() throws IOException {
+        try (Stream<Path> files = Files.walk(SERVER_TEST)) {
             List<String> doubled = files.filter(path -> path.getFileName().toString().equals("package-info.java"))
-                    .filter(path -> Files.exists(MAIN.resolve(SELFTEST.relativize(path))))
-                    .map(path -> SELFTEST.relativize(path).toString())
+                    .filter(path -> Files.exists(MAIN.resolve(SERVER_TEST.relativize(path))))
+                    .map(path -> SERVER_TEST.relativize(path).toString())
                     .toList();
             assertEquals(List.of(), doubled, "The plugin already has these package-info files");
         }

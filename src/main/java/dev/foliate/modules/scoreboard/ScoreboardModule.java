@@ -85,12 +85,12 @@ public final class ScoreboardModule implements Module, Listener {
         entries.clear();
     }
 
-    /** Whether the configuration asks for boards at all. For the self-test, which lives in this package. */
+    /** Whether the configuration asks for boards at all. For the server test, which lives in this package. */
     boolean showsBoards() {
         return settings.get().enabled();
     }
 
-    /** Whether a player has a board right now. For the self-test, which lives in this package. */
+    /** Whether a player has a board right now. For the server test, which lives in this package. */
     boolean hasBoard(UUID id) {
         return entries.containsKey(id);
     }

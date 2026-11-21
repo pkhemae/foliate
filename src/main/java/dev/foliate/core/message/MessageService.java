@@ -155,7 +155,7 @@ public final class MessageService implements Module {
     /**
      * The lines a language has of its own for a message, from its file or, for a locale with a
      * country, from the file of its language; null when it has none. Never those of the default
-     * language: this tells a language apart from the fallback. For the self-test, which lives in
+     * language: this tells a language apart from the fallback. For the server test, which lives in
      * this package.
      */
     @Nullable List<String> ownLines(Locale locale, String key) {
