@@ -9,30 +9,38 @@ import java.nio.file.Files
 // permission nodes, table names, placeholder identifier...), moves the sources to the new package,
 // and then removes itself. Run it once, on a clean checkout, before writing any code of your own.
 
-val templateName = "Foliate"
-val templateGroup = "dev.foliate"
-val templateRepository = "pkhemae/foliate"
-
-val skippedDirectories = setOf(".git", ".gradle", ".idea", ".kotlin", "build", "run", "out", "wrapper")
-val textExtensions =
-    setOf("java", "kts", "toml", "properties", "yml", "yaml", "md", "json", "sql", "txt", "sh", "gitignore", "editorconfig")
-val textFileNames = setOf("LICENSE", ".gitignore", ".gitattributes", ".editorconfig")
-val javaKeywords = setOf(
-    "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue",
-    "default", "do", "double", "else", "enum", "extends", "final", "finally", "float", "for", "goto", "if",
-    "implements", "import", "instanceof", "int", "interface", "long", "native", "new", "package", "private",
-    "protected", "public", "return", "short", "static", "strictfp", "super", "switch", "synchronized", "this",
-    "throw", "throws", "transient", "try", "void", "volatile", "while", "true", "false", "null",
-)
-
 tasks.register("renameTemplate") {
     group = "template"
     description = "Renames the template. Needs -PnewName, -PnewGroup and -PnewRepository."
+
+    // The action below only uses values and providers declared in this block: with the
+    // configuration cache on, Gradle stores the action, and it cannot store a reference to the
+    // script itself (a value declared at its top level, or its `providers`).
+    val templateName = "Foliate"
+    val templateGroup = "dev.foliate"
+    val templateRepository = "pkhemae/foliate"
+
+    val skippedDirectories = setOf(".git", ".gradle", ".idea", ".kotlin", "build", "run", "out", "wrapper")
+    val textExtensions =
+        setOf("java", "kts", "toml", "properties", "yml", "yaml", "md", "json", "sql", "txt", "sh", "gitignore", "editorconfig")
+    val textFileNames = setOf("LICENSE", ".gitignore", ".gitattributes", ".editorconfig")
+    val javaKeywords = setOf(
+        "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue",
+        "default", "do", "double", "else", "enum", "extends", "final", "finally", "float", "for", "goto", "if",
+        "implements", "import", "instanceof", "int", "interface", "long", "native", "new", "package", "private",
+        "protected", "public", "return", "short", "static", "strictfp", "super", "switch", "synchronized", "this",
+        "throw", "throws", "transient", "try", "void", "volatile", "while", "true", "false", "null",
+    )
+    // Not keywords, but not usable for every kind of name: "record" cannot name a type, and a
+    // method named "yield" cannot be called without a qualifier.
+    val restrictedIdentifiers = setOf("permits", "record", "sealed", "var", "yield")
 
     val newName = providers.gradleProperty("newName")
     val newGroup = providers.gradleProperty("newGroup")
     val newRepository = providers.gradleProperty("newRepository")
     val root = layout.projectDirectory.asFile
+    // Runs git only when the action asks for its output, which it does in a git repository only.
+    val gitStatus = providers.exec { commandLine("git", "status", "--porcelain") }.standardOutput.asText
 
     doLast {
         val name = newName.orNull ?: throw GradleException("Pass the plugin name: -PnewName=Skylands")
@@ -40,6 +48,11 @@ tasks.register("renameTemplate") {
         val repository = newRepository.orNull ?: throw GradleException("Pass the GitHub repository: -PnewRepository=you/skylands")
         if (!Regex("[A-Z][A-Za-z0-9]*").matches(name)) {
             throw GradleException("newName must be a class-like name such as Skylands, got '$name'")
+        }
+        // The lowercase name is the command and the prefix of many identifiers: on its own, it must
+        // be a valid Java name too.
+        name.lowercase().takeIf { it in javaKeywords || it in restrictedIdentifiers }?.let {
+            throw GradleException("newName cannot be '$name': '$it' is reserved in Java. Pick another name, such as ${name}Craft.")
         }
         if (!Regex("[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+").matches(basePackage)) {
             throw GradleException("newGroup must be a lowercase package such as com.example.skylands, got '$basePackage'")
@@ -69,8 +82,7 @@ tasks.register("renameTemplate") {
             ?.let { throw GradleException("newName '$name' would turn $it into ${it.replace(templateName, name)}, which already exists") }
         // Nothing can be undone by this task: start from a tree git can restore.
         if (File(root, ".git").exists()) {
-            val status = providers.exec { commandLine("git", "status", "--porcelain") }.standardOutput.asText.get()
-            if (status.isNotBlank()) {
+            if (gitStatus.get().isNotBlank()) {
                 throw GradleException(
                     "Commit or stash your changes first. If a rename goes wrong, " +
                         "'git checkout . && git clean -fd' brings the tree back."
