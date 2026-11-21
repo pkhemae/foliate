@@ -3,11 +3,13 @@ package dev.foliate.hooks.zmenu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
+import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.scheduler.FoliaSchedulers;
 import dev.foliate.core.scheduler.ManualSchedulers;
 import fr.maxlego08.menu.api.Inventory;
@@ -18,6 +20,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
@@ -201,6 +204,33 @@ class ZMenuHookTest {
 
         assertTrue(failure.getMessage().contains("nothing changed"), failure.getMessage());
         assertEquals(List.of(before), registered);
+    }
+
+    /**
+     * A server stopping during a reload: the global region no longer ticks, so the swap can never
+     * run. Disabling interrupts the wait instead of sitting out the reload timeout.
+     */
+    @Test
+    void disablingDuringAReloadDoesNotWaitForTheTimeout() throws Exception {
+        ManualSchedulers halted = new ManualSchedulers();
+        ZMenuHook stuck = new ZMenuHook(plugin, halted, messages, this::fakeZMenu, Duration.ofMinutes(5));
+        ModuleManager modules = new ModuleManager(NOPLogger.NOP_LOGGER);
+        modules.register(stuck);
+        modules.enableAll();
+        CompletableFuture<Map<String, Throwable>> reload = new CompletableFuture<>();
+        Thread reloading = new Thread(() -> reload.complete(modules.reloadAll()));
+        reloading.start();
+        while (halted.pendingTasks() == 0) {
+            Thread.onSpinWait();
+        }
+
+        assertTimeoutPreemptively(Duration.ofSeconds(5), modules::disableAll);
+
+        Throwable failure = reload.get(5, TimeUnit.SECONDS).get(ZMenuHook.MODULE_NAME);
+        assertTrue(failure instanceof MenuException && failure.getMessage().contains("nothing changed"), String.valueOf(failure));
+        // The swap, had the region ticked after all, would have done nothing.
+        halted.tick(1);
+        assertEquals(List.of(), registered, "disabling removed the menus, and none was loaded again");
     }
 
     private static String plain(PlayerMock player) {

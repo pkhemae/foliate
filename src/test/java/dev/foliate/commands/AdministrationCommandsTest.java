@@ -80,7 +80,7 @@ class AdministrationCommandsTest {
 
         dispatcher = TestCommands.foliate(
                 new InfoCommand(modules, messages, "1.2.3", "Test 26.2"),
-                new ReloadCommand(modules, messages, schedulers, NOPLogger.NOP_LOGGER));
+                new ReloadCommand(plugin, modules, messages, schedulers, NOPLogger.NOP_LOGGER));
     }
 
     @AfterEach
@@ -155,6 +155,21 @@ class AdministrationCommandsTest {
 
         assertTrue(TestCommands.plain(console.nextComponentMessage()).contains("reloaded"));
         assertEquals(List.of("async", "global"), schedulers.contextsUsed());
+    }
+
+    /** Disabling the plugin interrupts the reload: its outcome is not worth an answer then. */
+    @Test
+    void reloadFinishingAfterThePluginWasDisabledAnswersNothing() throws Exception {
+        PlayerMock player = operator();
+        dispatcher.execute("foliate reload", new CommandSource(player));
+        player.nextComponentMessage();
+
+        server.getPluginManager().disablePlugin(plugin);
+        runAsyncWork();
+
+        assertNull(player.nextComponentMessage());
+        // Nothing may be scheduled for a disabled plugin: the server would refuse it.
+        assertEquals(List.of("async"), schedulers.contextsUsed());
     }
 
     @Test

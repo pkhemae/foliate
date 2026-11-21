@@ -83,7 +83,7 @@ public class FoliatePlugin extends JavaPlugin {
         // module, and only while it runs.
         List<Subcommand> subcommands = new ArrayList<>();
         subcommands.add(new InfoCommand(modules, messages, getPluginMeta().getVersion(), Platform.describe()));
-        subcommands.add(new ReloadCommand(modules, messages, schedulers, getSLF4JLogger()));
+        subcommands.add(new ReloadCommand(this, modules, messages, schedulers, getSLF4JLogger()));
         for (SubcommandProvider feature : modules.enabledOf(SubcommandProvider.class)) {
             subcommands.addAll(feature.subcommands());
         }

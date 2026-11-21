@@ -35,7 +35,12 @@ public interface Module {
      * Re-reads whatever the module loaded at startup. A failed reload must leave the previous
      * state in place.
      *
-     * @throws Exception if the new state is invalid
+     * <p>When the plugin is disabled during a reload, the reloading thread is interrupted, and
+     * shutdown waits for this method to return. A reload that waits, for a region or anything else,
+     * must therefore wait interruptibly and, once interrupted, give up at once: keep the previous
+     * state, throw, and leave the interrupt status set.
+     *
+     * @throws Exception if the new state is invalid, or the reload was interrupted
      */
     default void reload() throws Exception {}
 
