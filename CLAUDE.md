@@ -36,9 +36,11 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
   next to the subcommand that checks it, and is declared in `build.gradle.kts`.
 - `FoliatePlugin` is the composition root. Dependencies are passed through constructors: no static
   singletons, no DI container.
-- `onDisable` does no world work and schedules nothing. Regions have stopped ticking only when Folia
-  stops: when the plugin alone is disabled (a plugin manager, Paper's `/reload`, a failed start),
-  a task or event already under way may still be running, so shared state stays thread-safe.
+- `onDisable` does no world work and schedules nothing: nothing runs for a disabled plugin
+  (`FoliaSchedulers` skips the region and global tasks Folia would still run). Regions have stopped
+  ticking only when Folia stops: when the plugin alone is disabled (a plugin manager, Paper's
+  `/reload`, a failed start), a task or event already under way may still be running, so shared
+  state stays thread-safe.
 - Third-party plugins are optional hooks (`softdepend` + `compileOnly`), isolated so their classes
   are only loaded when the plugin is installed.
 - Prefer the native Paper API (Adventure/MiniMessage, Brigadier, Data Components) over a library.

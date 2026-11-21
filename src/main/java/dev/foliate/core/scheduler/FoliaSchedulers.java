@@ -22,6 +22,11 @@ import org.slf4j.Logger;
  * {@link Schedulers} backed by the server's region, entity, global and async schedulers. They exist
  * on Paper too, where everything simply runs on the main thread.
  *
+ * <p>Region and global tasks are skipped once the plugin is disabled, including those queued
+ * before: Folia already does so for entity tasks, but runs region tasks given to {@code execute}
+ * and global ones whatever the plugin's state. A skipped task's future is left incomplete, as at
+ * {@link #shutdown()}.
+ *
  * <p>Thread-safe.
  */
 public final class FoliaSchedulers implements Schedulers {
@@ -130,6 +135,18 @@ public final class FoliaSchedulers implements Schedulers {
         };
     }
 
+    /**
+     * Wraps a region or global task so that it does nothing once the plugin is disabled: it may
+     * have been queued before, or Folia may accept it after, and the regions can still be ticking.
+     */
+    private Runnable whileEnabled(Runnable task) {
+        return () -> {
+            if (plugin.isEnabled()) {
+                task.run();
+            }
+        };
+    }
+
     private Consumer<ScheduledTask> consumer(Runnable task) {
         Runnable logged = logged(task);
         return scheduled -> logged.run();
@@ -208,18 +225,18 @@ public final class FoliaSchedulers implements Schedulers {
 
         @Override
         public void execute(Runnable task) {
-            server.getGlobalRegionScheduler().execute(plugin, logged(task));
+            server.getGlobalRegionScheduler().execute(plugin, whileEnabled(logged(task)));
         }
 
         @Override
         public TaskHandle runLater(Duration delay, Runnable task) {
-            return handle(server.getGlobalRegionScheduler().runDelayed(plugin, consumer(task), ticks(delay)));
+            return handle(server.getGlobalRegionScheduler().runDelayed(plugin, consumer(whileEnabled(task)), ticks(delay)));
         }
 
         @Override
         public TaskHandle runTimer(Duration initialDelay, Duration period, Runnable task) {
             return timer(server.getGlobalRegionScheduler()
-                    .runAtFixedRate(plugin, consumer(task), ticks(initialDelay), ticks(period)));
+                    .runAtFixedRate(plugin, consumer(whileEnabled(task)), ticks(initialDelay), ticks(period)));
         }
 
         @Override
@@ -230,7 +247,7 @@ public final class FoliaSchedulers implements Schedulers {
         @Override
         public <T> CompletableFuture<T> supply(Supplier<T> supplier) {
             CompletableFuture<T> future = new CompletableFuture<>();
-            server.getGlobalRegionScheduler().execute(plugin, completing(future, supplier));
+            server.getGlobalRegionScheduler().execute(plugin, whileEnabled(completing(future, supplier)));
             return future;
         }
     }
@@ -245,18 +262,19 @@ public final class FoliaSchedulers implements Schedulers {
 
         @Override
         public void execute(Runnable task) {
-            server.getRegionScheduler().execute(plugin, location, logged(task));
+            server.getRegionScheduler().execute(plugin, location, whileEnabled(logged(task)));
         }
 
         @Override
         public TaskHandle runLater(Duration delay, Runnable task) {
-            return handle(server.getRegionScheduler().runDelayed(plugin, location, consumer(task), ticks(delay)));
+            return handle(server.getRegionScheduler()
+                    .runDelayed(plugin, location, consumer(whileEnabled(task)), ticks(delay)));
         }
 
         @Override
         public TaskHandle runTimer(Duration initialDelay, Duration period, Runnable task) {
             return timer(server.getRegionScheduler()
-                    .runAtFixedRate(plugin, location, consumer(task), ticks(initialDelay), ticks(period)));
+                    .runAtFixedRate(plugin, location, consumer(whileEnabled(task)), ticks(initialDelay), ticks(period)));
         }
 
         @Override
@@ -267,7 +285,7 @@ public final class FoliaSchedulers implements Schedulers {
         @Override
         public <T> CompletableFuture<T> supply(Supplier<T> supplier) {
             CompletableFuture<T> future = new CompletableFuture<>();
-            server.getRegionScheduler().execute(plugin, location, completing(future, supplier));
+            server.getRegionScheduler().execute(plugin, location, whileEnabled(completing(future, supplier)));
             return future;
         }
     }

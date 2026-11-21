@@ -48,8 +48,9 @@ public interface Module {
     /**
      * Stops the module. Must cope with a module that only got halfway through {@link #enable()}.
      *
-     * <p>Nothing can be scheduled any more, not even async tasks: do what is left synchronously,
-     * on the calling thread (blocking to save data is fine), and do not touch the world.
+     * <p>Nothing scheduled from now on runs, not even async tasks (see {@code Schedulers}): do
+     * what is left synchronously, on the calling thread (blocking to save data is fine), and do
+     * not touch the world.
      *
      * <p>Whether the regions still tick depends on why the plugin is disabled. When Folia stops,
      * they have stopped. When only the plugin is disabled, by Paper's {@code /reload}, a plugin

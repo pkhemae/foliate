@@ -109,7 +109,7 @@ public final class ScoreboardModule implements Module, Listener {
     public void disable() {
         running = false;
         HandlerList.unregisterAll(this);
-        // Nothing can be scheduled on the players' threads any more. Removing a board only sends
+        // Nothing scheduled on the players' threads runs any more. Removing a board only sends
         // packets, which is safe from here. One at a time: a show still under way on a player's
         // thread may add a board meanwhile, and removes it itself once it sees running is false.
         for (UUID id : List.copyOf(entries.keySet())) {

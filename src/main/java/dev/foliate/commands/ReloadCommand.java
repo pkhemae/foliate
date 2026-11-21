@@ -90,8 +90,8 @@ public final class ReloadCommand implements Subcommand {
     /**
      * Runs a reply where its recipient expects it, see {@link Schedulers#sender}. Skipped when the
      * plugin was disabled while the reload ran, which interrupts it (see {@link ModuleManager}):
-     * nothing can be scheduled any more, and what failed then is only the shutdown cutting the
-     * reload short.
+     * the reply could not be scheduled or would never run, and what failed then is only the
+     * shutdown cutting the reload short.
      */
     private void reply(CommandSender sender, Runnable reply) {
         if (!plugin.isEnabled()) {

@@ -7,24 +7,32 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.papermc.paper.threadedregions.scheduler.EntityScheduler;
+import io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler;
+import io.papermc.paper.threadedregions.scheduler.RegionScheduler;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import net.kyori.adventure.util.Ticks;
 import org.bukkit.Location;
+import org.bukkit.Server;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Zombie;
+import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.ServerMock;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
+import org.slf4j.helpers.NOPLogger;
 
 /**
  * Covers the facade's own logic. MockBukkit runs every scheduler on one simulated thread, so these
@@ -238,6 +246,50 @@ class FoliaSchedulersTest {
         schedulers.shutdown();
 
         assertEquals(0, cancelled.get());
+    }
+
+    /**
+     * Folia runs region tasks given to {@code execute}, and global ones, whatever the plugin's
+     * state: when the plugin is disabled while the server runs, those queued before must not run
+     * plugin code afterwards. The server's schedulers are played by proxies that keep the tasks.
+     */
+    @Test
+    void regionAndGlobalTasksQueuedBeforeTheDisableDoNotRun() {
+        AtomicBoolean enabled = new AtomicBoolean(true);
+        List<Runnable> queued = new ArrayList<>();
+        Answer keep = (method, args) -> {
+            for (Object argument : args) {
+                if (argument instanceof Runnable task) {
+                    queued.add(task);
+                }
+            }
+            return null;
+        };
+        RegionScheduler regions = proxy(RegionScheduler.class, keep);
+        GlobalRegionScheduler global = proxy(GlobalRegionScheduler.class, keep);
+        Server fakeServer = proxy(Server.class, (method, args) -> switch (method.getName()) {
+            case "getRegionScheduler" -> regions;
+            case "getGlobalRegionScheduler" -> global;
+            default -> null;
+        });
+        Plugin plugin = proxy(Plugin.class, (method, args) -> switch (method.getName()) {
+            case "getServer" -> fakeServer;
+            case "getSLF4JLogger" -> NOPLogger.NOP_LOGGER;
+            case "isEnabled" -> enabled.get();
+            default -> null;
+        });
+        FoliaSchedulers disabling = new FoliaSchedulers(plugin);
+        AtomicInteger runs = new AtomicInteger();
+        disabling.region(location()).execute(runs::incrementAndGet);
+        disabling.global().execute(runs::incrementAndGet);
+        CompletableFuture<Integer> supplied = disabling.region(location()).supply(runs::incrementAndGet);
+        assertEquals(3, queued.size());
+
+        enabled.set(false);
+        queued.forEach(Runnable::run);
+
+        assertEquals(0, runs.get());
+        assertFalse(supplied.isDone(), "left incomplete, as at shutdown");
     }
 
     private interface Answer {

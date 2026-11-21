@@ -128,8 +128,8 @@ public class FoliatePlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        // Nothing can be scheduled any more: what is left runs synchronously, here, and must not
-        // touch the world. The regions have stopped ticking only when Folia stops; when the plugin
+        // Nothing scheduled from here on runs (see Schedulers): what is left runs synchronously,
+        // here, and must not touch the world. The regions have stopped ticking only when Folia stops; when the plugin
         // alone is disabled (a plugin manager, Paper's /reload, a failed start), a task or event of
         // ours already under way may still be running, see Module#disable. Timers go first, so
         // none starts again while a module is releasing its resources.
