@@ -73,6 +73,29 @@ class YamlTest {
         assertEquals("nested too deeply (more than 64 levels)", failure.getMessage());
     }
 
+    /** The engine stops at 3 MB, with a message that used to come out as "a value cannot be read". */
+    @Test
+    void fileOverTheSizeLimitSaysItIsTooLarge() {
+        String document = "a: '" + "x".repeat(3 * 1024 * 1024) + "'\n";
+
+        YamlException failure = assertThrows(YamlException.class, () -> Yaml.parse(document));
+
+        assertEquals("too large (more than 3 MB of text)", failure.getMessage());
+    }
+
+    /** It used to say that a value starts with * or &. */
+    @Test
+    void secondDocumentIsReportedAsSuch() {
+        YamlException failure = assertThrows(YamlException.class, () -> Yaml.parse("a: 1\n---\nb: 2\n"));
+
+        assertEquals("made of more than one document (a line --- starts a second one, line 2, column 1)", failure.getMessage());
+    }
+
+    @Test
+    void documentThatStartsWithTheMarkerIsASingleOne() throws Exception {
+        assertEquals(Map.of("a", 1), Yaml.parse("---\na: 1\n"));
+    }
+
     @Test
     void flatteningAMapThatContainsItselfIsRefused() {
         Map<String, Object> content = new LinkedHashMap<>();
