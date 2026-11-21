@@ -271,10 +271,35 @@ runPaper {
     disablePluginJarDetection()
 }
 
+// How many threads tick the Folia test server's regions. Left to itself (threaded-regions.threads: -1
+// in config/paper-global.yml), below ten cores Folia ticks every region on a single thread, which
+// covers CI runners and most laptops: nothing would ever tick in parallel. The test server gets this many
+// whatever the machine, and the server test checks that two regions do tick at the same time.
+val testServerRegionThreads = 2
+
 // Adds the runFolia task, the one to use day to day: Paper cannot detect region violations.
 runPaper.folia.registerTask {
     minecraftVersion(minecraftVersion)
     downloadPlugins(testServerPlugins)
+    val paperGlobal = runDirectory.file("config/paper-global.yml")
+    val threads = "  threads: $testServerRegionThreads"
+    doFirst {
+        // Only that line is set: the server writes the rest of the file on its first start (with a
+        // warning that the file has no _version, which it takes to be the latest) and keeps the
+        // value from then on.
+        val file = paperGlobal.get().asFile
+        val lines = if (file.exists()) file.readLines().toMutableList() else mutableListOf()
+        val section = lines.indexOfFirst { it.trimEnd() == "threaded-regions:" }
+        if (section < 0) {
+            lines += listOf("threaded-regions:", threads)
+        } else {
+            val end = (section + 1..lines.size).first { it == lines.size || !lines[it].startsWith(" ") }
+            val entry = (section + 1 until end).firstOrNull { lines[it].startsWith("  threads:") }
+            if (entry == null) lines.add(section + 1, threads) else lines[entry] = threads
+        }
+        file.parentFile.mkdirs()
+        file.writeText(lines.joinToString("\n", postfix = "\n"))
+    }
 }
 
 tasks.withType<RunServer>().configureEach {
