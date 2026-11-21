@@ -246,7 +246,7 @@ class ConfigServiceTest {
     void anEmptyKnownSectionIsNotReported() throws Exception {
         RecordingLogger logger = new RecordingLogger();
         ConfigService<PluginConfigShape> watched = new ConfigService<>(
-                directory, logger, PluginConfigShape.class, PluginConfigShape::new, NO_MIGRATIONS, HEADER);
+                directory, "config.yml", logger, PluginConfigShape.class, PluginConfigShape::new, NO_MIGRATIONS, HEADER);
         Files.writeString(file, "section: {}\n");
 
         watched.enable();
@@ -283,7 +283,7 @@ class ConfigServiceTest {
         Files.writeString(file, "debug: false\nleftover: {}\n");
         RecordingLogger logger = new RecordingLogger();
         ConfigService<Settings> watched =
-                new ConfigService<>(directory, logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+                new ConfigService<>(directory, "config.yml", logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
 
         watched.enable();
 
@@ -318,7 +318,7 @@ class ConfigServiceTest {
     @Test
     void aWholeNumberReadByASerializerOfItsOwnMayBeWrittenAsADecimal() throws Exception {
         ConfigService<TimedSettings> timed =
-                new ConfigService<>(directory, NOPLogger.NOP_LOGGER, TimedSettings.class, TimedSettings::new, NO_MIGRATIONS, HEADER);
+                new ConfigService<>(directory, "config.yml", NOPLogger.NOP_LOGGER, TimedSettings.class, TimedSettings::new, NO_MIGRATIONS, HEADER);
         timed.enable(); // writes cooldown: 1.5
 
         timed.reload();
@@ -467,6 +467,42 @@ class ConfigServiceTest {
         assertEquals(OWNER_ONLY, Files.getPosixFilePermissions(file));
     }
 
+    /** A plugin may keep some settings in a file of their own, next to config.yml. */
+    @Test
+    void anotherFileIsLoadedUnderItsOwnName() throws Exception {
+        ConfigService<Settings> rewards = new ConfigService<>(
+                directory, "rewards.yml", NOPLogger.NOP_LOGGER, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+        Files.writeString(directory.resolve("rewards.yml"), "debug: true\n");
+
+        rewards.enable();
+        service.enable();
+
+        assertTrue(rewards.get().debug());
+        assertFalse(service.get().debug());
+        assertTrue(Files.readString(directory.resolve("rewards.yml")).contains("config-version: 1"));
+        assertEquals("config:rewards", rewards.name());
+        assertEquals("config", service.name());
+    }
+
+    @Test
+    void messagesNameTheFileTheyAreAbout() throws IOException {
+        ConfigService<Settings> rewards = new ConfigService<>(
+                directory, "rewards.yml", NOPLogger.NOP_LOGGER, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+        Files.writeString(directory.resolve("rewards.yml"), "debug: [unclosed\n");
+
+        ConfigException failure = assertThrows(ConfigException.class, rewards::enable);
+
+        assertTrue(failure.getMessage().startsWith("rewards.yml is not valid YAML"), failure.getMessage());
+    }
+
+    @Test
+    void fileNameMustBeAYamlFileOfTheDataFolder() {
+        for (String name : List.of("../config.yml", "sub/config.yml", "config.txt", ".yml")) {
+            assertThrows(IllegalArgumentException.class, () -> new ConfigService<>(
+                    directory, name, NOPLogger.NOP_LOGGER, Settings.class, Settings::new, NO_MIGRATIONS, HEADER), name);
+        }
+    }
+
     /** A config.yml linked from elsewhere, such as a secrets folder, stays a link. */
     @Test
     void linkedFileIsWrittenThroughToItsTarget() throws Exception {
@@ -495,7 +531,7 @@ class ConfigServiceTest {
         assumeFalse(Files.isWritable(file), "running as a user who may write any file");
         RecordingLogger logger = new RecordingLogger();
         ConfigService<Settings> watched =
-                new ConfigService<>(directory, logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+                new ConfigService<>(directory, "config.yml", logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
 
         watched.enable();
 
@@ -516,7 +552,7 @@ class ConfigServiceTest {
             assumeFalse(Files.isWritable(directory), "running as a user who may write any folder");
             RecordingLogger logger = new RecordingLogger();
             ConfigService<Settings> watched =
-                    new ConfigService<>(directory, logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+                    new ConfigService<>(directory, "config.yml", logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
 
             watched.enable();
 
@@ -549,6 +585,6 @@ class ConfigServiceTest {
 
     private <T extends ConfigRoot> ConfigService<T> serviceOf(
             Class<T> type, Supplier<T> defaults, List<Consumer<Map<String, Object>>> migrations) {
-        return new ConfigService<>(directory, NOPLogger.NOP_LOGGER, type, defaults, migrations, HEADER);
+        return new ConfigService<>(directory, "config.yml", NOPLogger.NOP_LOGGER, type, defaults, migrations, HEADER);
     }
 }

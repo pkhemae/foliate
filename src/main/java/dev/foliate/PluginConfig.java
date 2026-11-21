@@ -66,7 +66,7 @@ public final class PluginConfig implements ConfigRoot {
 
     /** The service that loads {@code config.yml} into this class. */
     public static ConfigService<PluginConfig> service(Path dataDirectory, Logger logger) {
-        return new ConfigService<>(dataDirectory, logger, PluginConfig.class, PluginConfig::new, MIGRATIONS, HEADER);
+        return new ConfigService<>(dataDirectory, "config.yml", logger, PluginConfig.class, PluginConfig::new, MIGRATIONS, HEADER);
     }
 
     @Override

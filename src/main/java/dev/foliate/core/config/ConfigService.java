@@ -49,9 +49,10 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
- * Loads {@code config.yml} into a settings class and hands out the current instance. It knows
- * nothing about what the settings are: the class, its defaults and its migrations are given by the
- * caller.
+ * Loads a YAML file of the data folder, such as {@code config.yml}, into a settings class and hands
+ * out the current instance. It knows nothing about what the settings are: the file, the class, its
+ * defaults and its migrations are given by the caller. A plugin that keeps some settings in a file
+ * of their own, such as {@code rewards.yml}, registers one service per file.
  *
  * <p>Safe to read from any thread. A reload builds and validates a new configuration first and
  * only then publishes it, so readers see either the old one or the new one, never a mix, and an
@@ -64,7 +65,11 @@ import org.slf4j.Logger;
  */
 public final class ConfigService<T extends ConfigRoot> implements Module {
 
-    private static final String FILE_NAME = "config.yml";
+    /** The plugin's main file, whose module keeps the plain name {@code config}. */
+    private static final String MAIN_FILE = "config.yml";
+
+    /** A file directly in the data folder: {@code config.yml}, {@code rewards.yml}. */
+    private static final Pattern FILE_NAME = Pattern.compile("([\\w-]+)\\.yml");
 
     /** How many symbolic links to follow to the file before giving up, as the system does. */
     private static final int MAX_LINKS = 40;
@@ -75,6 +80,8 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     /** How the library names a field in its messages: {@code for field 'private int a.Settings.port'}. */
     private static final Pattern FIELD = Pattern.compile("for field '[^']* ([\\w.$]+)\\.(\\w+)'");
 
+    private final String fileName;
+    private final String name;
     private final Path file;
     private final Logger logger;
     private final Supplier<T> defaults;
@@ -84,6 +91,9 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     private volatile @Nullable T current;
 
     /**
+     * @param fileName the file in the data folder, such as {@code config.yml}; it names the module
+     *     too: {@code config} for {@code config.yml}, {@code config:rewards} for {@code rewards.yml},
+     *     so each file has its own and none takes the name of a feature
      * @param type the settings class, annotated for ConfigLib
      * @param defaults the settings of a fresh install
      * @param migrations the steps that upgrade a file written by an older version, see
@@ -92,12 +102,20 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
      */
     public ConfigService(
             Path dataDirectory,
+            String fileName,
             Logger logger,
             Class<T> type,
             Supplier<T> defaults,
             List<Consumer<Map<String, Object>>> migrations,
             String header) {
-        this.file = dataDirectory.resolve(FILE_NAME);
+        Matcher valid = FILE_NAME.matcher(fileName);
+        if (!valid.matches()) {
+            throw new IllegalArgumentException(
+                    "'" + fileName + "' is not the name of a .yml file directly in the data folder");
+        }
+        this.fileName = fileName;
+        this.name = fileName.equals(MAIN_FILE) ? "config" : "config:" + valid.group(1);
+        this.file = dataDirectory.resolve(fileName);
         this.logger = logger;
         this.defaults = defaults;
         this.migrator = new ConfigMigrator(migrations);
@@ -111,7 +129,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
 
     @Override
     public String name() {
-        return "config";
+        return name;
     }
 
     @Override
@@ -151,7 +169,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             Optional<Map<String, Object>> migrated = migrator.migrate(content);
             Path backup = null;
             if (migrated.isPresent() && onDisk != null) {
-                backup = file.resolveSibling(FILE_NAME + ".v" + content.get(ConfigMigrator.VERSION_KEY) + ".bak");
+                backup = file.resolveSibling(fileName + ".v" + content.get(ConfigMigrator.VERSION_KEY) + ".bak");
                 content = migrated.get();
             }
 
@@ -166,7 +184,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
                 // at the old version and migrated, needlessly, the next time it is loaded.
                 throw new IllegalStateException(config.getClass().getSimpleName() + " starts at config-version "
                         + config.configVersion() + " but the migration steps lead to version "
-                        + migrator.targetVersion() + ": " + FILE_NAME + " would be written at the wrong version");
+                        + migrator.targetVersion() + ": " + fileName + " would be written at the wrong version");
             }
             config.validate();
 
@@ -177,19 +195,19 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             }
             return config;
         } catch (ConfigException e) {
-            throw new ConfigException(FILE_NAME + " is invalid: " + e.getMessage(), e);
+            throw new ConfigException(fileName + " is invalid: " + e.getMessage(), e);
         } catch (YamlException e) {
-            throw new ConfigException(FILE_NAME + " is " + e.getMessage(), e);
+            throw new ConfigException(fileName + " is " + e.getMessage(), e);
         } catch (ConfigurationException e) {
             // Not chained: the library's messages print the values of the whole section, password
             // included, and a stack trace would print every cause.
-            throw new ConfigException(FILE_NAME + " is invalid: " + describe(e));
+            throw new ConfigException(fileName + " is invalid: " + describe(e));
         } catch (CharacterCodingException e) {
-            throw new ConfigException(FILE_NAME + " is not saved as UTF-8: save it again as UTF-8 in a text editor", e);
+            throw new ConfigException(fileName + " is not saved as UTF-8: save it again as UTF-8 in a text editor", e);
         } catch (IOException e) {
-            throw new ConfigException(FILE_NAME + " could not be read or written (" + reason(e) + ")", e);
+            throw new ConfigException(fileName + " could not be read or written (" + reason(e) + ")", e);
         } catch (UncheckedIOException e) {
-            throw new ConfigException(FILE_NAME + " could not be read or written (" + reason(Objects.requireNonNull(e.getCause())) + ")", e);
+            throw new ConfigException(fileName + " could not be read or written (" + reason(Objects.requireNonNull(e.getCause())) + ")", e);
         }
     }
 
@@ -349,7 +367,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         // A whole unknown section shows up as its leaves; a known list shows up as one key.
         for (String setting : unknown) {
             logger.warn("{}: '{}' is not a setting of this plugin{}",
-                    FILE_NAME, setting, written ? " and was removed from the file" : "");
+                    fileName, setting, written ? " and was removed from the file" : "");
         }
     }
 
@@ -390,19 +408,19 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             Path target = target();
             if (Files.exists(target) && !Files.isWritable(target)) {
                 logger.warn("{} is read-only: the settings were loaded, but the file was not brought up to date",
-                        FILE_NAME);
+                        fileName);
                 return false;
             }
             if (backup != null) {
                 writeLike(target, backup.path(), backup.content());
                 logger.info("{} was written by an older version: migrated, previous file kept as {}",
-                        FILE_NAME, backup.path().getFileName());
+                        fileName, backup.path().getFileName());
             }
             write(target, rendered);
             return true;
         } catch (IOException e) {
             logger.warn("{} could not be updated ({}): the settings were loaded, but the file was not brought up to date",
-                    FILE_NAME, reason(e));
+                    fileName, reason(e));
             return false;
         }
     }
@@ -415,7 +433,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         Path target = file;
         for (int links = 0; Files.isSymbolicLink(target); links++) {
             if (links == MAX_LINKS) {
-                throw new FileSystemException(FILE_NAME, null, "too many levels of symbolic links");
+                throw new FileSystemException(fileName, null, "too many levels of symbolic links");
             }
             target = target.resolveSibling(Files.readSymbolicLink(target));
         }
