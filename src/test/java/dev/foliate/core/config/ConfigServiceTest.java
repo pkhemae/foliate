@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import de.exlll.configlib.Comment;
 import de.exlll.configlib.Configuration;
@@ -13,11 +14,15 @@ import de.exlll.configlib.SerializeWith;
 import de.exlll.configlib.Serializer;
 import dev.foliate.testing.RecordingLogger;
 import java.io.IOException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
@@ -101,6 +106,7 @@ class ConfigServiceTest {
 
     private static final String HEADER = "Test configuration.";
     private static final List<Consumer<Map<String, Object>>> NO_MIGRATIONS = List.of();
+    private static final Set<PosixFilePermission> OWNER_ONLY = PosixFilePermissions.fromString("rw-------");
 
     @TempDir
     Path directory;
@@ -429,6 +435,39 @@ class ConfigServiceTest {
                 serviceOf(Settings.class, Settings::new, List.of(yaml -> ConfigMigrator.rename(yaml, "a", "b")));
 
         assertThrows(IllegalStateException.class, forgotten::enable);
+    }
+
+    /** The file holds the database password: rewriting it must not make it readable by all. */
+    @Test
+    void rewrittenFileKeepsItsPermissions() throws Exception {
+        assumePosix();
+        Files.writeString(file, "debug: true\n");
+        Files.setPosixFilePermissions(file, OWNER_ONLY);
+
+        service.enable();
+
+        assertTrue(Files.readString(file).contains("config-version: 1"), "the file was rewritten");
+        assertEquals(OWNER_ONLY, Files.getPosixFilePermissions(file));
+    }
+
+    @Test
+    void backupOfAMigratedFileHasTheFilesPermissions() throws Exception {
+        assumePosix();
+        ConfigService<SettingsV2> migrating = serviceOf(
+                SettingsV2.class,
+                SettingsV2::new,
+                List.of(yaml -> ConfigMigrator.rename(yaml, "verbose", "debug")));
+        Files.writeString(file, "config-version: 1\nverbose: true\n");
+        Files.setPosixFilePermissions(file, OWNER_ONLY);
+
+        migrating.enable();
+
+        assertEquals(OWNER_ONLY, Files.getPosixFilePermissions(directory.resolve("config.yml.v1.bak")));
+        assertEquals(OWNER_ONLY, Files.getPosixFilePermissions(file));
+    }
+
+    private static void assumePosix() {
+        assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"), "POSIX permissions only");
     }
 
     private <T extends ConfigRoot> ConfigService<T> serviceOf(

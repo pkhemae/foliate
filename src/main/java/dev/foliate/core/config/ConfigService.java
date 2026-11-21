@@ -20,6 +20,8 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributes;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
@@ -161,7 +163,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             config.validate();
 
             if (backup != null) {
-                Files.writeString(backup, onDisk);
+                writeLike(file, backup, Objects.requireNonNull(onDisk, "a backup is only made of a file"));
                 logger.info("{} was written by an older version: migrated, previous file kept as {}", FILE_NAME, backup.getFileName());
             }
             String rendered = render(config);
@@ -353,11 +355,37 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     /** Writes through a temporary file, so a crash mid-write cannot leave a truncated config. */
     private void write(String rendered) throws IOException {
         Path temporary = file.resolveSibling(FILE_NAME + ".tmp");
-        Files.writeString(temporary, rendered);
+        writeLike(file, temporary, rendered);
         try {
             Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (AtomicMoveNotSupportedException e) {
             Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
         }
+    }
+
+    /**
+     * Writes a file that stands for {@code model}, such as its replacement or its backup, with the
+     * permissions of {@code model} when it exists: the file holds the database password, and one
+     * that only its owner may read must not come back readable by all. The permissions are set
+     * before the text is written, so the text is never readable by more people than the model's.
+     * The owner and the group are copied when the server is allowed to, which it usually is not.
+     * Nothing is copied where the file system has no POSIX permissions.
+     */
+    private static void writeLike(Path model, Path destination, String content) throws IOException {
+        Files.deleteIfExists(destination);
+        Files.createFile(destination);
+        PosixFileAttributeView from = Files.getFileAttributeView(model, PosixFileAttributeView.class);
+        PosixFileAttributeView to = Files.getFileAttributeView(destination, PosixFileAttributeView.class);
+        if (from != null && to != null && Files.exists(model)) {
+            PosixFileAttributes attributes = from.readAttributes();
+            to.setPermissions(attributes.permissions());
+            try {
+                to.setOwner(attributes.owner());
+                to.setGroup(attributes.group());
+            } catch (IOException | SecurityException e) {
+                // Only a privileged user may give a file away: it stays the server's.
+            }
+        }
+        Files.writeString(destination, content);
     }
 }
