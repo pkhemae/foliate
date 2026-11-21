@@ -9,6 +9,7 @@ import net.kyori.adventure.text.Component;
  */
 interface ScoreboardDisplay {
 
+    /** Redraws the board. Does nothing once it is deleted, even when that happens on another thread. */
     void update(Component title, List<Component> lines);
 
     /** Removes the scoreboard from the player's screen. */

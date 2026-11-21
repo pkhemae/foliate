@@ -146,9 +146,12 @@ public final class ZMenuHook implements Module, SubcommandProvider {
     public void disable() {
         InventoryManager manager = this.manager;
         if (manager != null) {
-            manager.deleteInventories(plugin);
-            menus = Map.of();
+            // Forgotten before they are deleted: when the plugin is disabled while the server
+            // runs, a player may be opening a menu on their own thread right now, and from here on
+            // is told menus are unavailable instead. Deleting only touches zMenu's registry.
             this.manager = null;
+            menus = Map.of();
+            manager.deleteInventories(plugin);
         }
     }
 

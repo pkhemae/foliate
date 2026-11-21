@@ -31,7 +31,11 @@ import org.slf4j.Logger;
  *
  * <p>Threading: a player's board is created, refreshed and removed only from that player's own
  * scheduler. Join and quit events already run there; reloads and enabling hop to it. The map of
- * boards is the only state shared between threads.
+ * boards is the only state shared between threads, with {@link #disable()}: when the plugin is
+ * disabled while the server runs, a refresh or a join already under way on a player's thread may
+ * still be running as the boards are removed. FastBoard locks each board, which keeps a draw from
+ * interleaving with its removal and lets a late draw do nothing (see {@link FastBoardScoreboard}),
+ * and a board created during {@code disable} is removed by whichever of the two comes last.
  *
  * <p>A board that cannot be drawn is left as it was: for instance a placeholder expansion built
  * against another version of its plugin, which fails with an error that MiniMessage lets through
@@ -51,6 +55,8 @@ public final class ScoreboardModule implements Module, Listener {
     private final Map<UUID, Entry> entries = new ConcurrentHashMap<>();
     /** Whether a drawing failure has been logged and not followed by a successful draw or a reload. */
     private final AtomicBoolean failureLogged = new AtomicBoolean();
+    /** Between enable and disable: no board may be created outside. */
+    private volatile boolean running;
 
     public ScoreboardModule(Plugin plugin, Schedulers schedulers, Supplier<ScoreboardSettings> settings, MessageService messages) {
         this(
@@ -88,6 +94,7 @@ public final class ScoreboardModule implements Module, Listener {
     @Override
     public void enable() throws ScoreboardUnavailableException {
         supportCheck.run();
+        running = true;
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
         applyToAll();
     }
@@ -100,11 +107,17 @@ public final class ScoreboardModule implements Module, Listener {
 
     @Override
     public void disable() {
+        running = false;
         HandlerList.unregisterAll(this);
-        // No region work is possible during shutdown. Removing a board only sends packets, which
-        // is safe from here.
-        entries.values().forEach(Entry::remove);
-        entries.clear();
+        // Nothing can be scheduled on the players' threads any more. Removing a board only sends
+        // packets, which is safe from here. One at a time: a show still under way on a player's
+        // thread may add a board meanwhile, and removes it itself once it sees running is false.
+        for (UUID id : List.copyOf(entries.keySet())) {
+            Entry entry = entries.remove(id);
+            if (entry != null) {
+                entry.remove();
+            }
+        }
     }
 
     /** Whether the configuration asks for boards at all. For the server test, which lives in this package. */
@@ -161,21 +174,40 @@ public final class ScoreboardModule implements Module, Listener {
 
     private void show(Player player) {
         ScoreboardSettings settings = this.settings.get();
-        if (!settings.enabled() || !player.isOnline()) {
+        if (!running || !settings.enabled() || !player.isOnline()) {
             return;
         }
         Board board = new Board(boardFactory.apply(player));
         Duration period = Ticks.duration(settings.refreshTicks());
-        TaskHandle refresh = schedulers.entity(player).runTimer(period, period, () -> draw(player, board));
+        TaskHandle refresh;
+        try {
+            refresh = schedulers.entity(player).runTimer(period, period, () -> draw(player, board));
+        } catch (RuntimeException e) {
+            board.display().delete();
+            if (!plugin.isEnabled()) {
+                // Disabled since the check above: the server refuses timers from now on.
+                return;
+            }
+            throw e;
+        }
         if (refresh.isCancelled()) {
             // The player is being removed: no refresh will ever run, and no quit will remove it.
             board.display().delete();
             hide(player);
             return;
         }
-        Entry previous = entries.put(player.getUniqueId(), new Entry(board, refresh, settings.refreshTicks()));
+        UUID id = player.getUniqueId();
+        Entry entry = new Entry(board, refresh, settings.refreshTicks());
+        Entry previous = entries.put(id, entry);
         if (previous != null) {
             previous.remove();
+        }
+        if (!running) {
+            // disable() ran meanwhile and may have missed this board: whoever takes it out removes it.
+            if (entries.remove(id, entry)) {
+                entry.remove();
+            }
+            return;
         }
         // Already on the player's thread: drawn now, the board does not show up empty until the
         // first refresh.

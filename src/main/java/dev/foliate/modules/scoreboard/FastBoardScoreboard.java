@@ -27,10 +27,21 @@ final class FastBoardScoreboard implements ScoreboardDisplay {
         }
     }
 
+    /**
+     * Does nothing once the board is deleted, which the module may do from another thread while
+     * the plugin is disabled. FastBoard's methods are synchronized on the board: holding the same
+     * lock keeps the deletion from coming between the check and the update, where FastBoard would
+     * throw.
+     */
     @Override
     public void update(Component title, List<Component> lines) {
-        board.updateTitle(title);
-        board.updateLines(lines);
+        synchronized (board) {
+            if (board.isDeleted()) {
+                return;
+            }
+            board.updateTitle(title);
+            board.updateLines(lines);
+        }
     }
 
     @Override

@@ -342,6 +342,25 @@ class ScoreboardModuleTest {
         assertEquals(0, schedulers.pendingTasks());
     }
 
+    /**
+     * When the plugin is disabled while the server runs, work already under way on a player's
+     * thread can outlive the module: here, the redraw a reload queued just before.
+     */
+    @Test
+    void workStillUnderWayWhenTheModuleIsDisabledLeavesNoBoard() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        configure("scoreboard:\n  refresh-ticks: 5\n");
+        scoreboard.reload();
+
+        scoreboard.disable();
+        schedulers.tick(1);
+        scoreboard.onJoin(new PlayerJoinEvent(player, Component.empty()));
+
+        assertFalse(scoreboard.hasBoard(player.getUniqueId()));
+        assertTrue(boards.stream().allMatch(board -> board.deleted), boards.toString());
+        assertEquals(0, schedulers.pendingTasks());
+    }
+
     private void configure(String yaml) throws ConfigException {
         try {
             Files.writeString(directory.resolve("config.yml"), yaml);
@@ -372,6 +391,9 @@ class ScoreboardModuleTest {
 
         @Override
         public void update(Component title, List<Component> lines) {
+            if (deleted) {
+                return;
+            }
             draws++;
             this.title = PlainTextComponentSerializer.plainText().serialize(title);
             this.lines = lines.stream().map(PlainTextComponentSerializer.plainText()::serialize).toList();
