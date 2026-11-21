@@ -9,9 +9,12 @@ import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Properties;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.helpers.NOPLogger;
@@ -59,13 +62,80 @@ class MigrationsTest {
                 Migrations.statements(script));
     }
 
+    /** Block comments are skipped like line comments, quotes in them included. */
+    @Test
+    void blockCommentsAreNotStatements() {
+        assertEquals(
+                List.of("CREATE TABLE homes (id INT)", "CREATE TABLE warps (id INT)"),
+                Migrations.statements("/* Players' homes */\nCREATE TABLE homes (id INT);\nCREATE TABLE warps /* and; */ (id INT);\n")
+                        .stream().map(statement -> statement.replaceAll("\\s+", " ")).toList());
+    }
+
+    /**
+     * Rebuilding a table is how SQLite changes a column: with foreign keys on, dropping the old
+     * table would delete the rows that refer to it.
+     */
+    @Test
+    void rebuildingATableKeepsTheRowsThatReferToIt() throws Exception {
+        try (Connection connection = sqlite()) {
+            new Migrations(NOPLogger.NOP_LOGGER, List.of("003_parents.sql"), StorageSettings.Type.SQLITE).apply(connection);
+            execute(connection, "INSERT INTO parents (id, name) VALUES (1, 'a')");
+            execute(connection, "INSERT INTO children (id, parent) VALUES (10, 1)");
+
+            new Migrations(NOPLogger.NOP_LOGGER, List.of("003_parents.sql", "004_rebuild_parents.sql"), StorageSettings.Type.SQLITE)
+                    .apply(connection);
+
+            assertEquals(1, count(connection, "children"));
+            assertEquals(1, count(connection, "parents"));
+            assertEquals(1, count(connection, "pragma_foreign_keys WHERE foreign_keys = 1"), "foreign keys were not turned back on");
+        }
+    }
+
+    /** With foreign keys off during a migration, what it breaks is checked before it is committed. */
+    @Test
+    void aMigrationThatBreaksAForeignKeyIsRefused() throws Exception {
+        try (Connection connection = sqlite()) {
+            new Migrations(NOPLogger.NOP_LOGGER, List.of("003_parents.sql"), StorageSettings.Type.SQLITE).apply(connection);
+            execute(connection, "INSERT INTO parents (id, name) VALUES (1, 'a')");
+            execute(connection, "INSERT INTO children (id, parent) VALUES (10, 1)");
+
+            SQLException failure = assertThrows(SQLException.class, () -> new Migrations(
+                            NOPLogger.NOP_LOGGER, List.of("003_parents.sql", "005_orphan_children.sql"), StorageSettings.Type.SQLITE)
+                    .apply(connection));
+
+            assertTrue(failure.getMessage().contains("005_orphan_children.sql"), failure.getMessage());
+            assertEquals(1, count(connection, "parents"), "the migration was not rolled back");
+        }
+    }
+
+    /** A connection as the database gives them: with foreign keys on. */
+    private Connection sqlite() throws SQLException {
+        Properties properties = new Properties();
+        properties.setProperty("foreign_keys", "true");
+        return DriverManager.getConnection("jdbc:sqlite:" + directory.resolve("test.db"), properties);
+    }
+
+    private static void execute(Connection connection, String sql) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(sql);
+        }
+    }
+
+    private static int count(Connection connection, String table) throws SQLException {
+        try (Statement statement = connection.createStatement();
+                ResultSet result = statement.executeQuery("SELECT COUNT(*) FROM " + table)) {
+            result.next();
+            return result.getInt(1);
+        }
+    }
+
     /** The migration's own error is the one to report, even when the rollback fails too. */
     @Test
     void aFailedRollbackDoesNotHideTheMigrationsError() throws Exception {
-        try (Connection real = DriverManager.getConnection("jdbc:sqlite:" + directory.resolve("test.db"))) {
+        try (Connection real = sqlite()) {
             Connection broken = lost(real);
             Migrations migrations = new Migrations(
-                    NOPLogger.NOP_LOGGER, List.of("001_create_notes.sql", "002_broken.sql"), false);
+                    NOPLogger.NOP_LOGGER, List.of("001_create_notes.sql", "002_broken.sql"), StorageSettings.Type.SQLITE);
 
             SQLException failure = assertThrows(SQLException.class, () -> migrations.apply(broken));
 
@@ -79,11 +149,11 @@ class MigrationsTest {
     /** Running the rest on a schema they do not expect could damage it. */
     @Test
     void aRenamedOrReorderedMigrationStopsTheStart() throws Exception {
-        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + directory.resolve("test.db"))) {
-            new Migrations(NOPLogger.NOP_LOGGER, List.of("001_create_notes.sql"), false).apply(connection);
+        try (Connection connection = sqlite()) {
+            new Migrations(NOPLogger.NOP_LOGGER, List.of("001_create_notes.sql"), StorageSettings.Type.SQLITE).apply(connection);
 
             SQLException failure = assertThrows(SQLException.class, () ->
-                    new Migrations(NOPLogger.NOP_LOGGER, List.of("001_create_visits.sql"), false).apply(connection));
+                    new Migrations(NOPLogger.NOP_LOGGER, List.of("001_create_visits.sql"), StorageSettings.Type.SQLITE).apply(connection));
 
             assertTrue(failure.getMessage().contains("renamed or reordered"), failure.getMessage());
         }

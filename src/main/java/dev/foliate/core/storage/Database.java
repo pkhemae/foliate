@@ -101,7 +101,7 @@ public final class Database implements Module {
         HikariDataSource source = new HikariDataSource(pool);
         dataSource = source;
         try (Connection connection = source.getConnection()) {
-            new Migrations(logger, migrations, settings.type() == StorageSettings.Type.MYSQL).apply(connection);
+            new Migrations(logger, migrations, settings.type()).apply(connection);
         }
 
         AtomicInteger counter = new AtomicInteger();
@@ -125,12 +125,11 @@ public final class Database implements Module {
             threads.shutdown();
             try {
                 if (!threads.awaitTermination(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    // Left to run: against the closed pool they fail, and their callers log which
+                    // writes were lost. Dropped from the queue, they would never report anything.
                     logger.warn("Some database writes did not finish within {} seconds", SHUTDOWN_TIMEOUT_SECONDS);
-                    // Interrupted rather than left running against a closed pool.
-                    threads.shutdownNow();
                 }
             } catch (InterruptedException e) {
-                threads.shutdownNow();
                 Thread.currentThread().interrupt();
             }
         }

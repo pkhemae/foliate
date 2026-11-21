@@ -29,6 +29,11 @@ import org.slf4j.Logger;
  * <p>On MySQL and MariaDB, several servers of a network may share the database and start at the
  * same time: the migrations run under a named lock of the database server, so that one server
  * applies them while the others wait, then find them applied. SQLite is a file of one server.
+ *
+ * <p>On SQLite, foreign keys are off while the migrations run and checked before each one is
+ * committed, as SQLite asks for schema changes: rebuilding a table (create, copy, drop, rename)
+ * would otherwise delete the rows that refer to it, and the pragma that prevents it has no effect
+ * inside the transaction each script runs in.
  */
 final class Migrations {
 
@@ -44,18 +49,17 @@ final class Migrations {
 
     private final Logger logger;
     private final List<String> scripts;
-    private final boolean sharedServer;
+    private final StorageSettings.Type type;
 
-    /** @param sharedServer true on MySQL and MariaDB, whose database other servers may share */
-    Migrations(Logger logger, List<String> scripts, boolean sharedServer) {
+    Migrations(Logger logger, List<String> scripts, StorageSettings.Type type) {
         this.logger = logger;
         this.scripts = scripts;
-        this.sharedServer = sharedServer;
+        this.type = type;
     }
 
     void apply(Connection connection) throws SQLException, IOException {
-        if (!sharedServer) {
-            applyAll(connection);
+        if (type == StorageSettings.Type.SQLITE) {
+            applyOnSqlite(connection);
             return;
         }
         // The lock belongs to the connection's session: taken and released on this connection.
@@ -87,6 +91,46 @@ final class Migrations {
             throw e;
         }
         release(connection);
+    }
+
+    private void applyOnSqlite(Connection connection) throws SQLException, IOException {
+        boolean foreignKeys = foreignKeys(connection);
+        setForeignKeys(connection, false);
+        try {
+            applyAll(connection);
+        } catch (SQLException | IOException | RuntimeException e) {
+            try {
+                setForeignKeys(connection, foreignKeys);
+            } catch (SQLException restoreFailure) {
+                e.addSuppressed(restoreFailure);
+            }
+            throw e;
+        }
+        setForeignKeys(connection, foreignKeys);
+    }
+
+    private static boolean foreignKeys(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement();
+                ResultSet result = statement.executeQuery("PRAGMA foreign_keys")) {
+            return result.next() && result.getInt(1) == 1;
+        }
+    }
+
+    private static void setForeignKeys(Connection connection, boolean on) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA foreign_keys = " + (on ? "ON" : "OFF"));
+        }
+    }
+
+    /** With foreign keys off, a script could leave rows that refer to nothing: refused here. */
+    private static void checkForeignKeys(Connection connection, String script) throws SQLException {
+        try (Statement statement = connection.createStatement();
+                ResultSet broken = statement.executeQuery("PRAGMA foreign_key_check")) {
+            if (broken.next()) {
+                throw new SQLException("Database migration " + script + " leaves rows of " + broken.getString(1)
+                        + " that refer to missing rows of " + broken.getString(3));
+            }
+        }
     }
 
     /**
@@ -122,6 +166,9 @@ final class Migrations {
                 String script = scripts.get(version - 1);
                 try {
                     run(connection, script);
+                    if (type == StorageSettings.Type.SQLITE) {
+                        checkForeignKeys(connection, script);
+                    }
                     record(connection, version, script);
                     connection.commit();
                     logger.info("Applied database migration {}", script);
@@ -196,9 +243,11 @@ final class Migrations {
     }
 
     /**
-     * Splits a script into statements, on the semicolons that are not quoted. Comments start with
-     * {@code --} outside quotes and run to the end of the line. Stored procedures, whose bodies hold
-     * semicolons of their own, are not supported.
+     * Splits a script into statements, on the semicolons that are not quoted. Outside quotes,
+     * {@code --} starts a comment that runs to the end of the line, and <code>/* ... *&#47;</code> is a
+     * comment too. A quote inside a value is escaped by doubling it, the one way both SQLite and
+     * MySQL understand. Stored procedures and triggers, whose bodies hold semicolons of their own,
+     * are not supported.
      */
     static List<String> statements(String script) {
         List<String> statements = new ArrayList<>();
@@ -223,6 +272,11 @@ final class Migrations {
                 while (i + 1 < script.length() && script.charAt(i + 1) != '\n') {
                     i++;
                 }
+            } else if (c == '/' && i + 1 < script.length() && script.charAt(i + 1) == '*') {
+                int end = script.indexOf("*/", i + 2);
+                i = end < 0 ? script.length() : end + 1;
+                // Kept apart from what surrounds it, as the comment did.
+                current.append(' ');
             } else if (c == ';') {
                 add(statements, current);
             } else {
