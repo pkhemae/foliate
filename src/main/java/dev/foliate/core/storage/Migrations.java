@@ -49,6 +49,9 @@ final class Migrations {
     private static final int MAX_NAME_LENGTH = 191;
     /** How long a server waits for another one to finish migrating the shared database. */
     private static final int LOCK_TIMEOUT_SECONDS = 60;
+
+    /** How long the connection waits for the server while it waits for the lock. */
+    private static final int LOCK_NETWORK_TIMEOUT_MILLIS = (LOCK_TIMEOUT_SECONDS + 30) * 1000;
     /**
      * Evaluated by the server: the history table and a hash of the current database's name, cut to
      * MySQL's limit of 64 characters. The hash keeps two long names with a common start apart,
@@ -96,7 +99,10 @@ final class Migrations {
         }
         // The lock belongs to the connection's session: taken and released on this connection.
         // It is named after the database, on the server, so that plugins on other databases of
-        // the same MySQL server do not wait for each other.
+        // the same MySQL server do not wait for each other. The pool's socket timeout is shorter
+        // than the wait for the lock: this connection waits longer. The pool resets it when the
+        // connection goes back.
+        connection.setNetworkTimeout(Runnable::run, LOCK_NETWORK_TIMEOUT_MILLIS);
         try (PreparedStatement take = connection.prepareStatement("SELECT GET_LOCK(" + LOCK_NAME + ", ?)")) {
             take.setInt(1, LOCK_TIMEOUT_SECONDS);
             try (ResultSet result = take.executeQuery()) {
@@ -111,6 +117,9 @@ final class Migrations {
             }
         }
         try {
+            // No limit for the scripts themselves: a long ALTER TABLE cut off by the client would
+            // still finish on the server, without being recorded, and fail at the next start.
+            connection.setNetworkTimeout(Runnable::run, 0);
             applyAll(connection);
         } catch (SQLException | IOException | RuntimeException e) {
             // The migration's failure is the one to report, even when the connection is gone and
@@ -284,8 +293,14 @@ final class Migrations {
             }
             sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
+        List<String> statements;
+        try {
+            statements = statements(sql);
+        } catch (IllegalArgumentException e) {
+            throw new IOException("Migration " + script + " cannot be read: " + e.getMessage(), e);
+        }
         try (Statement statement = connection.createStatement()) {
-            for (String single : statements(sql)) {
+            for (String single : statements) {
                 statement.execute(single);
             }
         }
@@ -297,6 +312,9 @@ final class Migrations {
      * comment too. A quote inside a value is escaped by doubling it, the one way both SQLite and
      * MySQL understand. Stored procedures and triggers, whose bodies hold semicolons of their own,
      * are not supported.
+     *
+     * @throws IllegalArgumentException when a comment is not closed: everything after it would be
+     *     skipped, and the script still recorded as applied
      */
     static List<String> statements(String script) {
         List<String> statements = new ArrayList<>();
@@ -323,7 +341,10 @@ final class Migrations {
                 }
             } else if (c == '/' && i + 1 < script.length() && script.charAt(i + 1) == '*') {
                 int end = script.indexOf("*/", i + 2);
-                i = end < 0 ? script.length() : end + 1;
+                if (end < 0) {
+                    throw new IllegalArgumentException("a /* comment is never closed");
+                }
+                i = end + 1;
                 // Kept apart from what surrounds it, as the comment did.
                 current.append(' ');
             } else if (c == ';') {

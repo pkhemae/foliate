@@ -29,6 +29,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import net.kyori.adventure.text.Component;
+import dev.foliate.testing.RecordingLogger;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,6 +61,10 @@ class PlayerStoreTest {
     private final TestClock clock = new TestClock(1_000);
     private final VisitRepository repository = new VisitRepository();
     private final VisitLifecycle lifecycle = new VisitLifecycle();
+    private final RecordingLogger logger = new RecordingLogger();
+
+    /** Retries waiting to run, when a test runs them by hand. */
+    private final List<Runnable> pendingRetries = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -75,8 +80,10 @@ class PlayerStoreTest {
                 repository,
                 lifecycle,
                 () -> Component.text("could not load"),
-                NOPLogger.NOP_LOGGER,
+                logger,
                 clock);
+        // Retries at once: the tests do not wait for real delays.
+        store.retryDelays(millis -> Runnable::run);
         store.enable();
     }
 
@@ -434,9 +441,8 @@ class PlayerStoreTest {
         release.countDown();
         flush();
 
-        // The first save left the player's queue at once, to wait for the storage thread: every
-        // change after it joined the second one.
-        assertEquals(2, repository.saves.get() - before, "the changes were not written together");
+        // The save waited for the storage thread: every change made meanwhile joined it.
+        assertEquals(1, repository.saves.get() - before, "the changes were not written together");
         Visit stored = stored(id).orElseThrow();
         assertEquals(10_001, stored.visits());
         assertEquals(5_000, stored.lastSeen(), "the quit was not part of the write");
@@ -472,12 +478,12 @@ class PlayerStoreTest {
     }
 
     /**
-     * A save that left the player's queue and waits for the database (a free thread, a connection
-     * that may never come) is closed: a change made meanwhile is a save of its own, which a
-     * failure of the first one cannot take down with it.
+     * A save waiting for a storage thread has not started: a change made meanwhile joins it. At a
+     * shutdown with a slow database, the quit's save would otherwise queue behind it, one write
+     * more per player.
      */
     @Test
-    void aSaveWaitingForTheDatabaseTakesNoMoreChanges() throws Exception {
+    void aSaveWaitingForTheDatabaseTakesTheChangesMadeMeanwhile() throws Exception {
         PlayerMock player = server.addPlayer("Alex");
         UUID id = player.getUniqueId();
         flush();
@@ -489,8 +495,277 @@ class PlayerStoreTest {
         release.countDown();
         flush();
 
-        assertEquals(2, repository.saves.get() - before, "the second change joined a save that had left the queue");
+        assertEquals(1, repository.saves.get() - before, "the second change did not join the waiting save");
         assertEquals(60, stored(id).orElseThrow().visits());
+    }
+
+    /** A save that fails for a reason that may pass is tried again, with the latest value. */
+    @Test
+    void aFailedSaveIsRetriedWithTheLatestValue() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        CountDownLatch failed = new CountDownLatch(1);
+        repository.failSaves(2, failed, null, true);
+
+        store.update(id, visit -> withVisits(visit, 50));
+        assertTrue(failed.await(10, TimeUnit.SECONDS));
+        store.update(id, visit -> withVisits(visit, 60)); // made while the save waits for its retry
+        flush();
+
+        assertEquals(60, stored(id).orElseThrow().visits());
+        assertEquals(0, store.lostCount());
+    }
+
+    /** The quit's save during an outage is kept until the database answers again. */
+    @Test
+    void aQuitSavedDuringAnOutageReachesTheDatabaseOnceItIsBack() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        repository.failSaves(3, new CountDownLatch(3), null, true);
+
+        clock.set(7_000);
+        store.quit(id);
+        flush();
+
+        assertEquals(7_000, stored(id).orElseThrow().lastSeen());
+    }
+
+    /**
+     * A save that failed after it started, while a newer change queued a save of its own behind
+     * it, is not retried: the newer save holds the whole newer value.
+     */
+    @Test
+    void aFailedSaveOvertakenByANewerOneIsNotWrittenAgain() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        CountDownLatch inSave = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        repository.duringSave = () -> {
+            inSave.countDown();
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        };
+        repository.failSaves(1, new CountDownLatch(1), null, true);
+        int before = repository.saves.get();
+
+        store.update(id, visit -> withVisits(visit, 50)); // starts, then fails
+        assertTrue(inSave.await(10, TimeUnit.SECONDS));
+        store.update(id, visit -> withVisits(visit, 60)); // a save of its own, behind it
+        repository.duringSave = () -> {};
+        release.countDown();
+        flush();
+
+        assertEquals(1, repository.saves.get() - before, "the failed save was written again");
+        assertEquals(60, stored(id).orElseThrow().visits());
+    }
+
+    /** A login read goes ahead of the saves of other players: someone waits for it. */
+    @Test
+    void aLoginReadGoesAheadOfTheOtherPlayersSaves() throws Exception {
+        List<UUID> players = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            players.add(server.addPlayer("Player" + i).getUniqueId());
+        }
+        flush();
+        CountDownLatch release = holdStorageThread();
+        for (UUID player : players) {
+            store.update(player, visit -> withVisits(visit, 99));
+        }
+        int before = repository.saves.get();
+
+        CompletableFuture<Void> login = CompletableFuture.runAsync(() -> {
+            try {
+                store.beginLogin(UUID.randomUUID(), "Newcomer");
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        // The read is queued once beginLogin waits on it: give it the time to get there.
+        Thread.sleep(200);
+        release.countDown();
+        login.get(10, TimeUnit.SECONDS);
+        flush();
+
+        assertEquals(before, repository.savesAtLastFind, "the login read waited behind other players' saves");
+    }
+
+    /**
+     * Two logins of one player that overlap: the first session joins, plays and quits while the
+     * second login's read waits. That read was queued before the quit's save, so it sees the value
+     * from before the first session: the second session must start from what the quit saved.
+     */
+    @Test
+    void aSessionThatQuitDuringASecondLoginsReadIsNotLost() throws Exception {
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        store.beginLogin(id, "Alex"); // the first login
+        CountDownLatch release = holdStorageThread();
+        CompletableFuture<Void> secondLogin = CompletableFuture.runAsync(() -> {
+            try {
+                store.beginLogin(id, "Alex"); // not online yet: reads, behind the hold
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        Thread.sleep(200);
+
+        store.join(id, "Alex"); // 5, from the first login
+        store.update(id, visit -> withVisits(visit, visit.visits() + 100)); // 105
+        store.quit(id); // saves 105, queued behind the second login's read
+        release.countDown();
+        secondLogin.get(10, TimeUnit.SECONDS);
+        store.join(id, "Alex");
+        flush();
+
+        assertEquals(106, store.find(id).orElseThrow().visits());
+        assertEquals(106, stored(id).orElseThrow().visits());
+    }
+
+    /** A load after a join without pre-login that fails is tried again while the player is online. */
+    @Test
+    void aFailedLateLoadIsRetried() throws Exception {
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        repository.failFinds.set(2);
+
+        store.join(id, "Alex");
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (store.find(id).isEmpty() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+
+        assertEquals(5, store.find(id).orElseThrow().visits());
+    }
+
+    /**
+     * A save that can never succeed (here a broken constraint, which SQLite reports like any other
+     * error) is tried a few times, then given up and logged: the player's queue moves on, and
+     * their next login is not refused.
+     */
+    @Test
+    void aSaveThatCanNeverSucceedIsGivenUpAndThePlayerCanStillLogIn() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        repository.failSaves(Integer.MAX_VALUE, new CountDownLatch(0), null, false);
+        int before = repository.attempts.get();
+
+        store.update(id, visit -> withVisits(visit, 50));
+        flush();
+        repository.failSaves(0, new CountDownLatch(0), null, true);
+        CompletableFuture<Void> relogin = CompletableFuture.runAsync(() -> {
+            try {
+                store.quit(id);
+                store.beginLogin(id, "Alex");
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        relogin.get(5, TimeUnit.SECONDS);
+
+        assertEquals(1 + PlayerStore.UNCERTAIN_RETRIES, repository.attempts.get() - before - 1, "not given up after a few tries");
+        assertEquals(1, logger.lines().stream().filter(line -> line.startsWith("ERROR Could not save")).count(), logger.lines().toString());
+        assertEquals(0, store.lostCount(), "a save given up for its own error is not a shutdown loss");
+    }
+
+    /**
+     * A late load that failed and is retried after the player quit and came back must not save a
+     * value read then over what the new session saved.
+     */
+    @Test
+    void aLateLoadRetriedAfterTheQuitDoesNotOverwriteTheNextSession() throws Exception {
+        store.retryDelays(millis -> pendingRetries::add);
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        repository.failFinds.set(1);
+
+        store.join(id, "Alex"); // no pre-login: the load fails, its retry waits
+        flush();
+        assertEquals(1, pendingRetries.size());
+        store.quit(id);
+        store.beginLogin(id, "Alex");
+        store.join(id, "Alex"); // 5
+        store.update(id, visit -> withVisits(visit, 50));
+        flush();
+        pendingRetries.forEach(Runnable::run);
+        flush();
+
+        assertEquals(50, store.find(id).orElseThrow().visits());
+        assertEquals(50, stored(id).orElseThrow().visits());
+    }
+
+    /** A player counted as lost while the database was stopped is not reported once saved again. */
+    @Test
+    void aPlayerSavedAfterALostSaveIsNotReportedAtShutdown() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        database.disable();
+        store.update(id, visit -> withVisits(visit, 50));
+        database.enable();
+        assertEquals(1, store.lostCount());
+
+        store.update(id, visit -> withVisits(visit, 60));
+        flush();
+
+        assertEquals(0, store.lostCount());
+    }
+
+    /**
+     * An outage is logged when the first player's saves fail and when the last one's land: one
+     * player stuck while the others save is one warning, not one per save of someone else.
+     */
+    @Test
+    void anOutageIsLoggedOnceWhileOtherPlayersStillSave() throws Exception {
+        store.retryDelays(millis -> pendingRetries::add);
+        UUID stuck = server.addPlayer("Stuck").getUniqueId();
+        UUID other = server.addPlayer("Other").getUniqueId();
+        flush();
+        repository.failSaves(1, new CountDownLatch(1), stuck, true);
+
+        store.update(stuck, visit -> withVisits(visit, 50)); // fails, its retry waits
+        // Not flush(): the stuck player's queue waits for its retry, which the test runs below.
+        waitUntil(() -> pendingRetries.size() == 1);
+        for (int i = 1; i <= 5; i++) {
+            int visits = 100 + i;
+            store.update(other, visit -> withVisits(visit, visits));
+            waitUntil(() -> stored(other).orElseThrow().visits() == visits);
+        }
+        List<Runnable> retries = List.copyOf(pendingRetries);
+        pendingRetries.clear();
+        retries.forEach(Runnable::run);
+        flush();
+
+        List<String> outage = logger.lines().stream()
+                .filter(line -> line.contains("retrying") || line.contains("saved again"))
+                .toList();
+        assertEquals(2, outage.size(), outage.toString());
+        assertTrue(outage.get(0).startsWith("WARN"), outage.toString());
+        assertTrue(outage.get(1).startsWith("INFO"), outage.toString());
+        assertEquals(50, stored(stuck).orElseThrow().visits());
+    }
+
+    /** What could not be saved is reported in one line when the store stops, not one per player. */
+    @Test
+    void savesGivenUpAreReportedOnceAtShutdown() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            UUID id = UUID.randomUUID();
+            store.beginLogin(id, "Player" + i);
+            store.join(id, "Player" + i);
+        }
+        flush();
+        database.disable(); // the saves at shutdown cannot run
+
+        store.disable();
+        database.enable();
+
+        List<String> warnings = logger.lines().stream().filter(line -> line.startsWith("WARN")).toList();
+        assertEquals(1, warnings.size(), warnings.toString());
+        assertTrue(warnings.getFirst().contains("of 3 players"), warnings.getFirst());
+        assertTrue(logger.lines().stream().noneMatch(line -> line.startsWith("ERROR")), logger.lines().toString());
     }
 
     /** A save that could not run must not keep the changes made after it from being saved. */
@@ -779,6 +1054,15 @@ class PlayerStoreTest {
         return database.call(connection -> repository.find(connection, id));
     }
 
+    /** Polls a condition for up to ten seconds. */
+    private static void waitUntil(java.util.concurrent.Callable<Boolean> condition) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!condition.call()) {
+            assertTrue(System.nanoTime() < deadline, "the condition never held");
+            Thread.sleep(5);
+        }
+    }
+
     /** Waits for everything queued so far to reach the database. */
     private void flush() {
         assertTrue(store.awaitWrites(10));
@@ -833,8 +1117,39 @@ class PlayerStoreTest {
         /** How many rows were written, to tell a coalesced save from one per change. */
         final java.util.concurrent.atomic.AtomicInteger saves = new java.util.concurrent.atomic.AtomicInteger();
 
+        /** How many rows were written when the last read began. */
+        volatile int savesAtLastFind;
+
+        /** How many saves were tried, failed ones included. */
+        final java.util.concurrent.atomic.AtomicInteger attempts = new java.util.concurrent.atomic.AtomicInteger();
+
+        /** How many of the next saves fail, and a latch counting them. */
+        private final java.util.concurrent.atomic.AtomicInteger failSaves = new java.util.concurrent.atomic.AtomicInteger();
+
+        private volatile CountDownLatch saveFailures = new CountDownLatch(0);
+
+        /** The only player whose saves fail, or null for all. */
+        private volatile @org.jspecify.annotations.Nullable UUID failingPlayer;
+
+        /** Whether the failures are those of an unreachable database, or an error that says nothing. */
+        private volatile boolean unreachable = true;
+
+        /** How many of the next reads fail as an unreachable database would. */
+        final java.util.concurrent.atomic.AtomicInteger failFinds = new java.util.concurrent.atomic.AtomicInteger();
+
+        void failSaves(int count, CountDownLatch failures, @org.jspecify.annotations.Nullable UUID player, boolean unreachable) {
+            saveFailures = failures;
+            failingPlayer = player;
+            this.unreachable = unreachable;
+            failSaves.set(count);
+        }
+
         @Override
         public Optional<Visit> find(Connection connection, UUID id) throws SQLException {
+            savesAtLastFind = saves.get();
+            if (failFinds.getAndUpdate(left -> Math.max(0, left - 1)) > 0) {
+                throw new SQLException("Communications link failure", "08S01");
+            }
             try (PreparedStatement select = connection.prepareStatement(
                     "SELECT name, first_seen, last_seen, visits FROM test_visits WHERE id = ?")) {
                 select.setString(1, id.toString());
@@ -849,8 +1164,16 @@ class PlayerStoreTest {
 
         @Override
         public void save(Connection connection, Visit visit) throws SQLException {
-            saves.incrementAndGet();
             duringSave.run();
+            attempts.incrementAndGet();
+            UUID only = failingPlayer;
+            if ((only == null || only.equals(visit.id())) && failSaves.getAndUpdate(left -> Math.max(0, left - 1)) > 0) {
+                saveFailures.countDown();
+                throw unreachable
+                        ? new SQLException("Communications link failure", "08S01")
+                        : new SQLException("NOT NULL constraint failed: test_visits.name");
+            }
+            saves.incrementAndGet();
             try (PreparedStatement update = connection.prepareStatement(
                     "UPDATE test_visits SET name = ?, last_seen = ?, visits = ? WHERE id = ?")) {
                 update.setString(1, visit.name());

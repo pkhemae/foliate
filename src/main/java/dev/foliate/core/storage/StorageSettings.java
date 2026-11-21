@@ -101,6 +101,7 @@ public final class StorageSettings {
             "Options passed to the database driver as they are, for instance:",
             "  sslMode: REQUIRED",
             "  connectionTimeZone: UTC",
+            "connectTimeout and socketTimeout default to 10000 and 30000 (milliseconds).",
             "See the MySQL Connector/J documentation for the full list."
         })
         @SerializeWith(serializer = DriverProperties.class)

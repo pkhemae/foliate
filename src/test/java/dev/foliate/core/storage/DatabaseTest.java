@@ -16,6 +16,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
@@ -140,6 +142,43 @@ class DatabaseTest {
         assertEquals(1, write.get());
     }
 
+    /** A read someone waits for goes ahead of the writes already queued, not behind them. */
+    @Test
+    void submitFirstGoesAheadOfQueuedWork() throws Exception {
+        database.enable();
+        CountDownLatch release = new CountDownLatch(1);
+        List<String> order = new CopyOnWriteArrayList<>();
+        CompletableFuture<?> _ = database.submit(connection -> await(release));
+        CompletableFuture<?> write = database.submit(connection -> order.add("write"));
+        CompletableFuture<?> read = database.submitFirst(connection -> order.add("read"));
+
+        release.countDown();
+        CompletableFuture.allOf(write, read).get(5, TimeUnit.SECONDS);
+
+        assertEquals(List.of("read", "write"), order);
+    }
+
+    /**
+     * Work chained after queued work, as a player's next save is chained after their previous one,
+     * is still run by the shutdown: it is submitted while the shutdown waits.
+     */
+    @Test
+    void disableRunsWorkChainedAfterQueuedWork() throws Exception {
+        database.enable();
+        CountDownLatch release = new CountDownLatch(1);
+        CompletableFuture<Integer> chained = database.submit(connection -> await(release))
+                .thenCompose(ignored -> database.submit(connection -> {
+                    try (Statement statement = connection.createStatement()) {
+                        return statement.executeUpdate("INSERT INTO notes VALUES ('id', 'text')");
+                    }
+                }));
+        CompletableFuture.delayedExecutor(200, TimeUnit.MILLISECONDS).execute(release::countDown);
+
+        database.disable();
+
+        assertEquals(1, chained.get(1, TimeUnit.SECONDS));
+    }
+
     @Test
     void submitAfterDisableFailsInsteadOfHanging() throws Exception {
         database.enable();
@@ -157,6 +196,15 @@ class DatabaseTest {
 
         assertThrows(ModuleSkippedException.class, database::enable);
         assertFalse(database.isRunning());
+    }
+
+    private static boolean await(CountDownLatch latch) {
+        try {
+            return latch.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     private int countRows(String table) throws SQLException {
