@@ -195,6 +195,8 @@ tasks {
         for (name in listOf("PORT", "HOST", "DATABASE", "USER")) {
             inputs.property("mysql$name", providers.environmentVariable("FOLIATE_TEST_MYSQL_$name").orElse(""))
         }
+        // The same for the writer of the upgrade snapshots (src/test/resources/upgrade/README.md).
+        inputs.property("upgradeSnapshot", providers.environmentVariable("FOLIATE_UPGRADE_SNAPSHOT").orElse(""))
     }
 
     jar {
