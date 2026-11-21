@@ -590,6 +590,26 @@ class PlayerStoreTest {
         assertEquals(5, store.find(id).orElseThrow().visits());
     }
 
+    /** Seen by the store's start and again by its join event: one join, not two. */
+    @Test
+    void aPlayerJoiningAsTheStoreStartsIsCountedOnce() throws Exception {
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        store.disable();
+        server.addPlayer(new PlayerMock(server, "Alex", id));
+        store = new PlayerStore<>(
+                "visit", MockBukkit.createMockPlugin(), database, repository, lifecycle,
+                () -> Component.text("could not load"), NOPLogger.NOP_LOGGER, clock);
+        store.enable();
+
+        store.join(id, "Alex"); // the join event of the same player, while the load runs
+        flush();
+        store.join(id, "Alex"); // or after it
+        flush();
+
+        assertEquals(5, store.find(id).orElseThrow().visits());
+        assertEquals(5, stored(id).orElseThrow().visits());
+    }
+
     @Test
     void aStoreCannotBeEnabledTwice() {
         assertThrows(IllegalStateException.class, store::enable);

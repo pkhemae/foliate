@@ -47,8 +47,9 @@ public final class Yaml {
             return new LinkedHashMap<>();
         }
         if (!(root instanceof Map<?, ?> map)) {
-            // Read after the file's name: "config.yml is not a list of settings (it is a list)".
-            throw new YamlException("not a list of settings (it is " + (root instanceof List<?> ? "a list" : "a single value") + ")");
+            // Read after the file's name: "config.yml is not made of settings such as 'name: value'".
+            throw new YamlException("not made of settings such as 'name: value' (it is "
+                    + (root instanceof List<?> ? "a list" : "a single value") + ")");
         }
         return stringKeys(map);
     }

@@ -17,6 +17,10 @@ public interface PlayerLifecycle<T extends PlayerData> {
      * A player joins: the value for their session, made from the stored one (or from
      * {@link #create}), or from the one they already have when they log in a second time while
      * still online. It is cached and saved at once.
+     *
+     * <p>Players already online when the store starts get it too: their session counts from then.
+     * Enabling the plugin while they play (Paper's {@code /reload}, a plugin manager) ends their
+     * session with {@link #left} and starts a new one with this.
      */
     T joined(T stored, String name, long now);
 

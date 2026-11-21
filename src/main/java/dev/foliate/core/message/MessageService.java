@@ -44,8 +44,9 @@ import org.slf4j.Logger;
  * missing from the file on disk falls back to the built-in text for that locale, so new messages
  * work after an update without the administrator touching anything.
  *
- * <p>The language files are the administrator's: the built-in ones are copied once, on first
- * start. Deleting one removes that language, and adding one adds a language.
+ * <p>The language files are the administrator's: each built-in one is copied once, on first start
+ * or with the update that brings it. Deleting one removes that language, and adding one adds a
+ * language.
  *
  * <p>Values coming from players must be passed with {@link Placeholder#unparsed} or
  * {@link Placeholder#component}, never {@link Placeholder#parsed}: parsed input would let a player
@@ -357,8 +358,7 @@ public final class MessageService implements Module {
         }
         for (Locale candidate : candidates) {
             if (builtIn.containsKey(candidate)) {
-                logger.warn("default-locale '{}': lang/{}{} is missing, using its built-in text",
-                        configured, candidate, EXTENSION);
+                logger.warn("lang/{}{} is missing: using its built-in text", candidate, EXTENSION);
                 languages.put(candidate, Map.copyOf(builtIn.get(candidate)));
                 return candidate;
             }
@@ -371,7 +371,16 @@ public final class MessageService implements Module {
      * update brings a new one. The folder is the administrator's: a built-in language whose file
      * they deleted is not copied again, which {@value #OFFERED_FILE} remembers.
      */
-    private void offerBuiltInLanguages(Map<String, String> bundledFiles) throws IOException {
+    private void offerBuiltInLanguages(Map<String, String> bundledFiles) {
+        try {
+            copyBuiltInLanguages(bundledFiles);
+        } catch (IOException e) {
+            // A folder the server may not write to (mounted read-only) holds what it holds.
+            logger.warn("The built-in languages could not be copied to the lang folder: {}", e.toString());
+        }
+    }
+
+    private void copyBuiltInLanguages(Map<String, String> bundledFiles) throws IOException {
         Files.createDirectories(directory);
         Path record = directory.resolve(OFFERED_FILE);
         Set<String> offered = new TreeSet<>();
@@ -394,7 +403,8 @@ public final class MessageService implements Module {
         if (changed) {
             List<String> lines = new ArrayList<>(List.of(
                     "# The built-in languages already copied to this folder, one per line.",
-                    "# Delete a language's file to stop offering it: it is not copied again."));
+                    "# Delete a language's file to stop offering it: it is not copied again.",
+                    "# Remove its line here to have it copied again."));
             lines.addAll(offered);
             Files.write(record, lines);
         }

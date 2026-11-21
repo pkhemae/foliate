@@ -175,6 +175,25 @@ class MessageServiceTest {
         }
     }
 
+    /** A folder the server may not write to (mounted read-only) holds what it holds: it starts. */
+    @Test
+    void aLangFolderThatCannotBeWrittenStillStarts() throws Exception {
+        Files.delete(directory.resolve("lang/.built-in"));
+        java.io.File folder = directory.resolve("lang").toFile();
+        assertTrue(folder.setWritable(false));
+        try {
+            MessageService fresh = new MessageService(
+                    directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+
+            fresh.enable();
+
+            assertEquals("[P] Bonjour Alex", PlainTextComponentSerializer.plainText()
+                    .serialize(fresh.render(Locale.FRENCH, "greeting", Placeholder.unparsed("player", "Alex"))));
+        } finally {
+            folder.setWritable(true);
+        }
+    }
+
     /** At startup a default locale with no text is one setting written wrong: English stands in. */
     @Test
     void defaultLocaleWithoutAFileFallsBackToEnglishAtStartup() throws Exception {

@@ -331,6 +331,11 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                 write(id, joined);
                 return;
             }
+            if (online.containsKey(id) || pendingJoins.containsKey(id)) {
+                // Already loaded, or loading, by the store's start: a player who was joining as it
+                // started is seen there and again by the join event. One join, not two.
+                return;
+            }
             // No usable pre-login: the plugin was enabled while the player connected, or the login
             // took longer than anyone should wait. Load without blocking the tick; until then they
             // simply have no value. Queued under the lock too, so that a disable() cannot run in

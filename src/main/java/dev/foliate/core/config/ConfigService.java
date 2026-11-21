@@ -4,6 +4,7 @@ import de.exlll.configlib.Configuration;
 import de.exlll.configlib.ConfigurationException;
 import de.exlll.configlib.NameFormatter;
 import de.exlll.configlib.NameFormatters;
+import de.exlll.configlib.SerializeWith;
 import de.exlll.configlib.YamlConfigurationProperties;
 import de.exlll.configlib.YamlConfigurationStore;
 import dev.foliate.core.module.Module;
@@ -215,11 +216,16 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
 
     /**
      * ConfigLib reads {@code 1.5} into a whole-number setting as {@code 1}, without a word, and the
-     * file is then written back with {@code 1}: such a value is refused here instead.
+     * file is then written back with {@code 1}: such a value is refused here instead. It covers the
+     * fields of the settings classes and of their sections ({@code @Configuration} classes, their
+     * superclasses included), not the elements of a list or a map, nor a field read by a serializer
+     * of its own ({@code @SerializeWith}), which decides what it accepts.
      */
     private static void requireWholeNumbers(Class<?> settings, Map<?, ?> content, String prefix) throws ConfigException {
-        for (Field field : settings.getDeclaredFields()) {
-            if (Modifier.isStatic(field.getModifiers()) || Modifier.isTransient(field.getModifiers())) {
+        for (Field field : fieldsOf(settings)) {
+            if (Modifier.isStatic(field.getModifiers())
+                    || Modifier.isTransient(field.getModifiers())
+                    || field.isAnnotationPresent(SerializeWith.class)) {
                 continue;
             }
             String path = prefix + NAMES.format(field.getName());
@@ -231,6 +237,14 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
                 requireWholeNumbers(field.getType(), section, path + ".");
             }
         }
+    }
+
+    private static List<Field> fieldsOf(Class<?> settings) {
+        List<Field> fields = new ArrayList<>();
+        for (Class<?> type = settings; type != null && type != Object.class; type = type.getSuperclass()) {
+            fields.addAll(List.of(type.getDeclaredFields()));
+        }
+        return fields;
     }
 
     /** The field a message of the library is about, if it names one. */
