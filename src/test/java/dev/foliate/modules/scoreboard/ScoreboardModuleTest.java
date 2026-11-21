@@ -22,6 +22,7 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,6 +58,8 @@ class ScoreboardModuleTest {
     private boolean expansionBroken;
     /** The name of the one player for whom the {@code <flaky>} tag fails, when set. */
     private String brokenFor = "";
+    /** Run once, the next time the module creates a board. */
+    private Runnable onCreate = () -> {};
 
     @BeforeEach
     void setUp() throws Exception {
@@ -395,6 +398,50 @@ class ScoreboardModuleTest {
         assertEquals(0, schedulers.pendingTasks());
     }
 
+    /**
+     * disable() runs on another thread while a player's thread is creating a board, past the
+     * check that the module runs: the board must not outlive the module.
+     */
+    @Test
+    void boardCreatedWhileTheModuleIsDisabledIsRemoved() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        onCreate = () -> scoreboard.disable();
+        configure("scoreboard:\n  refresh-ticks: 5\n");
+        scoreboard.reload();
+        schedulers.tick(1);
+
+        assertFalse(scoreboard.hasBoard(player.getUniqueId()));
+        assertTrue(boards.stream().allMatch(board -> board.deleted), boards.toString());
+        assertEquals(0, schedulers.pendingTasks());
+    }
+
+    /** The plugin disabled between the module's check and the timer: the server refuses it. */
+    @Test
+    void boardWhoseTimerIsRefusedByADisabledPluginIsRemovedQuietly() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        configure("scoreboard:\n  refresh-ticks: 5\n");
+        scoreboard.reload();
+        server.getPluginManager().disablePlugin(plugin);
+        schedulers.refuseTimers();
+
+        schedulers.tick(1);
+
+        assertFalse(scoreboard.hasBoard(player.getUniqueId()));
+        assertTrue(boards.stream().allMatch(board -> board.deleted), boards.toString());
+    }
+
+    /** Refused for another reason, the failure is not hidden, and the board is not left behind. */
+    @Test
+    void boardWhoseTimerIsRefusedOtherwiseIsRemovedAndTheFailureReported() throws Exception {
+        server.addPlayer("Alex");
+        configure("scoreboard:\n  refresh-ticks: 5\n");
+        scoreboard.reload();
+        schedulers.refuseTimers();
+
+        assertThrows(IllegalPluginAccessException.class, () -> schedulers.tick(1));
+        assertTrue(boards.stream().allMatch(board -> board.deleted), boards.toString());
+    }
+
     private void configure(String yaml) throws ConfigException {
         try {
             Files.writeString(directory.resolve("config.yml"), yaml);
@@ -408,6 +455,9 @@ class ScoreboardModuleTest {
         return new ScoreboardModule(plugin, schedulers, () -> config.get().scoreboard(), messages, player -> {
             FakeBoard board = new FakeBoard();
             boards.add(board);
+            Runnable hook = onCreate;
+            onCreate = () -> {};
+            hook.run();
             return board;
         }, supportCheck, logger);
     }
