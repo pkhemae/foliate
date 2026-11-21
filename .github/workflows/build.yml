@@ -8,10 +8,11 @@ on:
 permissions:
   contents: read
 
-# A new push to a pull request replaces its running checks. On main every commit keeps its own
-# run, so that a quick second merge does not leave the first one unchecked.
+# A new push to a pull request cancels the run of the previous one. A push to main gets a group of
+# its own, its commit, so that a quick second merge neither cancels the first one's run nor waits
+# behind it.
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
