@@ -6,8 +6,22 @@
 # Runs from the repository root, on a CI runner, with Java 25 on the PATH and JAVA_HOME set.
 set -euo pipefail
 
+# Renovate does not update HMC_VERSION and SPECIFICS_VERSION below: each download is checked
+# against a pinned SHA-256, which Renovate cannot compute, so a version it bumped alone would only
+# fail the checksum. Bump them by hand, each version with its checksum, in the same commit:
+#   1. Pick the release on https://github.com/headlesshq/headlessmc/releases (the asset
+#      headlessmc.jar) or https://github.com/headlesshq/hmc-specifics/releases (the asset
+#      hmc-specifics-<minecraft>-<version>-fabric-release.jar, which must exist for the Minecraft
+#      version of the build).
+#   2. Read the checksum GitHub records for that asset, and set it without its "sha256:" prefix:
+#        gh api repos/headlesshq/headlessmc/releases/tags/<version> \
+#          --jq '.assets[] | select(.name == "headlessmc.jar") | .digest'
+#        gh api repos/headlesshq/hmc-specifics/releases/tags/<version> \
+#          --jq '.assets[] | select(.name | endswith("-fabric-release.jar")) | .name + " " + .digest'
+#      or download the asset and run sha256sum on it.
+#   3. Let the client-test job of CI run: the sha256sum -c checks below prove the pair matches.
 HMC_VERSION="${HMC_VERSION:-3.0.0-RC9}"
-# The checksum the release page publishes for headlessmc.jar of that version.
+# The checksum GitHub records for headlessmc.jar of that version (see above to bump it).
 HMC_SHA256="${HMC_SHA256:-a343a7c51e48c566a5cd408bd0012ddf091ea105ecc31daff00af600d3a7218a}"
 # The Minecraft version of the build: gradle/libs.versions.toml is the one place that sets it.
 MC_VERSION="$(sed -n 's/^minecraft *= *"\(.*\)"/\1/p' gradle/libs.versions.toml)"
