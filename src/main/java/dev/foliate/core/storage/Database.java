@@ -12,6 +12,7 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
@@ -41,6 +42,13 @@ public final class Database implements Module {
     private static final long CONNECTION_TIMEOUT_MILLIS = 10_000;
 
     /**
+     * How long the shutdown waits for the pool to close. Closing waits for a connection being
+     * opened, and one stuck in the handshake of a server that stopped answering would hold the
+     * shutdown for seconds more.
+     */
+    private static final long CLOSE_TIMEOUT_MILLIS = 2_000;
+
+    /**
      * The MySQL driver waits for an answer forever by default: a query in flight when the server
      * stops answering would hold its thread, and the shutdown, for good. These apply unless
      * {@code storage.mysql.properties} sets them.
@@ -65,6 +73,12 @@ public final class Database implements Module {
      * callbacks run, and submit what follows it, before it counts as finished.
      */
     private final AtomicInteger unfinished = new AtomicInteger();
+
+    /** How long the shutdown waits for the queue to empty. Shortened by the tests. */
+    private volatile long graceSeconds = SHUTDOWN_TIMEOUT_SECONDS;
+
+    /** The futures of the jobs submitted and not completed, by sequence, which the shutdown completes. */
+    private final Map<Long, CompletableFuture<?>> pending = new ConcurrentHashMap<>();
 
     /**
      * @param settings the current storage settings; read when the database starts
@@ -134,6 +148,9 @@ public final class Database implements Module {
             new Migrations(logger, migrations, settings.type()).apply(connection);
         }
 
+        // A job that never ended before an earlier stop, completed by it, must not count now.
+        unfinished.set(0);
+        pending.clear();
         AtomicInteger counter = new AtomicInteger();
         // A fixed pool whose queue hands out the urgent jobs first. Its threads are made as jobs
         // come and never retire: the same as Executors.newFixedThreadPool, with another queue.
@@ -157,7 +174,8 @@ public final class Database implements Module {
     public void disable() {
         ExecutorService threads = executor;
         if (threads != null) {
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(SHUTDOWN_TIMEOUT_SECONDS);
+            long grace = graceSeconds;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(grace);
             boolean drained = awaitUnfinished(deadline);
             // Not running from here on: what is submitted now fails at once instead of queuing.
             executor = null;
@@ -166,7 +184,7 @@ public final class Database implements Module {
                 logger.warn(
                         "{} database operations did not finish within {} seconds and were stopped",
                         unfinished.get(),
-                        SHUTDOWN_TIMEOUT_SECONDS);
+                        grace);
                 // What still waits in the queue would only fail against the closed pool: it fails
                 // now, and the threads still running are interrupted.
                 for (Runnable queued : threads.shutdownNow()) {
@@ -180,11 +198,26 @@ public final class Database implements Module {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
+            // A query still running against a server that stopped answering would complete its
+            // future whenever the driver gives up, after the plugin is gone: it fails now, so its
+            // caller knows and can report it while the server still logs.
+            for (CompletableFuture<?> future : List.copyOf(pending.values())) {
+                future.completeExceptionally(new IllegalStateException("The database stopped before this finished"));
+            }
         }
         HikariDataSource source = dataSource;
         if (source != null) {
-            source.close();
             dataSource = null;
+            Thread closing = Thread.ofPlatform().name("Foliate-Storage-Close").daemon().start(source::close);
+            try {
+                closing.join(CLOSE_TIMEOUT_MILLIS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            if (closing.isAlive()) {
+                logger.warn("The database connections did not close within {} ms: left to close in the background",
+                        CLOSE_TIMEOUT_MILLIS);
+            }
         }
     }
 
@@ -205,6 +238,11 @@ public final class Database implements Module {
             }
             return true;
         }
+    }
+
+    /** Shortens the shutdown's grace, for the tests. */
+    void graceSeconds(long seconds) {
+        graceSeconds = seconds;
     }
 
     /** False when storage is turned off or failed to start. */
@@ -242,10 +280,13 @@ public final class Database implements Module {
             return future;
         }
         unfinished.incrementAndGet();
+        long place = sequence.getAndIncrement();
+        pending.put(place, future);
+        CompletableFuture<?> _ = future.whenComplete((value, error) -> pending.remove(place));
         try {
             threads.execute(new Job(
                     first,
-                    sequence.getAndIncrement(),
+                    place,
                     () -> {
                         try {
                             future.complete(call(work));

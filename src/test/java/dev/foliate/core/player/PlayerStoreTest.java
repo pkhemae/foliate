@@ -666,6 +666,7 @@ class PlayerStoreTest {
             }
         });
         relogin.get(5, TimeUnit.SECONDS);
+        flush(); // the login may start from the quit's save before it lands
 
         assertEquals(1 + PlayerStore.UNCERTAIN_RETRIES, repository.attempts.get() - before - 1, "not given up after a few tries");
         assertEquals(1, logger.lines().stream().filter(line -> line.startsWith("ERROR Could not save")).count(), logger.lines().toString());
@@ -746,6 +747,138 @@ class PlayerStoreTest {
         assertTrue(outage.get(0).startsWith("WARN"), outage.toString());
         assertTrue(outage.get(1).startsWith("INFO"), outage.toString());
         assertEquals(50, stored(stuck).orElseThrow().visits());
+    }
+
+    /**
+     * A player who quits and logs in again while their quit's save waits for a storage thread
+     * starts from that save's value, without waiting behind every other player's saves.
+     */
+    @Test
+    void aLoginWhileTheQuitsSaveWaitsStartsFromItWithoutWaiting() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        store.update(id, visit -> withVisits(visit, 50));
+        flush();
+        CountDownLatch release = holdStorageThread();
+        try {
+            clock.set(7_000);
+            store.quit(id); // its save waits behind the hold
+
+            CompletableFuture<Void> login = CompletableFuture.runAsync(() -> {
+                try {
+                    store.beginLogin(id, "Alex");
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+            login.get(2, TimeUnit.SECONDS);
+            store.join(id, "Alex");
+        } finally {
+            release.countDown();
+        }
+        flush();
+
+        Visit visit = store.find(id).orElseThrow();
+        assertEquals(51, visit.visits());
+        assertEquals(51, stored(id).orElseThrow().visits());
+    }
+
+    /** While the database is down, a player whose save is being retried can still log in. */
+    @Test
+    void aPlayerWhoseSaveIsRetriedCanStillLogIn() throws Exception {
+        store.retryDelays(millis -> pendingRetries::add);
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        repository.failSaves(1, new CountDownLatch(1), id, true);
+
+        store.update(id, visit -> withVisits(visit, 50)); // its save fails and waits for its retry
+        waitUntil(() -> pendingRetries.size() == 1);
+        store.quit(id); // joins that save
+        store.beginLogin(id, "Alex"); // would wait for the retry, then time out
+        store.join(id, "Alex");
+        List<Runnable> retries = List.copyOf(pendingRetries);
+        pendingRetries.clear();
+        retries.forEach(Runnable::run);
+        flush();
+
+        assertEquals(51, store.find(id).orElseThrow().visits());
+        assertEquals(51, stored(id).orElseThrow().visits());
+    }
+
+    /**
+     * When the shutdown stops waiting, the saves still running get the database's own grace: the
+     * report waits for their outcome instead of counting them as lost beforehand.
+     */
+    @Test
+    void theShutdownReportWaitsForTheSavesTheDatabaseStillFinishes() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        store.flushTimeoutSeconds(1);
+        CountDownLatch release = holdStorageThread();
+        store.update(id, visit -> withVisits(visit, 50));
+
+        store.disable(); // gives up waiting after a second: the save is still queued
+        assertTrue(logger.lines().stream().noneMatch(line -> line.contains("could not be saved")), logger.lines().toString());
+        release.countDown();
+        database.disable(); // its grace lets the save land
+
+        assertTrue(logger.lines().stream().noneMatch(line -> line.contains("could not be saved")), logger.lines().toString());
+        database.enable();
+        assertEquals(50, stored(id).orElseThrow().visits());
+    }
+
+    /**
+     * A login does not start from a value the database refuses: while a save fails for a reason
+     * not known to pass, and once it is given up, the login reads what is stored.
+     */
+    @Test
+    void aLoginDoesNotStartFromAValueTheDatabaseRefuses() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        repository.failSaves(Integer.MAX_VALUE, new CountDownLatch(0), id, false);
+        CountDownLatch release = holdStorageThread();
+        store.update(id, visit -> withVisits(visit, 50)); // refused, once it runs
+        store.quit(id);
+        CompletableFuture<Void> login = CompletableFuture.runAsync(() -> {
+            try {
+                store.beginLogin(id, "Alex"); // starts from the waiting save's value
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        login.get(5, TimeUnit.SECONDS);
+        release.countDown();
+        flush(); // the save is refused and given up
+        repository.failSaves(0, new CountDownLatch(0), null, true);
+
+        store.join(id, "Alex"); // the refused value is dropped: loaded from the database
+        waitUntil(() -> store.find(id).isPresent());
+
+        // The stored value counted one visit: this join is the second. From the refused value
+        // (50 visits), the session would count 51, and every save of it would be refused.
+        assertEquals(2, store.find(id).orElseThrow().visits());
+    }
+
+    /**
+     * A save queued by a callback after the shutdown stopped waiting (a late load that was still
+     * reading) is part of the report: the report waits for it too.
+     */
+    @Test
+    void theShutdownReportCountsASaveQueuedAfterItStoppedWaiting() throws Exception {
+        UUID id = UUID.randomUUID();
+        store.flushTimeoutSeconds(1);
+        CountDownLatch release = holdStorageThread();
+        store.join(id, "Alex"); // no pre-login: the read waits behind the hold
+        repository.failSaves(Integer.MAX_VALUE, new CountDownLatch(0), id, true);
+
+        store.disable(); // stops waiting after a second, while the read is still queued
+        release.countDown(); // the read ends, its callback queues the save, which is lost
+
+        waitUntil(() -> logger.lines().stream().anyMatch(line -> line.contains("could not be saved")));
+        assertTrue(logger.lines().stream().anyMatch(line -> line.contains("of 1 player")), logger.lines().toString());
     }
 
     /** What could not be saved is reported in one line when the store stops, not one per player. */
