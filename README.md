@@ -30,11 +30,11 @@ first. The same jar runs on Paper.
 | **Messages** | MiniMessage text in per-language files, shown in each player's language |
 | **Commands** | One class per subcommand, on Paper's native command API, with declared permissions |
 | **Storage** | SQLite out of the box, MySQL or MariaDB by configuration, with schema migrations |
-| **Player data** | Loaded before login, cached, saved in order, flushed on shutdown |
+| **Player data** | Loaded before login, cached, saved in order, retried while the database is unreachable, flushed on shutdown |
 | **Scoreboard** | A per-player scoreboard on the side of the screen, drawn with packets because the Bukkit scoreboard API does not work on Folia |
 | **Integrations** | PlaceholderAPI and zMenu, both optional |
-| **Tests** | Unit tests, and a smoke test that boots a real Folia server in CI |
-| **Tooling** | One command to rename the template, GitHub releases on tag, Renovate |
+| **Tests** | Unit tests, a smoke test that boots a real Folia server, and a headless Minecraft client that joins it, in CI |
+| **Tooling** | One command to rename the template, GitHub releases on tag with a SHA-256 checksum, Renovate |
 
 What you keep is `core/`, the plugin class and the `info` and `reload` commands. Everything under `modules/` and `hooks/`, with the subcommands each feature offers, is example code that you can delete: the [developer guide](https://github.com/pkhemae/foliate/wiki/Making-it-yours) lists what each removal takes with it. `contracts/` is empty, apart from its `package-info.java`: it is where your features put what they offer each other.
 
@@ -93,5 +93,6 @@ Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Changes are l
 
 ## License
 
-[MIT](LICENSE). PlaceholderAPI and zMenu are separate plugins under their own licenses and are not
-bundled.
+[MIT](LICENSE). The libraries bundled in the plugin jar keep their own licenses, listed in
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES), which the jar carries too. PlaceholderAPI and zMenu are
+separate plugins under their own licenses and are not bundled.
