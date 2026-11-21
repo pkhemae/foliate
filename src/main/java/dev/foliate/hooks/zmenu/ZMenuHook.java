@@ -184,7 +184,16 @@ public final class ZMenuHook implements Module, SubcommandProvider {
                     return;
                 }
                 // As zMenu has it now, which a /zm reload may have replaced since it was loaded.
-                Optional<Inventory> inventory = MENUS.contains(menu) ? manager.getInventory(plugin, menu) : Optional.empty();
+                Optional<Inventory> inventory;
+                try {
+                    inventory = MENUS.contains(menu) ? manager.getInventory(plugin, menu) : Optional.empty();
+                } catch (RuntimeException e) {
+                    // zMenu keeps the menus in a plain list, which a reload on the global region
+                    // may be changing right now: the player can simply try again.
+                    plugin.getSLF4JLogger().debug("Looking up the menu '{}' in zMenu failed", menu, e);
+                    messages.send(player, "menu.unavailable");
+                    return;
+                }
                 if (inventory.isPresent()) {
                     manager.openInventory(player, inventory.get());
                 } else {

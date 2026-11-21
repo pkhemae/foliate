@@ -19,6 +19,7 @@ import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -51,6 +52,8 @@ class ZMenuHookTest {
     private MessageService messages;
     private ZMenuHook hook;
     private boolean zMenuRejectsFiles;
+    /** zMenu's lookup fails, as it does when a reload changes its list while it is read. */
+    private volatile boolean zMenuLookupFails;
     /** How long loading a menu takes in the fake zMenu. */
     private volatile Duration loadTime = Duration.ZERO;
     private final List<Inventory> registered = new ArrayList<>();
@@ -122,6 +125,23 @@ class ZMenuHookTest {
         server.getScheduler().performTicks(1);
 
         assertTrue(registered.isEmpty());
+        assertTrue(opened.isEmpty());
+        assertTrue(plain(player).contains("not available"));
+    }
+
+    /**
+     * zMenu keeps the menus in a plain list: a lookup while a reload changes it on the global
+     * region can fail. The player is told menus are unavailable, instead of nothing happening.
+     */
+    @Test
+    void failedLookupTellsThePlayerMenusAreUnavailable() throws Exception {
+        hook.enable();
+        PlayerMock player = server.addPlayer();
+        zMenuLookupFails = true;
+
+        hook.open(player, "example");
+        server.getScheduler().performTicks(1);
+
         assertTrue(opened.isEmpty());
         assertTrue(plain(player).contains("not available"));
     }
@@ -342,6 +362,9 @@ class ZMenuHookTest {
                             return List.copyOf(registered);
                         }
                         case "getInventory" -> {
+                            if (zMenuLookupFails) {
+                                throw new ConcurrentModificationException();
+                            }
                             return registered.stream()
                                     .filter(menu -> menu.getFileName().equalsIgnoreCase((String) arguments[1]))
                                     .findFirst();
