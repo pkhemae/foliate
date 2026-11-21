@@ -55,6 +55,7 @@ class ZMenuHookTest {
     private volatile Duration loadTime = Duration.ZERO;
     private final List<Inventory> registered = new ArrayList<>();
     private final List<String> opened = new ArrayList<>();
+    private final List<Inventory> openedMenus = new ArrayList<>();
     /** Counted down when the fake zMenu starts loading a menu. */
     private volatile CountDownLatch loading = new CountDownLatch(1);
 
@@ -143,6 +144,32 @@ class ZMenuHookTest {
         hook.disable();
 
         assertTrue(registered.isEmpty());
+    }
+
+    /**
+     * {@code /zm reload inventory example} replaces the menu with a new object: the one the hook
+     * loaded is deleted, and opening it would show a menu zMenu no longer knows.
+     */
+    @Test
+    void menuReloadedByZMenuIsOpenedAsZMenuHasItNow() throws Exception {
+        hook.enable();
+        Inventory reloaded = zMenuReloads(registered.getFirst());
+        PlayerMock player = server.addPlayer("Alex");
+
+        hook.open(player, "example");
+        server.getScheduler().performTicks(1);
+
+        assertEquals(List.of(reloaded), openedMenus);
+    }
+
+    @Test
+    void swapAfterZMenuReloadedAMenuLeavesASingleCopy() throws Exception {
+        hook.enable();
+        zMenuReloads(registered.getFirst());
+
+        hook.swapMenus(fakeZMenu());
+
+        assertEquals(1, registered.size());
     }
 
     /** A reload that gave up waiting must not swap the menus when its task finally runs. */
@@ -272,6 +299,28 @@ class ZMenuHookTest {
         return PlainTextComponentSerializer.plainText().serialize(player.nextComponentMessage());
     }
 
+    /** What zMenu's reloadInventory does: deletes the menu and loads its file again. */
+    private Inventory zMenuReloads(Inventory menu) {
+        registered.remove(menu);
+        Inventory fresh = menu(menu.getFileName());
+        registered.add(fresh);
+        return fresh;
+    }
+
+    /** A menu as zMenu names it: after its file, without the extension. */
+    @SuppressWarnings("ReferenceEquality") // a proxy is equal to itself only, as Object is
+    private Inventory menu(String fileName) {
+        return (Inventory) Proxy.newProxyInstance(
+                getClass().getClassLoader(),
+                new Class<?>[] {Inventory.class},
+                (self, call, parameters) -> switch (call.getName()) {
+                    case "equals" -> self == parameters[0];
+                    case "hashCode" -> System.identityHashCode(self);
+                    case "getFileName" -> fileName;
+                    default -> "inventory";
+                });
+    }
+
     /** Implements only the handful of zMenu methods the hook calls. */
     @SuppressWarnings("ReferenceEquality") // a proxy is equal to itself only, as Object is
     private InventoryManager fakeZMenu() {
@@ -284,20 +333,25 @@ class ZMenuHookTest {
                             if (zMenuRejectsFiles) {
                                 throw new InventoryException("size must be a multiple of 9");
                             }
-                            Inventory inventory = (Inventory) Proxy.newProxyInstance(
-                                    getClass().getClassLoader(),
-                                    new Class<?>[] {Inventory.class},
-                                    (self, call, parameters) -> switch (call.getName()) {
-                                        case "equals" -> self == parameters[0];
-                                        case "hashCode" -> System.identityHashCode(self);
-                                        default -> "inventory";
-                                    });
+                            String file = Path.of((String) arguments[1]).getFileName().toString();
+                            Inventory inventory = menu(file.substring(0, file.length() - ".yml".length()));
                             registered.add(inventory);
                             return inventory;
                         }
+                        case "getInventories" -> {
+                            return List.copyOf(registered);
+                        }
+                        case "getInventory" -> {
+                            return registered.stream()
+                                    .filter(menu -> menu.getFileName().equalsIgnoreCase((String) arguments[1]))
+                                    .findFirst();
+                        }
                         case "deleteInventory" -> registered.remove(arguments[0]);
                         case "deleteInventories" -> registered.clear();
-                        case "openInventory" -> opened.add(((Player) arguments[0]).getName());
+                        case "openInventory" -> {
+                            opened.add(((Player) arguments[0]).getName());
+                            openedMenus.add((Inventory) arguments[1]);
+                        }
                         default -> throw new UnsupportedOperationException(method.getName());
                     }
                     return null;

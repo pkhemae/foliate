@@ -12,10 +12,10 @@ import fr.maxlego08.menu.api.MenuPlugin;
 import fr.maxlego08.menu.api.exceptions.InventoryException;
 import java.io.Serial;
 import java.time.Duration;
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -34,6 +34,10 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>To add a menu, drop its file in {@code src/main/resources/inventories/} and add its name to
  * {@link #MENUS}.
+ *
+ * <p>A menu is looked up in zMenu each time it is opened, by this plugin and its file name, never
+ * kept as an object: {@code /zm reload inventory <name>} replaces it with a new one and deletes the
+ * one this hook loaded.
  */
 public final class ZMenuHook implements Module, SubcommandProvider {
 
@@ -56,7 +60,6 @@ public final class ZMenuHook implements Module, SubcommandProvider {
     private final Supplier<InventoryManager> zMenu;
     private final Duration reloadTimeout;
     private volatile @Nullable InventoryManager manager;
-    private volatile Map<String, Inventory> menus = Map.of();
 
     public ZMenuHook(Plugin plugin, Schedulers schedulers, MessageService messages) {
         this(plugin, schedulers, messages, () -> {
@@ -96,7 +99,7 @@ public final class ZMenuHook implements Module, SubcommandProvider {
         InventoryManager manager = zMenu.get();
         // Set before loading: if a menu fails, disable() is called and removes the ones before it.
         this.manager = manager;
-        menus = load(manager);
+        load(manager);
     }
 
     @Override
@@ -162,7 +165,6 @@ public final class ZMenuHook implements Module, SubcommandProvider {
             // runs, a player may be opening a menu on their own thread right now, and from here on
             // is told menus are unavailable instead. Deleting only touches zMenu's registry.
             this.manager = null;
-            menus = Map.of();
             manager.deleteInventories(plugin);
         }
     }
@@ -177,13 +179,16 @@ public final class ZMenuHook implements Module, SubcommandProvider {
         try {
             schedulers.entity(player).executeOrRun(() -> {
                 InventoryManager manager = this.manager;
-                Inventory inventory = menus.get(menu);
                 if (manager == null) {
                     messages.send(player, "menu.unavailable");
-                } else if (inventory == null) {
-                    messages.send(player, "menu.unknown", Placeholder.unparsed("menu", menu));
+                    return;
+                }
+                // As zMenu has it now, which a /zm reload may have replaced since it was loaded.
+                Optional<Inventory> inventory = MENUS.contains(menu) ? manager.getInventory(plugin, menu) : Optional.empty();
+                if (inventory.isPresent()) {
+                    manager.openInventory(player, inventory.get());
                 } else {
-                    manager.openInventory(player, inventory);
+                    messages.send(player, "menu.unknown", Placeholder.unparsed("menu", menu));
                 }
             });
         } catch (EntityRetiredException gone) {
@@ -196,28 +201,28 @@ public final class ZMenuHook implements Module, SubcommandProvider {
      * files is invalid. Must run on a tick thread.
      */
     void swapMenus(InventoryManager manager) {
-        Map<String, Inventory> previous = menus;
+        // The menus as zMenu has them now: a /zm reload may have replaced the ones loaded here.
+        List<Inventory> previous = List.copyOf(manager.getInventories(plugin));
         try {
-            menus = load(manager);
+            load(manager);
         } catch (MenuException e) {
             throw new MenuLoadFailure(e);
         }
-        previous.values().forEach(manager::deleteInventory);
+        previous.forEach(manager::deleteInventory);
     }
 
     /** Loads every menu, or none: the ones loaded before a failure are removed again. */
-    private Map<String, Inventory> load(InventoryManager manager) throws MenuException {
-        Map<String, Inventory> loaded = new LinkedHashMap<>();
+    private void load(InventoryManager manager) throws MenuException {
+        List<Inventory> loaded = new ArrayList<>();
         for (String menu : MENUS) {
             String file = "inventories/" + menu + ".yml";
             try {
-                loaded.put(menu, manager.loadInventoryOrSaveResource(plugin, file));
+                loaded.add(manager.loadInventoryOrSaveResource(plugin, file));
             } catch (InventoryException | RuntimeException e) {
-                loaded.values().forEach(manager::deleteInventory);
+                loaded.forEach(manager::deleteInventory);
                 throw new MenuException(file + " could not be loaded: " + e.getMessage(), e);
             }
         }
-        return Map.copyOf(loaded);
     }
 
     /** Carries a {@link MenuException} out of the task that runs on the global region. */
