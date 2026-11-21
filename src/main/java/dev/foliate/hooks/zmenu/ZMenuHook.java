@@ -37,6 +37,12 @@ public final class ZMenuHook implements Module, SubcommandProvider {
 
     public static final String PLUGIN_NAME = "zMenu";
 
+    /**
+     * The module's name. A constant, so that the server test can name the module without loading
+     * this class, which would load zMenu's when zMenu is not installed.
+     */
+    public static final String MODULE_NAME = "zmenu";
+
     /** File names under {@code inventories/}, without the extension. */
     private static final List<String> MENUS = List.of("example");
 
@@ -74,7 +80,7 @@ public final class ZMenuHook implements Module, SubcommandProvider {
 
     @Override
     public String name() {
-        return "zmenu";
+        return MODULE_NAME;
     }
 
     /** {@code /foliate menu}, which opens the example menu. */
