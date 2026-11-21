@@ -67,9 +67,9 @@ The [wiki](https://github.com/pkhemae/foliate/wiki) has one page per topic.
 
 | Start here | Guides |
 | --- | --- |
-| [Getting started](https://github.com/pkhemae/foliate/wiki/Getting-started) | [Modules](https://github.com/pkhemae/foliate/wiki/Modules) · [Configuration](https://github.com/pkhemae/foliate/wiki/Configuration) · [Messages](https://github.com/pkhemae/foliate/wiki/Messages) · [Commands](https://github.com/pkhemae/foliate/wiki/Commands) |
-| [Scheduling](https://github.com/pkhemae/foliate/wiki/Scheduling) | [Placeholders](https://github.com/pkhemae/foliate/wiki/Placeholders) · [Menus](https://github.com/pkhemae/foliate/wiki/Menus) · [Scoreboard](https://github.com/pkhemae/foliate/wiki/Scoreboard) · [Storage and player data](https://github.com/pkhemae/foliate/wiki/Storage-and-player-data) |
-| [Making it yours](https://github.com/pkhemae/foliate/wiki/Making-it-yours) | [Optional integrations](https://github.com/pkhemae/foliate/wiki/Optional-integrations) · [Testing](https://github.com/pkhemae/foliate/wiki/Testing) · [Releasing](https://github.com/pkhemae/foliate/wiki/Releasing) |
+| [Getting started](https://github.com/pkhemae/foliate/wiki/Getting-started) | [Architecture](https://github.com/pkhemae/foliate/wiki/Architecture) · [Modules](https://github.com/pkhemae/foliate/wiki/Modules) · [Commands](https://github.com/pkhemae/foliate/wiki/Commands) · [Events](https://github.com/pkhemae/foliate/wiki/Events) · [Configuration](https://github.com/pkhemae/foliate/wiki/Configuration) · [Messages](https://github.com/pkhemae/foliate/wiki/Messages) |
+| [Folia for Bukkit developers](https://github.com/pkhemae/foliate/wiki/Folia-for-Bukkit-developers) | [Scheduling](https://github.com/pkhemae/foliate/wiki/Scheduling) · [Storage and player data](https://github.com/pkhemae/foliate/wiki/Storage-and-player-data) · [Placeholders](https://github.com/pkhemae/foliate/wiki/Placeholders) · [Menus](https://github.com/pkhemae/foliate/wiki/Menus) · [Scoreboard](https://github.com/pkhemae/foliate/wiki/Scoreboard) |
+| [Making it yours](https://github.com/pkhemae/foliate/wiki/Making-it-yours) | [Optional integrations](https://github.com/pkhemae/foliate/wiki/Optional-integrations) · [Testing](https://github.com/pkhemae/foliate/wiki/Testing) · [Debugging](https://github.com/pkhemae/foliate/wiki/Debugging) · [Releasing](https://github.com/pkhemae/foliate/wiki/Releasing) |
 
 ## Requirements
 
