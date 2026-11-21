@@ -1,7 +1,7 @@
 package dev.foliate.modules.profile;
 
 import dev.foliate.core.player.PlayerStoreChecks;
-import dev.foliate.selftest.PlayerCheck;
+import dev.foliate.servertest.PlayerCheck;
 import java.sql.SQLException;
 import java.util.UUID;
 import org.bukkit.entity.Player;

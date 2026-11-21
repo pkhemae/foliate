@@ -32,8 +32,8 @@ import org.jspecify.annotations.Nullable;
  * Plugin entrypoint and composition root: everything the plugin is made of is created and wired
  * here, by hand, so the dependency graph can be read in one place.
  *
- * <p>Not final: MockBukkit subclasses the plugin class to load it in tests, and the self-test
- * build (the {@code selftest} source set) extends it through {@link #started} and
+ * <p>Not final: MockBukkit subclasses the plugin class to load it in tests, and the server test
+ * build (the {@code serverTest} source set) extends it through {@link #started} and
  * {@link #failedToStart}, which do nothing here.
  */
 public class FoliatePlugin extends JavaPlugin {
@@ -103,12 +103,12 @@ public class FoliatePlugin extends JavaPlugin {
 
     /**
      * Called at the end of {@code onEnable}, once every module is enabled and the command is
-     * registered. Does nothing: the self-test build overrides it to start its checks.
+     * registered. Does nothing: the server test build overrides it to start its checks.
      */
     protected void started(Parts parts) {}
 
     /**
-     * Called when the plugin cannot start, just before it gives up. Does nothing: the self-test
+     * Called when the plugin cannot start, just before it gives up. Does nothing: the server test
      * build overrides it, so that the smoke test fails at once instead of waiting for a verdict
      * that cannot come.
      */

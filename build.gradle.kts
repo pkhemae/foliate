@@ -37,15 +37,15 @@ val testServerPlugins: Action<DownloadPluginsSpec> = Action {
 // but an explicit "true" leaves the EULA unaccepted.
 val acceptEula: Boolean = providers.gradleProperty("acceptEula").map(String::toBoolean).getOrElse(false)
 
-// -PselfTest=true installs the self-test jar (see selfTestJar) instead of the plugin jar: the
+// -PserverTest=true installs the server test jar (see serverTestJar) instead of the plugin jar: the
 // plugin tests itself once the server is up, then stops the server. The task fails unless the
-// self-test passed and nothing went wrong in the plugin. This is the smoke test.
-val selfTest: Boolean = providers.gradleProperty("selfTest").map(String::toBoolean).getOrElse(false)
+// server test passed and nothing went wrong in the plugin. This is the smoke test.
+val serverTest: Boolean = providers.gradleProperty("serverTest").map(String::toBoolean).getOrElse(false)
 
-// -PclientTest=true (with -PselfTest=true) makes the self-test wait for a real client to join and
+// -PclientTest=true (with -PserverTest=true) makes the server test wait for a real client to join and
 // check what the plugin did for it, before stopping the server. The server then runs in offline
 // mode so that a client without a Minecraft account can join: never for anything but CI. The CI
-// job starts the client once the log says the self-test is waiting.
+// job starts the client once the log says the server test is waiting.
 val clientTest: Boolean = providers.gradleProperty("clientTest").map(String::toBoolean).getOrElse(false)
 
 // -PclientLanguages=en,fr makes the connected-client test expect one visit per entry, each by a
@@ -56,7 +56,7 @@ val clientLanguages: String = providers.gradleProperty("clientLanguages").getOrE
 // CI job does through the client mod hmc-specifics.
 val clientTyped: String = providers.gradleProperty("clientTyped").getOrElse("")
 
-// The modules the self-test must find enabled. Without this, a hook that silently failed to load
+// The modules the server test must find enabled. Without this, a hook that silently failed to load
 // (its plugin could not download its libraries, say) would still give a green run.
 val expectedModules: String =
     (listOf("config", "messages", "storage", "profiles", "scoreboard") +
@@ -66,14 +66,14 @@ java {
     toolchain.languageVersion = JavaLanguageVersion.of(25)
 }
 
-// The self-test and its checks: compiled against the plugin, never part of its jar. The checks of
+// The server test and its checks: compiled against the plugin, never part of its jar. The checks of
 // a module sit in the module's package, so that they can use what it keeps package-private.
-val selftest: SourceSet = sourceSets.create("selftest") {
+val serverTestSources: SourceSet = sourceSets.create("serverTest") {
     compileClasspath += sourceSets.main.get().output
     runtimeClasspath += sourceSets.main.get().output
 }
-configurations[selftest.compileOnlyConfigurationName].extendsFrom(configurations.compileOnly.get())
-configurations[selftest.implementationConfigurationName].extendsFrom(configurations.implementation.get())
+configurations[serverTestSources.compileOnlyConfigurationName].extendsFrom(configurations.compileOnly.get())
+configurations[serverTestSources.implementationConfigurationName].extendsFrom(configurations.implementation.get())
 
 repositories {
     mavenCentral()
@@ -109,8 +109,8 @@ dependencies {
     testImplementation(libs.folia.api)
     testImplementation(libs.placeholderapi)
     testImplementation(libs.zmenu.api) { isTransitive = false }
-    // The tests of the self-test's checks.
-    testImplementation(selftest.output)
+    // The tests of the server test's checks.
+    testImplementation(serverTestSources.output)
     testRuntimeOnly(libs.junit.platform.launcher)
     testRuntimeOnly(libs.sqlite.jdbc)
     testRuntimeOnly(libs.mysql.connector)
@@ -163,7 +163,7 @@ tasks {
         // ArchitectureTest reads the source files: without this, Gradle would call the test up to
         // date after a change that does not alter the bytecode, such as an import.
         inputs.dir("src/main/java").withPropertyName("sources").withPathSensitivity(PathSensitivity.RELATIVE)
-        inputs.dir("src/selftest/java").withPropertyName("selfTestSources").withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.dir("src/serverTest/java").withPropertyName("serverTestSources").withPathSensitivity(PathSensitivity.RELATIVE)
         // The tests that need a MySQL or MariaDB server run only when the environment points at one:
         // without declaring it, Gradle would reuse a run (or a cached one) made without a server.
         for (name in listOf("PORT", "HOST", "DATABASE", "USER")) {
@@ -194,41 +194,41 @@ tasks {
     }
 }
 
-// The plugin with the self-test: the plugin jar itself, entry for entry, plus the selftest source
-// set, and a plugin.yml whose main class is SelfTestPlugin. So the smoke test runs what is
+// The plugin with the server test: the plugin jar itself, entry for entry, plus the serverTest source
+// set, and a plugin.yml whose main class is ServerTestPlugin. So the smoke test runs what is
 // released. Only the test servers get it, never next to the plugin jar; it is built in its own
-// folder, away from the jars to install. The self-test's classes are not relocated: they may use
+// folder, away from the jars to install. The server test's classes are not relocated: they may use
 // the plugin and the server's API, not a bundled library directly.
-val selfTestJar = tasks.register<Jar>("selfTestJar") {
-    description = "Builds the plugin jar with its self-test, for the smoke test."
-    archiveClassifier = "selftest"
-    destinationDirectory = layout.buildDirectory.dir("selftest")
+val serverTestJar = tasks.register<Jar>("serverTestJar") {
+    description = "Builds the plugin jar with its server test, for the smoke test."
+    archiveClassifier = "server-test"
+    destinationDirectory = layout.buildDirectory.dir("server-test")
     from(zipTree(tasks.shadowJar.flatMap { it.archiveFile })) {
         exclude("META-INF/MANIFEST.MF")
     }
-    from(selftest.output)
-    // A class of the self-test must not hide one of the plugin, nor the other way round.
+    from(serverTestSources.output)
+    // A class of the server test must not hide one of the plugin, nor the other way round.
     duplicatesStrategy = DuplicatesStrategy.FAIL
     manifest.attributes("Multi-Release" to "true")
-    val mainLine = "main: $basePackage.selftest.SelfTestPlugin"
+    val mainLine = "main: $basePackage.servertest.ServerTestPlugin"
     filesMatching("plugin.yml") {
         filter { line -> if (line.startsWith("main:")) mainLine else line }
     }
-    // Without its main class the self-test would not start, and the smoke test would only end at
+    // Without its main class the server test would not start, and the smoke test would only end at
     // its timeout.
     doLast {
         ZipFile(archiveFile.get().asFile).use { zip ->
             val pluginYml = zip.getInputStream(zip.getEntry("plugin.yml")).reader().readText()
             if (mainLine !in pluginYml.lines()) {
-                throw GradleException("The self-test jar's plugin.yml does not say '$mainLine'")
+                throw GradleException("The server test jar's plugin.yml does not say '$mainLine'")
             }
         }
     }
 }
 
 tasks.check {
-    // So that the build, and a renamed template, always package the self-test.
-    dependsOn(selfTestJar)
+    // So that the build, and a renamed template, always package the server test.
+    dependsOn(serverTestJar)
 }
 
 // The test servers get the jar named here, not whatever jar run-paper would find on its own.
@@ -243,14 +243,14 @@ runPaper.folia.registerTask {
 }
 
 tasks.withType<RunServer>().configureEach {
-    pluginJars(if (selfTest) selfTestJar else tasks.shadowJar)
+    pluginJars(if (serverTest) serverTestJar else tasks.shadowJar)
     if (acceptEula) {
         jvmArgs("-Dcom.mojang.eula.agree=true")
     }
-    if (selfTest) {
-        jvmArgs("-Dfoliate.selftest.expect=$expectedModules")
+    if (serverTest) {
+        jvmArgs("-Dfoliate.servertest.expect=$expectedModules")
         if (clientTest) {
-            jvmArgs("-Dfoliate.selftest.client=true", "-Dfoliate.selftest.client.languages=$clientLanguages", "-Dfoliate.selftest.client.typed=$clientTyped")
+            jvmArgs("-Dfoliate.servertest.client=true", "-Dfoliate.servertest.client.languages=$clientLanguages", "-Dfoliate.servertest.client.typed=$clientTyped")
             doFirst {
                 // The server is switched to offline mode, which would stay on a developer's
                 // machine: this is for CI runners, which are thrown away.
@@ -278,10 +278,10 @@ tasks.withType<RunServer>().configureEach {
                     basePackage in it && ("Exception" in it || "Error" in it) ||
                     it.trimStart().startsWith("at ") && basePackage in it
             }
-            if (lines.none { "FOLIATE SELF-TEST PASSED" in it } || errors.isNotEmpty()) {
+            if (lines.none { "FOLIATE SERVER TEST PASSED" in it } || errors.isNotEmpty()) {
                 throw GradleException(
-                    "The self-test did not pass. Relevant log lines:\n" +
-                        (errors + lines.filter { "SELF-TEST" in it }).distinct().joinToString("\n")
+                    "The server test did not pass. Relevant log lines:\n" +
+                        (errors + lines.filter { "SERVER TEST" in it }).distinct().joinToString("\n")
                 )
             }
         }

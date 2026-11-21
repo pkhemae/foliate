@@ -22,7 +22,7 @@ import org.slf4j.Logger;
  * Keeps a {@link PlayerProfile} for every online player: what the plugin remembers about them
  * between sessions. It is the first use of {@link PlayerStore}, which does the loading, the cache,
  * the ordered saves and the flush on shutdown; what is left here is what belongs to the profile
- * (its fields, its SQL, its placeholder; its self-test check is ProfileCheck, in the selftest
+ * (its fields, its SQL, its placeholder; its check on a real server is ProfileCheck, in the serverTest
  * source set). To keep another kind of data per player,
  * give a store its own repository and lifecycle, as this module does.
  */
@@ -103,7 +103,7 @@ public final class ProfileModule implements Module, ProfileLookup {
         return store.awaitWrites(timeoutSeconds);
     }
 
-    /** The store behind the profiles, for the self-test, which lives in this package. */
+    /** The store behind the profiles, for the server test, which lives in this package. */
     PlayerStore<PlayerProfile> store() {
         return store;
     }

@@ -123,7 +123,7 @@ tasks.register("renameTemplate") {
                 Files.move(file.toPath(), file.resolveSibling(file.name.replace(templateName, name)).toPath())
                 moved++
             }
-        for (sources in listOf("src/main/java", "src/selftest/java", "src/test/java")) {
+        for (sources in listOf("src/main/java", "src/serverTest/java", "src/test/java")) {
             val from = File(root, "$sources/${templateGroup.replace('.', '/')}")
             val to = File(root, "$sources/${basePackage.replace('.', '/')}")
             if (from.isDirectory && from != to) {
@@ -190,7 +190,7 @@ tasks.register("renameTemplate") {
             |
             |The plugin jar is in `build/libs/` (the one without `-plain` in its name is the one to install).
             |`./gradlew runFolia` starts a Folia test server with it,
-            |and `./gradlew runFolia -PselfTest=true` runs the smoke test.
+            |and `./gradlew runFolia -PserverTest=true` runs the smoke test.
             |
             |## Developer guide
             |

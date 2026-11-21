@@ -1,6 +1,6 @@
 package dev.foliate.core.message;
 
-import dev.foliate.selftest.PlayerCheck;
+import dev.foliate.servertest.PlayerCheck;
 import java.util.List;
 import java.util.Locale;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;

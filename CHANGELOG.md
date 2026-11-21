@@ -16,5 +16,5 @@ All notable changes to this project are listed here. The format follows
 - Optional PlaceholderAPI and zMenu integrations.
 - Per-player scoreboard.
 - SQL storage (SQLite, MySQL, MariaDB) with schema migrations, and per-player profiles.
-- Unit tests and a Folia smoke test run by CI (the self-test lives in its own source set and jar, never in the plugin jar), CI jobs that join the test server with a real Minecraft client (twice as the same player, in two languages, once typing a command), and profile storage tests on MySQL and MariaDB.
+- Unit tests and a Folia smoke test run by CI (the server test lives in its own source set and jar, never in the plugin jar), CI jobs that join the test server with a real Minecraft client (twice as the same player, in two languages, once typing a command), and profile storage tests on MySQL and MariaDB.
 - `renameTemplate` task, GitHub release workflow, Renovate configuration.

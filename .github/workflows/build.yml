@@ -59,11 +59,11 @@ jobs:
 
       # -PacceptEula=true accepts the Minecraft EULA (https://aka.ms/MinecraftEULA) for this throwaway
       # server. Remove this job if you do not agree to it.
-      - name: Start Folia and run the self-test
+      - name: Start Folia and run the server test
         # A run takes about a minute. If the plugin could not even be loaded nothing stops the
         # server, so this is what ends the step.
         timeout-minutes: 5
-        run: ./gradlew runFolia -PselfTest=true -PacceptEula=true -Phooks=${{ matrix.hooks }} < /dev/null
+        run: ./gradlew runFolia -PserverTest=true -PacceptEula=true -Phooks=${{ matrix.hooks }} < /dev/null
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure() || cancelled()
@@ -73,7 +73,7 @@ jobs:
 
   # The smoke test connects nobody. This one joins the test server with a real Minecraft client,
   # run headlessly by HeadlessMC (https://github.com/headlesshq/headlessmc, MIT) with an offline
-  # account, which is only allowed in CI. The plugin's self-test then checks what the player got:
+  # account, which is only allowed in CI. The plugin's server test then checks what the player got:
   # what each module did for them, that the connection holds, that a player can come back, and that
   # the messages are in their language.
   client-test:
@@ -111,7 +111,7 @@ jobs:
       # both are subject to the Minecraft EULA (https://aka.ms/MinecraftEULA). Remove this job if
       # you do not agree to it.
       - name: Join the test server with a client
-        # Longer than the self-test's own timeout, which gives the verdict.
+        # Longer than the server test's own timeout, which gives the verdict.
         timeout-minutes: 20
         env:
           HOOKS: ${{ matrix.hooks }}

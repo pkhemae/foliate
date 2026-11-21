@@ -66,7 +66,7 @@ class RootCommandTest {
         server = MockBukkit.mock();
         // The permissions come from the plugin.yml of the build, without starting the real plugin:
         // its modules would listen to the players these tests add. That the plugin registers its
-        // commands with the server is checked by the self-test on a real server.
+        // commands with the server is checked by the server test on a real server.
         plugin = MockBukkit.createMockPlugin();
         PluginYml.registerPermissions(server);
 
