@@ -1,6 +1,5 @@
 package dev.foliate.servertest;
 
-import dev.foliate.contracts.menu.Menus;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
@@ -286,7 +285,9 @@ public final class ServerTest {
      */
     private CompletableFuture<Void> menuOpens(Player player, int typedBefore) {
         boolean typed = !typedCommand.isEmpty();
-        if (modules.enabledOf(Menus.class).isEmpty()) {
+        // By name: a reference to the hook's class would load it, and zMenu's with it, when zMenu
+        // is not installed.
+        if (!modules.enabledNames().contains("zmenu")) {
             return typed
                     ? CompletableFuture.failedFuture(new IllegalStateException("a typed command needs the menu plugin"))
                     : CompletableFuture.completedFuture(null);

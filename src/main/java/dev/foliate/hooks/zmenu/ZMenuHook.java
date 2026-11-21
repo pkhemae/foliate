@@ -1,6 +1,5 @@
 package dev.foliate.hooks.zmenu;
 
-import dev.foliate.contracts.menu.Menus;
 import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.command.SubcommandProvider;
 import dev.foliate.core.message.MessageService;
@@ -34,7 +33,7 @@ import org.jspecify.annotations.Nullable;
  * <p>To add a menu, drop its file in {@code src/main/resources/inventories/} and add its name to
  * {@link #MENUS}.
  */
-public final class ZMenuHook implements Module, Menus, SubcommandProvider {
+public final class ZMenuHook implements Module, SubcommandProvider {
 
     public static final String PLUGIN_NAME = "zMenu";
 
@@ -81,7 +80,7 @@ public final class ZMenuHook implements Module, Menus, SubcommandProvider {
     /** {@code /foliate menu}, which opens the example menu. */
     @Override
     public List<Subcommand> subcommands() {
-        return List.of(new MenuCommand(this));
+        return List.of(new MenuCommand(this::open));
     }
 
     @Override
@@ -146,7 +145,12 @@ public final class ZMenuHook implements Module, Menus, SubcommandProvider {
         }
     }
 
-    @Override
+    /**
+     * Opens a menu. Safe to call from any thread: the menu is opened from the player's own region.
+     * The player is told when the menu does not exist or menus are not loaded.
+     *
+     * @param menu the file name of the menu under {@code inventories/}, without the extension
+     */
     public void open(Player player, String menu) {
         try {
             schedulers.entity(player).executeOrRun(() -> {
