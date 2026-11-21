@@ -11,7 +11,6 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -19,7 +18,6 @@ import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
 /**
@@ -28,8 +26,10 @@ import org.bukkit.entity.Player;
  *
  * <ul>
  *   <li>the argument is optional, and its node requires a permission of its own, so that anyone
- *       may see their own profile and only some may see another's (that includes running the
- *       command as someone else, with {@code /execute as});
+ *       may see their own profile and only some may see another's. Running the command as
+ *       someone else, with {@code /execute as}, needs the same permission, checked when the
+ *       command runs: Brigadier checks requirements before {@code /execute as} changes the
+ *       executor;
  *   <li>the online players are suggested while typing;
  *   <li>it reads the profile from the cache: a command runs on the region of whoever typed it,
  *       so it must never wait for the database;
@@ -78,19 +78,20 @@ final class ProfileCommand implements Subcommand {
     public void build(LiteralArgumentBuilder<CommandSourceStack> node) {
         // /foliate profile: the one who runs it. The executor is the player the command runs as,
         // which differs from the sender under /execute as: showing another player's profile that
-        // way needs the permission to see other players' profiles, like naming them. Without an
-        // executor (the console, a command block), there is nobody else's profile to show: the
-        // command asks for a name.
-        node.requires(source -> source.getExecutor() == null
-                        || Objects.equals(source.getExecutor(), source.getSender())
-                        || source.getSender().hasPermission(PERMISSION_OTHERS))
-                .executes(context -> {
+        // way needs the permission to see other players' profiles, like naming them. It is checked
+        // here, when the command runs, and not in requires(): Brigadier evaluates requirements
+        // while it parses, with the source as typed, and /execute as only swaps the executor
+        // afterwards. Without an executor (the console, a command block), there is nobody else's
+        // profile to show: the command asks for a name.
+        node.executes(context -> {
             CommandSourceStack source = context.getSource();
-            Entity executor = source.getExecutor();
-            if (executor instanceof Player player) {
-                show(source.getSender(), player);
+            CommandSender sender = source.getSender();
+            if (!(source.getExecutor() instanceof Player player)) {
+                messages.send(sender, "command.profile.name-required");
+            } else if (isSelf(sender, player) || sender.hasPermission(PERMISSION_OTHERS)) {
+                show(sender, player);
             } else {
-                messages.send(source.getSender(), "command.profile.name-required");
+                messages.send(sender, "command.profile.others-denied");
             }
             return Command.SINGLE_SUCCESS;
         });
@@ -124,6 +125,10 @@ final class ProfileCommand implements Subcommand {
                     }
                     return Command.SINGLE_SUCCESS;
                 }));
+    }
+
+    private static boolean isSelf(CommandSender sender, Player player) {
+        return sender instanceof Player self && self.getUniqueId().equals(player.getUniqueId());
     }
 
     /** A player the sender cannot see, such as one who vanished, is treated as not online. */

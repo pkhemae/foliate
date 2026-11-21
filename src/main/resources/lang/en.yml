@@ -24,6 +24,7 @@ command:
     name-required: "<prefix><red>Name a player: <white>/foliate profile \\<player></white>"
     unknown: "<prefix><red><white><player></white> is not online."
     not-loaded: "<prefix><red>The profile of <white><player></white> is not loaded yet."
+    others-denied: "<prefix><red>You may not see another player's profile."
 
 menu:
   unknown: "<prefix><red>The menu <white><menu></white> does not exist."
