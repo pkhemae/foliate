@@ -202,7 +202,6 @@ class PluginConfigTest {
     @Test
     void settingsLeftEmptyKeepTheirDefault() throws Exception {
         for (String empty : new String[] {
-            "default-locale:\n",
             "scoreboard:\n  title:\n",
             "scoreboard:\n  lines:\n",
             "storage:\n  type:\n",
@@ -214,7 +213,6 @@ class PluginConfigTest {
 
             service.enable();
 
-            assertEquals("en", service.get().defaultLocale(), empty);
             assertEquals("<aqua><bold>Foliate", service.get().scoreboard().title(), empty);
             assertEquals(4, service.get().scoreboard().lines().size(), empty);
             assertEquals(StorageSettings.Type.SQLITE, service.get().storage().type(), empty);

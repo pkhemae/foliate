@@ -22,7 +22,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * Every message the code sends by a literal key is written in the English file. A key that is not
+ * Every message the code sends by a literal key is written in messages.yml. A key that is not
  * would show as the key itself, and only to whoever happens to trigger it.
  *
  * <p>Read from the sources: the calls of {@link MessageService} whose key is a string literal,
@@ -50,14 +50,14 @@ class MessageKeysTest {
     private static final Pattern LITERAL = Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"");
 
     @Test
-    void everyKeyUsedInTheCodeIsInTheEnglishFile() throws Exception {
-        Set<String> defined = keysOf("en");
+    void everyKeyUsedInTheCodeIsInTheMessagesFile() throws Exception {
+        Set<String> defined = definedKeys();
         Map<String, String> used = usedKeys();
 
         assertTrue(used.size() >= 10, "the scan found too few keys to be working: " + used);
         Map<String, String> missing = new TreeMap<>(used);
         missing.keySet().removeAll(defined);
-        assertEquals(Map.of(), missing, "keys used in the code (key=file) but missing from lang/en.yml");
+        assertEquals(Map.of(), missing, "keys used in the code (key=file) but missing from messages.yml");
     }
 
     /** Each key used with a literal, and the first file that uses it. */
@@ -161,8 +161,8 @@ class MessageKeysTest {
         }
     }
 
-    private Set<String> keysOf(String language) throws Exception {
-        try (InputStream in = getClass().getResourceAsStream("/lang/" + language + ".yml")) {
+    private Set<String> definedKeys() throws Exception {
+        try (InputStream in = getClass().getResourceAsStream("/" + MessageService.FILE)) {
             return new TreeSet<>(Yaml.flatten(Yaml.parse(new String(in.readAllBytes(), StandardCharsets.UTF_8))).keySet());
         }
     }

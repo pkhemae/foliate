@@ -24,7 +24,6 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
@@ -55,8 +54,7 @@ class ProfileModuleTest {
         server = MockBukkit.mock();
         ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
-        messages = new MessageService(
-                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        messages = new MessageService(directory, getClass().getClassLoader()::getResourceAsStream, NOPLogger.NOP_LOGGER);
         messages.enable();
         database = new Database(
                 directory, () -> config.get().storage(), ProfileModule.MIGRATIONS, NOPLogger.NOP_LOGGER);
@@ -216,7 +214,7 @@ class ProfileModuleTest {
         java.util.concurrent.CompletableFuture.runAsync(() -> server.getPluginManager().callEvent(login)).get();
 
         assertEquals(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, login.getLoginResult());
-        assertEquals(messages.render(Locale.ROOT, "profile.load-failed"), login.kickMessage());
+        assertEquals(messages.render("profile.load-failed"), login.kickMessage());
         assertTrue(plain(login.kickMessage()).contains("could not be loaded"));
     }
 

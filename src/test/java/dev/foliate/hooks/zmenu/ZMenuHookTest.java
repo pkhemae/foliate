@@ -68,8 +68,7 @@ class ZMenuHookTest {
         Plugin plugin = MockBukkit.createMockPlugin();
         ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
-        MessageService messages = new MessageService(
-                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService messages = new MessageService(directory, getClass().getClassLoader()::getResourceAsStream, NOPLogger.NOP_LOGGER);
         messages.enable();
         this.plugin = plugin;
         this.messages = messages;

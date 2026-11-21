@@ -1,4 +1,4 @@
-/** Player-facing text: MiniMessage templates in per-locale files. */
+/** Player-facing text: MiniMessage templates in {@code messages.yml}. */
 @NullMarked
 package dev.foliate.core.message;
 

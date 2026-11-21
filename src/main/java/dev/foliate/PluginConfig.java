@@ -50,12 +50,6 @@ public final class PluginConfig implements ConfigRoot {
     @Comment({"Internal version of this file, used to migrate it when the plugin updates.", "Do not edit."})
     private int configVersion = VERSION;
 
-    @Comment({
-        "Language of the console, and of players whose game language has no file in the lang folder.",
-        "Must be the name of a file in that folder, without the extension."
-    })
-    private String defaultLocale = "en";
-
     @Comment("Scoreboard shown on the right of each player's screen.")
     private ScoreboardSettings scoreboard = new ScoreboardSettings();
 
@@ -74,10 +68,6 @@ public final class PluginConfig implements ConfigRoot {
         return configVersion;
     }
 
-    public String defaultLocale() {
-        return defaultLocale;
-    }
-
     public ScoreboardSettings scoreboard() {
         return scoreboard;
     }
@@ -88,9 +78,6 @@ public final class PluginConfig implements ConfigRoot {
 
     @Override
     public void validate() throws ConfigException {
-        if (defaultLocale.isBlank()) {
-            throw new ConfigException("default-locale must not be empty");
-        }
         scoreboard.validate();
         storage.validate();
     }

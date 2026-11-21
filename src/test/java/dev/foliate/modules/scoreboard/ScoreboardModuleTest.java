@@ -67,8 +67,7 @@ class ScoreboardModuleTest {
         plugin = MockBukkit.createMockPlugin();
         config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
-        messages = new MessageService(
-                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        messages = new MessageService(directory, getClass().getClassLoader()::getResourceAsStream, NOPLogger.NOP_LOGGER);
         messages.enable();
         messages.addSharedResolver(TagResolver.resolver("flaky", (arguments, context) -> {
             if (expansionBroken || (context.target() instanceof Player viewer && viewer.getName().equals(brokenFor))) {

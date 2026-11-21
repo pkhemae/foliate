@@ -11,7 +11,6 @@ import dev.foliate.core.player.PlayerStore;
 import dev.foliate.core.storage.Database;
 import java.time.Clock;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
@@ -63,7 +62,7 @@ public final class ProfileModule implements Module, SubcommandProvider {
                 database,
                 repository,
                 new ProfileLifecycle(),
-                () -> messages.render(Locale.ROOT, "profile.load-failed"),
+                () -> messages.render("profile.load-failed"),
                 logger,
                 clock);
     }

@@ -1,14 +1,12 @@
 package dev.foliate.core.message;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import dev.foliate.PluginConfig;
-import dev.foliate.core.config.ConfigService;
+import dev.foliate.testing.RecordingLogger;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -18,137 +16,100 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import net.kyori.adventure.audience.Audience;
-import net.kyori.adventure.identity.Identity;
 import net.kyori.adventure.pointer.Pointers;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import net.kyori.adventure.title.Title;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
 import org.slf4j.helpers.NOPLogger;
-import dev.foliate.testing.RecordingLogger;
 
 class MessageServiceTest {
 
-    private static final Map<String, String> BUNDLED = Map.of(
-            "lang/en.yml",
-            """
+    private static final String BUNDLED = """
             prefix: "[P] "
             greeting: "<prefix>Hello <player>"
-            only-english: "English only"
+            built-in-only: "From the jar"
             farewell:
               short: "Bye"
             multi:
               - "one"
               - "two"
             silent: ""
-            """,
-            "lang/fr.yml",
-            """
-            prefix: "[P] "
-            greeting: "<prefix>Bonjour <player>"
-            """);
+            """;
 
     @TempDir
     Path directory;
 
-    private ConfigService<PluginConfig> config;
     private MessageService messages;
 
     @BeforeEach
     void setUp() throws Exception {
-        config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
-        config.enable();
-        messages = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        messages = service(NOPLogger.NOP_LOGGER);
         messages.enable();
     }
 
     @Test
-    void bundledFilesAreCopiedOnFirstStart() {
-        assertTrue(Files.exists(directory.resolve("lang/en.yml")));
-        assertTrue(Files.exists(directory.resolve("lang/fr.yml")));
+    void theBuiltInFileIsCopiedOnFirstStart() throws Exception {
+        assertEquals(BUNDLED, Files.readString(file()));
     }
 
-    /** Which languages the jar holds is the plugin's to say, not the message service's. */
+    /** Deleting the file is how an administrator gets the built-in one back. */
     @Test
-    void onlyTheBuiltInLanguagesItIsGivenAreCopied(@TempDir Path elsewhere) throws Exception {
-        MessageService englishOnly = new MessageService(
-                elsewhere, List.of("en"), MessageServiceTest::bundled, () -> "en", NOPLogger.NOP_LOGGER);
+    void aDeletedFileIsCopiedAgain() throws Exception {
+        Files.writeString(file(), "greeting: \"Hi <player>\"\n");
+        messages.reload();
+        Files.delete(file());
 
-        englishOnly.enable();
+        messages.reload();
 
-        assertTrue(Files.exists(elsewhere.resolve("lang/en.yml")));
-        assertFalse(Files.exists(elsewhere.resolve("lang/fr.yml")));
-    }
-
-    @Test
-    void englishMustBeBuiltIn() {
-        assertThrows(IllegalArgumentException.class, () -> new MessageService(
-                directory, List.of("fr"), MessageServiceTest::bundled, () -> "fr", NOPLogger.NOP_LOGGER));
-    }
-
-    @Test
-    void rendersInTheRequestedLanguage() {
-        assertEquals("[P] Bonjour Alex", plain(Locale.FRENCH, "greeting", "Alex"));
-    }
-
-    @Test
-    void regionalLocaleFallsBackToItsLanguage() {
-        assertEquals("[P] Bonjour Alex", plain(Locale.CANADA_FRENCH, "greeting", "Alex"));
-    }
-
-    @Test
-    void unknownLanguageFallsBackToTheDefaultLocale() {
-        assertEquals("[P] Hello Alex", plain(Locale.JAPANESE, "greeting", "Alex"));
-    }
-
-    @Test
-    void keyMissingFromALanguageFallsBackToEnglish() {
-        assertEquals("English only", plain(Locale.FRENCH, "only-english", "Alex"));
+        assertEquals(BUNDLED, Files.readString(file()));
+        assertEquals("[P] Hello Alex", plain("greeting", "Alex"));
     }
 
     @Test
     void nestedKeysAreDottedAndListsBecomeLines() {
-        assertEquals("Bye", plain(Locale.ENGLISH, "farewell.short", "Alex"));
-        assertEquals("one\ntwo", plain(Locale.ENGLISH, "multi", "Alex"));
+        assertEquals("Bye", plain("farewell.short", "Alex"));
+        assertEquals("one\ntwo", plain("multi", "Alex"));
     }
 
     @Test
-    void unknownKeyRendersAsTheKeyItself() {
-        assertEquals("does.not.exist", plain(Locale.ENGLISH, "does.not.exist", "Alex"));
+    void unknownKeyRendersAsTheKeyItselfAndIsReportedOnce() throws Exception {
+        RecordingLogger logger = new RecordingLogger();
+        MessageService fresh = service(logger);
+        fresh.enable();
+
+        fresh.render("does.not.exist");
+        Component rendered = fresh.render("does.not.exist");
+
+        assertEquals("does.not.exist", PlainTextComponentSerializer.plainText().serialize(rendered));
+        assertEquals(
+                List.of("WARN Message 'does.not.exist' is not defined in messages.yml"),
+                logger.lines().stream().filter(line -> line.contains("does.not.exist")).toList());
     }
 
+    /** The messages an update brings work without the administrator adding them to their file. */
     @Test
-    void fileOnDiskOverridesTheBundledTextAndKeepsTheRest() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "greeting: \"Hi <player>\"\n");
+    void theFileOverridesTheBuiltInTextAndKeysItLacksFallBackToIt() throws Exception {
+        Files.writeString(file(), "greeting: \"Hi <player>\"\n");
 
         messages.reload();
 
-        assertEquals("Hi Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
-        assertEquals("English only", plain(Locale.ENGLISH, "only-english", "Alex"));
-    }
-
-    @Test
-    void extraLanguageFileIsPickedUp() throws Exception {
-        Files.writeString(directory.resolve("lang/de.yml"), "greeting: \"Hallo <player>\"\n");
-
-        messages.reload();
-
-        assertEquals("Hallo Alex", plain(Locale.GERMAN, "greeting", "Alex"));
+        assertEquals("Hi Alex", plain("greeting", "Alex"));
+        assertEquals("From the jar", plain("built-in-only", "Alex"));
     }
 
     @Test
     void playerInputIsNeverParsedAsFormatting() {
-        Component rendered =
-                messages.render(Locale.ENGLISH, "greeting", Placeholder.unparsed("player", "<red>Mallory</red>"));
+        Component rendered = messages.render("greeting", Placeholder.unparsed("player", "<red>Mallory</red>"));
 
         assertEquals("[P] Hello <red>Mallory</red>", PlainTextComponentSerializer.plainText().serialize(rendered));
         assertTrue(colors(rendered).stream().noneMatch(NamedTextColor.RED::equals));
@@ -157,81 +118,189 @@ class MessageServiceTest {
     /** A prefix that names itself used to recurse until the stack overflowed, on every message. */
     @Test
     void prefixThatUsesItselfRendersAsText() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "prefix: \"<prefix><prefix>[P] \"\n");
+        Files.writeString(file(), "prefix: \"<prefix><prefix>[P] \"\n");
 
         messages.reload();
 
-        assertEquals("<prefix><prefix>[P] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
+        assertEquals("<prefix><prefix>[P] Hello Alex", plain("greeting", "Alex"));
     }
 
     @Test
     void prefixSeesTheArgumentsOfTheMessage() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "prefix: \"[<player>] \"\n");
+        Files.writeString(file(), "prefix: \"[<player>] \"\n");
 
         messages.reload();
 
-        assertEquals("[Alex] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
+        assertEquals("[Alex] Hello Alex", plain("greeting", "Alex"));
     }
 
     /** A prefix that ends with an open colour, as many are written, colours the message after it. */
     @Test
     void colourLeftOpenByThePrefixCarriesOnIntoTheMessage() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "prefix: \"<gray>[P] <yellow>\"\n");
+        Files.writeString(file(), "prefix: \"<gray>[P] <yellow>\"\n");
 
         messages.reload();
 
-        Component rendered = messages.render(Locale.ENGLISH, "greeting", Placeholder.unparsed("player", "Alex"));
+        Component rendered = messages.render("greeting", Placeholder.unparsed("player", "Alex"));
         assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText().serialize(rendered));
-        assertEquals(NamedTextColor.YELLOW, colorOf(rendered, "Hello Alex"));
+        assertEquals(NamedTextColor.YELLOW, colorOf(rendered, "Hello Alex", null));
     }
 
     @Test
     void prefixIsInsertedWhateverTheCaseOfItsTagAndWhenSelfClosing() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "a: \"<PREFIX>x\"\nb: \"<prefix/>y\"\n");
+        Files.writeString(file(), "a: \"<PREFIX>x\"\nb: \"<prefix/>y\"\n");
 
         messages.reload();
 
-        assertEquals("[P] x", plain(Locale.ENGLISH, "a", "Alex"));
-        assertEquals("[P] y", plain(Locale.ENGLISH, "b", "Alex"));
+        assertEquals("[P] x", plain("a", "Alex"));
+        assertEquals("[P] y", plain("b", "Alex"));
     }
 
     @Test
     void escapedPrefixTagStaysText() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "a: \"\\\\<prefix> and \\\\\\\\<prefix>\"\n");
+        Files.writeString(file(), "a: \"\\\\<prefix> and \\\\\\\\<prefix>\"\n");
 
         messages.reload();
 
         // An escaped tag is text; an escaped backslash is one backslash, followed by the prefix.
-        assertEquals("<prefix> and \\[P] ", plain(Locale.ENGLISH, "a", "Alex"));
+        assertEquals("<prefix> and \\[P] ", plain("a", "Alex"));
     }
 
     /** What the code passes is never searched for the prefix: a parsed argument cannot make it recurse. */
     @Test
     void prefixTagInAParsedArgumentStaysText() {
-        Component rendered = messages.render(Locale.ENGLISH, "greeting", Placeholder.parsed("player", "<prefix>"));
+        Component rendered = messages.render("greeting", Placeholder.parsed("player", "<prefix>"));
 
         assertEquals("[P] Hello <prefix>", PlainTextComponentSerializer.plainText().serialize(rendered));
     }
 
     @Test
     void invalidFileOnReloadKeepsThePreviousMessages() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "greeting: [unclosed\n");
+        Files.writeString(file(), "greeting: \"Hi <player>\"\n");
+        messages.reload();
+        Files.writeString(file(), "greeting: [unclosed\n");
 
         assertThrows(MessageException.class, messages::reload);
 
-        assertEquals("[P] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
+        assertEquals("Hi Alex", plain("greeting", "Alex"));
+    }
+
+    /** At startup the built-in text stands in, so one typo does not keep the plugin down. */
+    @Test
+    void brokenFileIsReplacedByTheBuiltInTextAtStartupButRefusedOnReload() throws Exception {
+        Files.writeString(file(), "greeting: [unclosed\n");
+        RecordingLogger logger = new RecordingLogger();
+        MessageService fresh = service(logger);
+
+        fresh.enable();
+
+        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render("greeting", Placeholder.unparsed("player", "Alex"))));
+        assertTrue(logger.lines().stream().anyMatch(line -> line.startsWith("ERROR messages.yml is ")), logger.lines().toString());
+        assertThrows(MessageException.class, fresh::reload);
+    }
+
+    /** It used to overflow the stack, which no part of the plugin catches. */
+    @Test
+    void fileThatContainsItselfIsReportedOnReload() throws Exception {
+        Files.writeString(file(), "greeting: &x {b: *x}\n");
+
+        MessageException failure = assertThrows(MessageException.class, messages::reload);
+
+        assertEquals("messages.yml is not valid YAML (a value contains itself: an alias * inside the & it names,"
+                + " line 1, column 18)", failure.getMessage());
+    }
+
+    /** The message reaches whoever ran /foliate reload: it names the file, not the server's folders. */
+    @Test
+    void fileThatCannotBeReadIsReportedWithoutItsPath() throws Exception {
+        assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"), "POSIX permissions only");
+        Files.setPosixFilePermissions(file(), PosixFilePermissions.fromString("---------"));
+        assumeFalse(Files.isReadable(file()), "running as a user who may read any file");
+
+        MessageException failure = assertThrows(MessageException.class, messages::reload);
+
+        assertEquals("messages.yml could not be read (permission denied)", failure.getMessage());
+    }
+
+    /** A folder named like the file is not one: the built-in text stands in, and a reload says why. */
+    @Test
+    void folderNamedLikeTheFileIsNotRead() throws Exception {
+        Files.delete(file());
+        Files.createDirectory(file());
+        MessageService fresh = service(NOPLogger.NOP_LOGGER);
+
+        fresh.enable();
+
+        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render("greeting", Placeholder.unparsed("player", "Alex"))));
+        assertThrows(MessageException.class, fresh::reload);
+    }
+
+    /** A folder the server may not write to (mounted read-only) holds what it holds: it starts. */
+    @Test
+    void aFolderThatCannotBeWrittenStillStarts(@TempDir Path readOnly) throws Exception {
+        java.io.File folder = readOnly.toFile();
+        assertTrue(folder.setWritable(false));
+        try {
+            MessageService fresh = new MessageService(readOnly, MessageServiceTest::bundled, NOPLogger.NOP_LOGGER);
+
+            fresh.enable();
+
+            assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
+                    .serialize(fresh.render("greeting", Placeholder.unparsed("player", "Alex"))));
+        } finally {
+            folder.setWritable(true);
+        }
     }
 
     @Test
-    void defaultLocaleWithoutAFileIsRejected() throws Exception {
-        Files.writeString(directory.resolve("config.yml"), "default-locale: zz\n");
-        config.reload();
+    void aJarWithoutTheFileIsReported(@TempDir Path elsewhere) {
+        MessageService broken = new MessageService(elsewhere, name -> null, NOPLogger.NOP_LOGGER);
 
-        assertThrows(MessageException.class, messages::reload);
-        assertEquals("[P] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
+        MessageException failure = assertThrows(MessageException.class, broken::enable);
+
+        assertEquals("messages.yml is missing from the plugin jar", failure.getMessage());
     }
 
-    /** An action bar is rendered in the viewer's language; an empty message shows nothing. */
+    @Test
+    void keysNamedLikeYamlBooleansAreKept() throws Exception {
+        Files.writeString(file(), "toggle:\n  on: \"Enabled\"\n  off: \"Disabled\"\n  yes: no\n");
+
+        messages.reload();
+
+        assertEquals("Enabled", plain("toggle.on", "Alex"));
+        assertEquals("Disabled", plain("toggle.off", "Alex"));
+        assertEquals("no", plain("toggle.yes", "Alex"));
+    }
+
+    @Test
+    void argumentsTakePrecedenceOverSharedTags() {
+        messages.addSharedResolver(Placeholder.unparsed("player", "SHARED"));
+        messages.addSharedResolver(Placeholder.unparsed("server", "lobby"));
+
+        assertEquals("[P] Hello Alex", plain("greeting", "Alex"));
+    }
+
+    @Test
+    void sharedTagsAreAvailableInEveryMessage() throws Exception {
+        Files.writeString(file(), "where: \"On <server>\"\n");
+        messages.reload();
+        messages.addSharedResolver(Placeholder.unparsed("server", "lobby"));
+
+        assertEquals("On lobby", plain("where", "Alex"));
+    }
+
+    @Test
+    void listMessageCanBeRenderedLineByLine() {
+        List<String> lines = messages.renderLines(new RecordingAudience(), "multi").stream()
+                .map(PlainTextComponentSerializer.plainText()::serialize)
+                .toList();
+
+        assertEquals(List.of("one", "two"), lines);
+    }
+
+    /** An action bar is rendered for the viewer; an empty message shows nothing. */
     @Test
     void actionBarIsRenderedForTheViewer() {
         PlayerMock player = MockBukkit.mock().addPlayer("Alex");
@@ -246,275 +315,9 @@ class MessageServiceTest {
         }
     }
 
-    /** As for a player: en_US, fr-CA and fr_FR fall back to their language. */
-    @Test
-    void defaultLocaleWithACountryUsesItsLanguage() throws Exception {
-        for (String locale : new String[] {"fr_FR", "fr-CA", "FR_fr"}) {
-            useDefaultLocale(locale);
-
-            assertEquals("[P] Bonjour Alex", plain(Locale.JAPANESE, "greeting", "Alex"), locale);
-        }
-    }
-
-    /** A folder the server may not write to (mounted read-only) holds what it holds: it starts. */
-    @Test
-    void aLangFolderThatCannotBeWrittenStillStarts() throws Exception {
-        Files.delete(directory.resolve("lang/.built-in"));
-        java.io.File folder = directory.resolve("lang").toFile();
-        assertTrue(folder.setWritable(false));
-        try {
-            MessageService fresh = new MessageService(
-                    directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
-
-            fresh.enable();
-
-            assertEquals("[P] Bonjour Alex", PlainTextComponentSerializer.plainText()
-                    .serialize(fresh.render(Locale.FRENCH, "greeting", Placeholder.unparsed("player", "Alex"))));
-        } finally {
-            folder.setWritable(true);
-        }
-    }
-
-    /** At startup a default locale with no text is one setting written wrong: English stands in. */
-    @Test
-    void defaultLocaleWithoutAFileFallsBackToEnglishAtStartup() throws Exception {
-        Files.writeString(directory.resolve("config.yml"), "default-locale: zz\n");
-        config.reload();
-        RecordingLogger logger = new RecordingLogger();
-        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
-
-        fresh.enable();
-
-        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
-                .serialize(fresh.render(Locale.JAPANESE, "greeting", Placeholder.unparsed("player", "Alex"))));
-        assertTrue(logger.lines().stream().anyMatch(line -> line.startsWith("ERROR default-locale 'zz'")), logger.lines().toString());
-    }
-
-    /** An update that brings a language copies its file, once: a file the administrator deleted stays deleted. */
-    @Test
-    void aBuiltInLanguageIsCopiedOnceEvenToAnExistingFolder() throws Exception {
-        Files.delete(directory.resolve("lang/fr.yml"));
-        messages.reload();
-        assertFalse(Files.exists(directory.resolve("lang/fr.yml")), "a deleted language came back");
-
-        // A folder made by a version that copied only English: French is new to it.
-        Files.writeString(directory.resolve("lang/.built-in"), "en\n");
-        messages.reload();
-
-        assertTrue(Files.exists(directory.resolve("lang/fr.yml")), "the new language was not copied");
-        assertEquals(List.of("en", "fr"), Files.readAllLines(directory.resolve("lang/.built-in")).stream()
-                .filter(line -> !line.startsWith("#")).toList());
-    }
-
-    @Test
-    void defaultLocaleIsUsedBeforeEnglish() throws Exception {
-        useDefaultLocale("fr");
-
-        assertEquals("[P] Bonjour Alex", plain(Locale.JAPANESE, "greeting", "Alex"));
-        // French has no such key: English built-in text is the last resort.
-        assertEquals("English only", plain(Locale.JAPANESE, "only-english", "Alex"));
-    }
-
-    @Test
-    void viewerWithoutALocaleGetsTheDefaultLocale() throws Exception {
-        useDefaultLocale("fr");
-        RecordingAudience console = new RecordingAudience(null);
-
-        messages.send(console, "greeting", Placeholder.unparsed("player", "Alex"));
-
-        assertEquals(List.of("[P] Bonjour Alex"), console.received);
-    }
-
-    @Test
-    void filesThatAreNotNamedAfterALocaleAreIgnored() throws Exception {
-        Files.writeString(directory.resolve("lang/backup.yml"), "greeting: \"from backup\"\n");
-        Files.writeString(directory.resolve("lang/en - Copy.yml"), "greeting: \"from copy\"\n");
-
-        messages.reload();
-
-        assertEquals("[P] Hello Alex", plain(Locale.of("backup"), "greeting", "Alex"));
-    }
-
-    @Test
-    void hyphenatedFileNameIsARegionalLocale() throws Exception {
-        Files.writeString(directory.resolve("lang/fr-CA.yml"), "greeting: \"Allo <player>\"\n");
-
-        messages.reload();
-
-        assertEquals("Allo Alex", plain(Locale.CANADA_FRENCH, "greeting", "Alex"));
-        assertEquals("[P] Bonjour Alex", plain(Locale.FRANCE, "greeting", "Alex"));
-    }
-
-    @Test
-    void keysNamedLikeYamlBooleansAreKept() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "toggle:\n  on: \"Enabled\"\n  off: \"Disabled\"\n  yes: no\n");
-
-        messages.reload();
-
-        assertEquals("Enabled", plain(Locale.ENGLISH, "toggle.on", "Alex"));
-        assertEquals("Disabled", plain(Locale.ENGLISH, "toggle.off", "Alex"));
-        assertEquals("no", plain(Locale.ENGLISH, "toggle.yes", "Alex"));
-    }
-
-    @Test
-    void argumentsTakePrecedenceOverSharedTags() {
-        messages.addSharedResolver(Placeholder.unparsed("player", "SHARED"));
-        messages.addSharedResolver(Placeholder.unparsed("server", "lobby"));
-
-        assertEquals("[P] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
-    }
-
-    @Test
-    void sharedTagsAreAvailableInEveryMessage() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "where: \"On <server>\"\n");
-        messages.reload();
-        messages.addSharedResolver(Placeholder.unparsed("server", "lobby"));
-
-        assertEquals("On lobby", plain(Locale.ENGLISH, "where", "Alex"));
-    }
-
-    @Test
-    void listMessageCanBeRenderedLineByLine() {
-        RecordingAudience viewer = new RecordingAudience(Locale.US);
-
-        List<String> lines = messages.renderLines(viewer, "multi").stream()
-                .map(PlainTextComponentSerializer.plainText()::serialize)
-                .toList();
-
-        assertEquals(List.of("one", "two"), lines);
-    }
-
-    @Test
-    void deletedLanguageStaysDeletedAndItsSpeakersGetTheDefault() throws Exception {
-        Files.delete(directory.resolve("lang/fr.yml"));
-
-        messages.reload();
-
-        assertFalse(Files.exists(directory.resolve("lang/fr.yml")));
-        assertEquals("[P] Hello Alex", plain(Locale.FRENCH, "greeting", "Alex"));
-    }
-
-    @Test
-    void brokenExtraLanguageIsSkippedAtStartupButRefusedOnReload() throws Exception {
-        Files.writeString(directory.resolve("lang/de.yml"), "greeting: [unclosed\n");
-        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
-
-        fresh.enable();
-
-        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
-                .serialize(fresh.render(Locale.GERMAN, "greeting", Placeholder.unparsed("player", "Alex"))));
-        assertThrows(MessageException.class, fresh::reload);
-    }
-
-    /** The message reaches whoever ran /foliate reload: it names the file, not the server's folders. */
-    @Test
-    void languageFileThatCannotBeReadIsReportedWithoutItsPath() throws Exception {
-        Path english = directory.resolve("lang/en.yml");
-        assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"), "POSIX permissions only");
-        Files.setPosixFilePermissions(english, PosixFilePermissions.fromString("---------"));
-        assumeFalse(Files.isReadable(english), "running as a user who may read any file");
-
-        MessageException failure = assertThrows(MessageException.class, messages::reload);
-
-        assertEquals("lang/en.yml could not be read (permission denied)", failure.getMessage());
-    }
-
-    /** It used to overflow the stack, which no part of the plugin catches. */
-    @Test
-    void extraLanguageThatContainsItselfIsSkippedAtStartupAndReportedOnReload() throws Exception {
-        Files.writeString(directory.resolve("lang/de.yml"), "greeting: &x {b: *x}\n");
-        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
-
-        fresh.enable();
-
-        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
-                .serialize(fresh.render(Locale.GERMAN, "greeting", Placeholder.unparsed("player", "Alex"))));
-        MessageException failure = assertThrows(MessageException.class, fresh::reload);
-        assertEquals("lang/de.yml is not valid YAML (a value contains itself: an alias * inside the & it names,"
-                + " line 1, column 18)", failure.getMessage());
-    }
-
-    @Test
-    void brokenFileOfTheDefaultLocaleDoesNotStopTheServerFromStarting() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "greeting: [unclosed\n");
-        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
-
-        fresh.enable();
-
-        // The built-in text stands in for the file until it is fixed.
-        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
-                .serialize(fresh.render(Locale.ENGLISH, "greeting", Placeholder.unparsed("player", "Alex"))));
-        assertThrows(MessageException.class, fresh::reload);
-    }
-
-    /** A folder that happens to be named like a language file is not one, and stops nothing. */
-    @Test
-    void folderNamedLikeALanguageFileIsIgnored() throws Exception {
-        Files.createDirectories(directory.resolve("lang/de.yml"));
-        RecordingLogger logger = new RecordingLogger();
-        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
-
-        fresh.enable();
-        fresh.reload();
-
-        assertTrue(logger.lines().contains("WARN Ignoring lang/de.yml: it is not a file"), logger.lines().toString());
-    }
-
-    /** Two names for one language: the first in name order is used, the other is reported. */
-    @Test
-    void secondFileForTheSameLanguageIsIgnored() throws Exception {
-        Files.writeString(directory.resolve("lang/fr-CA.yml"), "greeting: \"Allo <player>\"\n");
-        Files.writeString(directory.resolve("lang/fr_CA.yml"), "greeting: \"Salut <player>\"\n");
-        RecordingLogger logger = new RecordingLogger();
-        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
-
-        fresh.enable();
-
-        assertEquals("Allo Alex", PlainTextComponentSerializer.plainText()
-                .serialize(fresh.render(Locale.CANADA_FRENCH, "greeting", Placeholder.unparsed("player", "Alex"))));
-        assertTrue(
-                logger.lines().contains("WARN Ignoring lang/fr_CA.yml: lang/fr-CA.yml is already the file of this language"),
-                logger.lines().toString());
-    }
-
-    /** A broken file does not hide a good one for the same language. */
-    @Test
-    void brokenFileDoesNotHideAGoodOneForTheSameLanguage() throws Exception {
-        Files.writeString(directory.resolve("lang/fr-CA.yml"), "greeting: [unclosed\n");
-        Files.writeString(directory.resolve("lang/fr_CA.yml"), "greeting: \"Salut <player>\"\n");
-        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
-
-        fresh.enable();
-
-        assertEquals("Salut Alex", PlainTextComponentSerializer.plainText()
-                .serialize(fresh.render(Locale.CANADA_FRENCH, "greeting", Placeholder.unparsed("player", "Alex"))));
-    }
-
-    @Test
-    void brokenFileOfAnotherBundledLocaleUsedAsDefaultFallsBackToo() throws Exception {
-        Files.writeString(directory.resolve("lang/fr.yml"), "greeting: [unclosed\n");
-        Files.writeString(directory.resolve("config.yml"), "default-locale: fr\n");
-        config.reload();
-        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
-
-        fresh.enable();
-
-        assertEquals("[P] Bonjour Alex", PlainTextComponentSerializer.plainText()
-                .serialize(fresh.render(Locale.JAPANESE, "greeting", Placeholder.unparsed("player", "Alex"))));
-    }
-
-    @Test
-    void deletedFileOfTheDefaultLocaleFallsBackToItsBuiltInText() throws Exception {
-        Files.delete(directory.resolve("lang/en.yml"));
-
-        messages.reload();
-
-        assertEquals("[P] Hello Alex", plain(Locale.JAPANESE, "greeting", "Alex"));
-    }
-
     @Test
     void titleIsNotShownWhenBothPartsAreEmpty() {
-        RecordingAudience viewer = new RecordingAudience(Locale.US);
+        RecordingAudience viewer = new RecordingAudience();
 
         messages.showTitle(viewer, "silent", "silent");
         messages.showTitle(viewer, "farewell.short", "silent");
@@ -523,61 +326,29 @@ class MessageServiceTest {
     }
 
     @Test
-    void sendUsesEachViewersLanguageAndSkipsEmptyMessages() {
-        RecordingAudience french = new RecordingAudience(Locale.FRANCE);
-        RecordingAudience english = new RecordingAudience(Locale.US);
-        Audience both = Audience.audience(french, english);
+    void sendReachesEveryViewerAndSkipsEmptyMessages() {
+        RecordingAudience first = new RecordingAudience();
+        RecordingAudience second = new RecordingAudience();
+        Audience both = Audience.audience(first, second);
 
         messages.send(both, "greeting", Placeholder.unparsed("player", "Alex"));
         messages.send(both, "silent");
 
-        assertEquals(List.of("[P] Bonjour Alex"), french.received);
-        assertEquals(List.of("[P] Hello Alex"), english.received);
+        assertEquals(List.of("[P] Hello Alex"), first.received);
+        assertEquals(List.of("[P] Hello Alex"), second.received);
     }
 
-    /**
-     * MockBukkit's players keep one locale in their pointers whatever {@code setLocale} says,
-     * which is what a server that cannot read its players' language would look like. The real
-     * thing is checked with a connected client in CI.
-     */
-    @Test
-    void playerWhoseLanguageCannotBeReadIsReported() throws Exception {
-        Files.writeString(directory.resolve("lang/en.yml"), "command:\n  reload:\n    success: \"Not now\"\n");
-        Files.writeString(directory.resolve("lang/fr.yml"), "command:\n  reload:\n    success: \"Pas maintenant\"\n");
-        messages.reload();
-        PlayerMock player = MockBukkit.mock().addPlayer("Alex");
-        try {
-            player.setLocale(Locale.FRENCH);
-
-            assertEquals(
-                    "Alex is not spoken to in fr: got the default language's \"Not now\"",
-                    new MessageCheck(messages).problemWith(player, 1));
-        } finally {
-            MockBukkit.unmock();
-        }
+    private MessageService service(org.slf4j.Logger logger) {
+        return new MessageService(directory, MessageServiceTest::bundled, logger);
     }
 
-    @Test
-    void playerWhoseLanguageIsTheDefaultOneIsFine() throws Exception {
-        PlayerMock player = MockBukkit.mock().addPlayer("Alex");
-        try {
-            player.setLocale(Locale.ENGLISH);
-
-            assertEquals(null, new MessageCheck(messages).problemWith(player, 1));
-        } finally {
-            MockBukkit.unmock();
-        }
+    private Path file() {
+        return directory.resolve(MessageService.FILE);
     }
 
-    private void useDefaultLocale(String locale) throws Exception {
-        Files.writeString(directory.resolve("config.yml"), "default-locale: " + locale + "\n");
-        config.reload();
-        messages.reload();
-    }
-
-    private String plain(Locale locale, String key, String player) {
+    private String plain(String key, String player) {
         return PlainTextComponentSerializer.plainText()
-                .serialize(messages.render(locale, key, Placeholder.unparsed("player", player)));
+                .serialize(messages.render(key, Placeholder.unparsed("player", player)));
     }
 
     private static List<Object> colors(Component component) {
@@ -590,18 +361,13 @@ class MessageServiceTest {
     }
 
     /** The colour a piece of text is shown in, inherited from the components around it. */
-    private static net.kyori.adventure.text.format.TextColor colorOf(Component component, String text) {
-        return colorOf(component, text, null);
-    }
-
-    private static net.kyori.adventure.text.format.TextColor colorOf(
-            Component component, String text, net.kyori.adventure.text.format.TextColor inherited) {
-        net.kyori.adventure.text.format.TextColor color = component.color() != null ? component.color() : inherited;
+    private static @Nullable TextColor colorOf(Component component, String text, @Nullable TextColor inherited) {
+        TextColor color = component.color() != null ? component.color() : inherited;
         if (component instanceof net.kyori.adventure.text.TextComponent part && part.content().contains(text)) {
             return color;
         }
         for (Component child : component.children()) {
-            net.kyori.adventure.text.format.TextColor found = colorOf(child, text, color);
+            TextColor found = colorOf(child, text, color);
             if (found != null) {
                 return found;
             }
@@ -609,23 +375,16 @@ class MessageServiceTest {
         return null;
     }
 
-    private static InputStream bundled(String name) {
-        String content = BUNDLED.get(name);
-        return content == null ? null : new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8));
+    private static @Nullable InputStream bundled(String name) {
+        return MessageService.FILE.equals(name)
+                ? new ByteArrayInputStream(BUNDLED.getBytes(StandardCharsets.UTF_8))
+                : null;
     }
 
     private static final class RecordingAudience implements Audience {
 
         private final List<String> received = new ArrayList<>();
-        private final Pointers pointers;
         private int titles;
-
-        /** @param locale null for a viewer that has none, like the console */
-        RecordingAudience(Locale locale) {
-            this.pointers = locale == null
-                    ? Pointers.empty()
-                    : Pointers.builder().withStatic(Identity.LOCALE, locale).build();
-        }
 
         @Override
         public void showTitle(Title title) {
@@ -634,7 +393,7 @@ class MessageServiceTest {
 
         @Override
         public Pointers pointers() {
-            return pointers;
+            return Pointers.empty();
         }
 
         @Override
