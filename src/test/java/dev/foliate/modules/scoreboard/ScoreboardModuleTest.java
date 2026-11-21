@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.AfterEach;
@@ -208,6 +209,19 @@ class ScoreboardModuleTest {
         assertThrows(ConfigException.class, () -> configure("scoreboard:\n  refresh-ticks: 0\n"));
         String sixteenLines = "scoreboard:\n  lines:\n" + "  - line\n".repeat(16);
         assertThrows(ConfigException.class, () -> configure(sixteenLines));
+    }
+
+    /** A board whose refresh cannot be scheduled would never be drawn, nor removed by a quit. */
+    @Test
+    void noBoardIsKeptForAPlayerWhoseSchedulerIsRetired() {
+        PlayerMock leaving = server.addPlayer("Leaving");
+        scoreboard.onQuit(new PlayerQuitEvent(leaving, Component.empty(), PlayerQuitEvent.QuitReason.DISCONNECTED));
+        schedulers.retire(leaving);
+
+        scoreboard.onJoin(new PlayerJoinEvent(leaving, Component.empty()));
+
+        assertFalse(scoreboard.hasBoard(leaving.getUniqueId()));
+        assertTrue(boards.stream().allMatch(board -> board.deleted));
     }
 
     @Test

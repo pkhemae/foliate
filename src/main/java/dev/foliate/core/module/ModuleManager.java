@@ -32,10 +32,18 @@ public final class ModuleManager {
         this.logger = logger;
     }
 
-    /** Registers a module. Order matters: a module goes after the ones it depends on. */
+    /**
+     * Registers a module. Order matters: a module goes after the ones it depends on.
+     *
+     * @throws IllegalArgumentException when a module of the same name is registered: the logs,
+     *     the reload report and {@link #enabledNames()} tell modules apart by their name
+     */
     public synchronized void register(Module module) {
         if (state != State.NEW) {
             throw new IllegalStateException("Modules must be registered before enableAll()");
+        }
+        if (registered.stream().anyMatch(other -> other.name().equals(module.name()))) {
+            throw new IllegalArgumentException("A module named '" + module.name() + "' is already registered");
         }
         registered.add(module);
     }
@@ -56,6 +64,13 @@ public final class ModuleManager {
                 module.enable();
                 enabled.add(module);
             } catch (ModuleSkippedException e) {
+                if (module.required()) {
+                    // The plugin cannot run without it, whatever the reason it gives.
+                    logger.error("Required module '{}' is not enabled, the plugin cannot start: {}",
+                            module.name(), e.getMessage());
+                    disableAll();
+                    return false;
+                }
                 logger.info("Module '{}' is not enabled: {}", module.name(), e.getMessage());
             } catch (Exception | LinkageError e) {
                 disable(module);
@@ -75,8 +90,13 @@ public final class ModuleManager {
      * Reloads every enabled module. Must not be called from a tick thread.
      *
      * @return the failures by module name, empty when everything reloaded
+     * @throws IllegalStateException when the modules are not enabled: there would be nothing to
+     *     reload, and an empty result would read as a success
      */
     public synchronized Map<String, Throwable> reloadAll() {
+        if (state != State.ENABLED) {
+            throw new IllegalStateException("The modules are not enabled");
+        }
         Map<String, Throwable> failures = new LinkedHashMap<>();
         for (Module module : enabled) {
             try {

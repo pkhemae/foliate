@@ -305,8 +305,10 @@ public final class FoliaSchedulers implements Schedulers {
             tracked.set(scheduled);
             TaskHandle handle = timer(scheduled);
             if (gone.get() || scheduled.isCancelled()) {
-                // The entity was removed between scheduling and tracking.
+                // The entity was removed between scheduling and tracking. Reported as cancelled
+                // whatever the task says, so that callers see it will never run.
                 timers.remove(scheduled);
+                return CancelledHandle.INSTANCE;
             }
             return handle;
         }

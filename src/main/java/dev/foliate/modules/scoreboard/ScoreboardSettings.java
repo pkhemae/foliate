@@ -64,5 +64,6 @@ public final class ScoreboardSettings {
             throw new ConfigException(
                     "scoreboard.title and scoreboard.lines use the MiniMessage format: write <red> instead of legacy colour codes");
         }
+
     }
 }
