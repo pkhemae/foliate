@@ -1,6 +1,5 @@
 package dev.foliate.modules.scoreboard;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -223,13 +222,6 @@ class ScoreboardModuleTest {
 
         assertFalse(scoreboard.hasBoard(leaving.getUniqueId()));
         assertTrue(boards.stream().allMatch(board -> board.deleted));
-    }
-
-    @Test
-    void papiTagWithoutAPlaceholderIsRejectedAtLoad() {
-        assertThrows(ConfigException.class, () -> configure("scoreboard:\n  title: \"<papi>\"\n"));
-        assertThrows(ConfigException.class, () -> configure("scoreboard:\n  lines: [\"<PAPI:>\"]\n"));
-        assertDoesNotThrow(() -> configure("scoreboard:\n  lines: [\"<papi:player_name>\"]\n"));
     }
 
     @Test

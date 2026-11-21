@@ -118,20 +118,15 @@ public class FoliatePlugin extends JavaPlugin {
      * Registers an optional integration, only when the other plugin is installed. The hook is
      * created inside the supplier so that none of its classes is touched otherwise, and a hook
      * that does not link against the installed version is left out instead of stopping the plugin.
-     *
-     * @return the hook, or null when it is not available
      */
-    private <T extends Module> @Nullable T hook(ModuleManager modules, String plugin, Supplier<T> factory) {
+    private void hook(ModuleManager modules, String plugin, Supplier<? extends Module> factory) {
         if (!getServer().getPluginManager().isPluginEnabled(plugin)) {
-            return null;
+            return;
         }
         try {
-            T hook = factory.get();
-            modules.register(hook);
-            return hook;
+            modules.register(factory.get());
         } catch (LinkageError e) {
             getSLF4JLogger().error("The {} integration does not work with the installed version and stays off", plugin, e);
-            return null;
         }
     }
 

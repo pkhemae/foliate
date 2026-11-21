@@ -281,7 +281,7 @@ public final class MessageService implements Module {
                         continue;
                     }
                     Locale locale = Translator.parseLocale(name.replace('-', '_'));
-                    String earlier = sources.putIfAbsent(locale, fileName);
+                    String earlier = sources.get(locale);
                     if (earlier != null) {
                         logger.warn("Ignoring lang/{}: lang/{} is already the file of this language", fileName, earlier);
                         continue;
@@ -304,6 +304,9 @@ public final class MessageService implements Module {
                         languages.put(locale, Map.copyOf(builtInOfLocale));
                         continue;
                     }
+                    // Claimed only once read: a broken file does not hide a good one for the same
+                    // language, which then replaces the built-in text that stood in.
+                    sources.put(locale, fileName);
                     Map<String, List<String>> messages = new HashMap<>(builtIn.getOrDefault(locale, Map.of()));
                     messages.putAll(onDisk);
                     languages.put(locale, Map.copyOf(messages));

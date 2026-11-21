@@ -131,6 +131,7 @@ public final class ScoreboardModule implements Module, Listener {
         if (refresh.isCancelled()) {
             // The player is being removed: no refresh will ever run, and no quit will remove it.
             board.delete();
+            hide(player);
             return;
         }
         Entry previous = entries.put(player.getUniqueId(), new Entry(board, refresh));

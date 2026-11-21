@@ -293,6 +293,19 @@ class MessageServiceTest {
                 logger.lines().toString());
     }
 
+    /** A broken file does not hide a good one for the same language. */
+    @Test
+    void brokenFileDoesNotHideAGoodOneForTheSameLanguage() throws Exception {
+        Files.writeString(directory.resolve("lang/fr-CA.yml"), "greeting: [unclosed\n");
+        Files.writeString(directory.resolve("lang/fr_CA.yml"), "greeting: \"Salut <player>\"\n");
+        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+
+        fresh.enable();
+
+        assertEquals("Salut Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render(Locale.CANADA_FRENCH, "greeting", Placeholder.unparsed("player", "Alex"))));
+    }
+
     @Test
     void brokenFileOfAnotherBundledLocaleUsedAsDefaultFallsBackToo() throws Exception {
         Files.writeString(directory.resolve("lang/fr.yml"), "greeting: [unclosed\n");
