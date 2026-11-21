@@ -26,9 +26,9 @@ HMC_SHA256="${HMC_SHA256:-a343a7c51e48c566a5cd408bd0012ddf091ea105ecc31daff00af6
 # The Minecraft version of the build: gradle/libs.versions.toml is the one place that sets it.
 MC_VERSION="$(sed -n 's/^minecraft *= *"\(.*\)"/\1/p' gradle/libs.versions.toml)"
 HOOKS="${HOOKS:-true}"
-# One visit per language, as Minecraft names it (en_us, fr_fr): a client set to it joins, is checked and kicked, then the next one joins
-# as the same player. Two visits are what a player coming back needs.
-LANGUAGES="${LANGUAGES:-en_us,fr_fr}"
+# How many times a client joins, is checked and kicked, then joins again as the same player. Two
+# visits are what a player coming back needs.
+VISITS="${VISITS:-2}"
 # With TYPED=true the client is a Fabric client with the mod hmc-specifics, which lets this script
 # make it type a command; without it the client is the vanilla one and only joins.
 TYPED="${TYPED:-false}"
@@ -118,7 +118,7 @@ java -jar headlessmc.jar launch --dry-run -lwjgl --offline $LOADER "$MC_VERSION"
 echo "::endgroup::"
 
 rm -f "$SERVER_LOG"
-./gradlew runFolia -PserverTest=true -PclientTest=true -PacceptEula=true "-Phooks=$HOOKS" "-PclientLanguages=$(echo "$LANGUAGES" | sed 's/_[a-z_]*//g')" \
+./gradlew runFolia -PserverTest=true -PclientTest=true -PacceptEula=true "-Phooks=$HOOKS" "-PclientVisits=$VISITS" \
   "-PclientTyped=$([ "$TYPED" = true ] && echo "$TYPED_COMMAND")" \
   < /dev/null > server.out 2>&1 &
 server_pid=$!
@@ -152,8 +152,7 @@ type_when_joined() {
 }
 
 launch_client() {
-  language="$1"
-  printf 'onboardAccessibility:false\npauseOnLostFocus:false\nlang:%s\n' "$language" > client-run/options.txt
+  printf 'onboardAccessibility:false\npauseOnLostFocus:false\n' > client-run/options.txt
   # The launcher's shell reads its commands from a pipe that this script keeps open (an end of
   # input would make it quit), and writes the typed command to.
   rm -f client-in.fifo
@@ -170,7 +169,7 @@ launch_client() {
 }
 
 visit=0
-for language in ${LANGUAGES//,/ }; do
+while [ "$visit" -lt "$VISITS" ]; do
   visit=$((visit + 1))
   # The server test says it is waiting again once the previous player is gone.
   for _ in $(seq 1 60); do
@@ -179,8 +178,8 @@ for language in ${LANGUAGES//,/ }; do
     sleep 2
   done
   [ "$(count "$WAITING")" -ge "$visit" ] || { echo "The server was not ready for visit $visit"; exit 1; }
-  echo "Visit $visit: joining with a client set to $language"
-  launch_client "$language"
+  echo "Visit $visit: joining"
+  launch_client
   # The server kicks the client once its checks are done. A client that died before joining
   # would leave the server waiting for minutes.
   deadline=$((SECONDS + 300))

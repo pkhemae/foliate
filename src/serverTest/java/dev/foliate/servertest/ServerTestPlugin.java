@@ -1,8 +1,6 @@
 package dev.foliate.servertest;
 
 import dev.foliate.FoliatePlugin;
-import dev.foliate.core.message.MessageCheck;
-import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.modules.profile.ProfileCheck;
 import dev.foliate.modules.profile.ProfileModule;
@@ -31,7 +29,6 @@ public final class ServerTestPlugin extends FoliatePlugin {
     /** One check per enabled module that has one. A new module with a check is added here. */
     private static List<PlayerCheck> checks(ModuleManager modules) {
         List<PlayerCheck> checks = new ArrayList<>();
-        modules.enabledOf(MessageService.class).forEach(messages -> checks.add(new MessageCheck(messages)));
         modules.enabledOf(ProfileModule.class).forEach(profiles -> checks.add(new ProfileCheck(profiles)));
         modules.enabledOf(ScoreboardModule.class).forEach(scoreboard -> checks.add(new ScoreboardCheck(scoreboard)));
         return List.copyOf(checks);

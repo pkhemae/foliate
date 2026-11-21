@@ -64,7 +64,7 @@ public final class ServerTest {
 
     private static final String EXPECTED_MODULES_PROPERTY = "foliate.servertest.expect";
     private static final String CLIENT_PROPERTY = "foliate.servertest.client";
-    private static final String LANGUAGES_PROPERTY = "foliate.servertest.client.languages";
+    private static final String VISITS_PROPERTY = "foliate.servertest.client.visits";
     private static final String TYPED_PROPERTY = "foliate.servertest.client.typed";
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
     /** Starting a client takes much longer than starting the server. */
@@ -92,11 +92,8 @@ public final class ServerTest {
     private final List<Typed> typedByPlayers = new CopyOnWriteArrayList<>();
 
     private record Typed(UUID player, String command) {}
-    /** The language each visit's client is set to, in order: one visit per entry, one at least. */
-    private final List<String> visitLanguages = Arrays.stream(System.getProperty(LANGUAGES_PROPERTY, "").split(","))
-            .map(String::strip)
-            .filter(language -> !language.isEmpty())
-            .toList();
+    /** How many times a client joins as the same player: one at least. */
+    private final int visits = Math.max(1, Integer.getInteger(VISITS_PROPERTY, 1));
     private volatile @Nullable Entity marker;
     private volatile @Nullable Runnable releaseChunk;
 
@@ -178,20 +175,19 @@ public final class ServerTest {
                 .thenCompose(ignored -> withClient ? connectedPlayerIsServed() : CompletableFuture.completedFuture(null));
     }
 
-    /** One visit per language asked for, or one: each is a client that joins, is checked, and is kicked. */
+    /** Each visit is a client that joins, is checked, and is kicked; the next one is the same player coming back. */
     private CompletableFuture<Void> connectedPlayerIsServed() {
-        return visit(1, Math.max(1, visitLanguages.size()));
+        return visit(1, visits);
     }
 
     private CompletableFuture<Void> visit(int number, int total) {
         logger.info("{} (visit {} of {})", WAITING, number, total);
-        String language = number <= visitLanguages.size() ? visitLanguages.get(number - 1) : "";
         return nextPlayer.get()
                 .thenCompose(player -> {
                     // What the player types from now on belongs to this visit.
                     int typedBefore = typedByPlayers.size();
                     return after(SETTLE)
-                        .thenCompose(ignored -> eventually(() -> schedulers.async().supply(() -> servedProblem(player, number, language))))
+                        .thenCompose(ignored -> eventually(() -> schedulers.async().supply(() -> servedProblem(player, number))))
                         .thenCompose(ignored -> profileCommandRuns(player))
                         .thenCompose(ignored -> menuOpens(player, typedBefore))
                         .thenCompose(ignored -> after(SETTLE))
@@ -213,16 +209,12 @@ public final class ServerTest {
                 });
     }
 
-    private @Nullable String servedProblem(Player player, int visit, String language) {
+    private @Nullable String servedProblem(Player player, int visit) {
         if (!player.isOnline()) {
             return "the client left before the checks were done";
         }
-        if (!language.isEmpty() && !player.locale().getLanguage().equals(language)) {
-            return player.getName() + " reports the language " + player.locale() + " instead of " + language;
-        }
-        if (checks.isEmpty()) {
-            return "no module has a check for a connected player";
-        }
+        // No check at all is fine: a plugin without the example modules still has a player who
+        // joins, stays connected and comes back, which the visits check whatever modules exist.
         for (PlayerCheck check : checks) {
             String problem = check.problemWith(player, visit);
             if (problem != null) {

@@ -2,7 +2,7 @@ package dev.foliate.core.message;
 
 import java.io.Serial;
 
-/** The language files could not be read or do not match the configuration. */
+/** messages.yml could not be read, or is not valid. */
 public final class MessageException extends Exception {
 
     @Serial

@@ -1,6 +1,8 @@
+# Every message of the plugin. Translate them here to change its language.
 # Messages use the MiniMessage format: https://docs.papermc.io/adventure/minimessage/format/
 # <prefix> inserts the prefix below. Set a message to "" to disable it.
 # A message missing from this file falls back to the plugin's built-in text.
+# Delete this file to get the built-in one back.
 
 prefix: "<dark_gray>[<aqua>Foliate</aqua>]</dark_gray> "
 

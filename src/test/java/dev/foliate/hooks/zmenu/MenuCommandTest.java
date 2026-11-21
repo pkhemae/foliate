@@ -3,8 +3,6 @@ package dev.foliate.hooks.zmenu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.mojang.brigadier.CommandDispatcher;
-import dev.foliate.PluginConfig;
-import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.testing.CommandSource;
 import dev.foliate.testing.PluginYml;
@@ -38,10 +36,7 @@ class MenuCommandTest {
     void setUp() throws Exception {
         server = MockBukkit.mock();
         PluginYml.registerPermissions(server);
-        ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
-        config.enable();
-        MessageService messages = new MessageService(
-                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService messages = new MessageService(directory, getClass().getClassLoader()::getResourceAsStream, NOPLogger.NOP_LOGGER);
         messages.enable();
         dispatcher = TestCommands.registerExecuteAs(
                 TestCommands.dispatcher(new MenuCommand((player, menu) -> opened.add(player.getName() + " " + menu), messages)),

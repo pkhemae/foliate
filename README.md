@@ -27,7 +27,7 @@ first. The same jar runs on Paper.
 | **Scheduling** | One facade over Folia's region, entity, global and async schedulers |
 | **Modules** | Features with an enable, reload and disable lifecycle, isolated from each other |
 | **Configuration** | A typed `config.yml`, generated with comments, reloaded safely, migrated between versions |
-| **Messages** | MiniMessage text in per-language files, shown in each player's language |
+| **Messages** | MiniMessage text in one `messages.yml`, in English, that the administrator translates by editing it |
 | **Commands** | One class per subcommand, on Paper's native command API, with declared permissions |
 | **Storage** | SQLite out of the box, MySQL or MariaDB by configuration, with schema migrations |
 | **Player data** | Loaded before login, cached, saved in order, retried while the database is unreachable, flushed on shutdown |

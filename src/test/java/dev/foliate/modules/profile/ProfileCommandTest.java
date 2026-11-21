@@ -7,8 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
-import dev.foliate.PluginConfig;
-import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.testing.CommandSource;
 import dev.foliate.testing.PluginYml;
@@ -49,10 +47,7 @@ class ProfileCommandTest {
         server = MockBukkit.mock();
         plugin = MockBukkit.createMockPlugin();
         PluginYml.registerPermissions(server);
-        ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
-        config.enable();
-        MessageService messages = new MessageService(
-                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService messages = new MessageService(directory, getClass().getClassLoader()::getResourceAsStream, NOPLogger.NOP_LOGGER);
         messages.enable();
         dispatcher = TestCommands.registerExecuteAs(
                 TestCommands.dispatcher(new ProfileCommand(id -> Optional.ofNullable(profiles.get(id)), messages, server)),

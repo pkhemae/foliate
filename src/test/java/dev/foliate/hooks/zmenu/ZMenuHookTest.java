@@ -6,8 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.foliate.PluginConfig;
-import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.scheduler.FoliaSchedulers;
@@ -66,10 +64,7 @@ class ZMenuHookTest {
     void setUp() throws Exception {
         server = MockBukkit.mock();
         Plugin plugin = MockBukkit.createMockPlugin();
-        ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
-        config.enable();
-        MessageService messages = new MessageService(
-                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService messages = new MessageService(directory, getClass().getClassLoader()::getResourceAsStream, NOPLogger.NOP_LOGGER);
         messages.enable();
         this.plugin = plugin;
         this.messages = messages;
