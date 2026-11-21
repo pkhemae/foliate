@@ -1,10 +1,9 @@
-package dev.foliate.commands;
+package dev.foliate.modules.profile;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import dev.foliate.contracts.profile.ProfileLookup;
-import dev.foliate.contracts.profile.ProfileSummary;
+import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.message.MessageService;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
@@ -13,6 +12,8 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Function;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Server;
@@ -29,27 +30,34 @@ import org.bukkit.entity.Player;
  *       may see their own profile and only some may see another's (that includes running the
  *       command as someone else, with {@code /execute as});
  *   <li>the online players are suggested while typing;
- *   <li>it reads the profile from the cache, through {@link ProfileLookup}: a command runs on the
- *       region of whoever typed it, so it must never wait for the database;
- *   <li>it reaches the profile feature through an interface of {@code contracts}, because
- *       commands never depend on a module.
+ *   <li>it reads the profile from the cache: a command runs on the region of whoever typed it,
+ *       so it must never wait for the database;
+ *   <li>it lives with the feature it shows, in the module's package, and the module offers it
+ *       ({@link ProfileModule#subcommands()}): it exists exactly when profiles are loaded.
  * </ul>
  *
  * <p>{@link Subcommand} says another player must be reached through the schedulers. Here only
  * their name and unique id are read, which are safe from any thread, and the profile comes from
  * the cache: nothing of the player's body, location or world is touched.
  */
-public final class ProfileCommand implements Subcommand {
+final class ProfileCommand implements Subcommand {
+
+    /** To see one's own profile. Declared in the plugin.yml with the other nodes. */
+    static final String PERMISSION = "foliate.command.profile";
+
+    /** To see another player's profile, by name or by running the command as them. */
+    static final String PERMISSION_OTHERS = "foliate.command.profile.others";
 
     private static final String ARGUMENT = "player";
     private static final DateTimeFormatter DATE_TIME =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'").withZone(ZoneOffset.UTC);
 
-    private final ProfileLookup profiles;
+    private final Function<UUID, Optional<PlayerProfile>> profiles;
     private final MessageService messages;
     private final Server server;
 
-    public ProfileCommand(ProfileLookup profiles, MessageService messages, Server server) {
+    /** @param profiles the cached profile of an online player, as {@link ProfileModule#find} gives it */
+    ProfileCommand(Function<UUID, Optional<PlayerProfile>> profiles, MessageService messages, Server server) {
         this.profiles = profiles;
         this.messages = messages;
         this.server = server;
@@ -62,7 +70,7 @@ public final class ProfileCommand implements Subcommand {
 
     @Override
     public String permission() {
-        return Permissions.COMMAND_PROFILE;
+        return PERMISSION;
     }
 
     @Override
@@ -74,7 +82,7 @@ public final class ProfileCommand implements Subcommand {
         // command asks for a name.
         node.requires(source -> source.getExecutor() == null
                         || source.getExecutor() == source.getSender()
-                        || source.getSender().hasPermission(Permissions.COMMAND_PROFILE_OTHERS))
+                        || source.getSender().hasPermission(PERMISSION_OTHERS))
                 .executes(context -> {
             CommandSourceStack source = context.getSource();
             Entity executor = source.getExecutor();
@@ -87,10 +95,10 @@ public final class ProfileCommand implements Subcommand {
         });
         // /foliate profile <player>: a word that is matched against the players online.
         node.then(Commands.argument(ARGUMENT, StringArgumentType.word())
-                .requires(source -> source.getSender().hasPermission(Permissions.COMMAND_PROFILE_OTHERS))
+                .requires(source -> source.getSender().hasPermission(PERMISSION_OTHERS))
                 .suggests((context, suggestions) -> {
                     // Brigadier asks for suggestions without applying the node's requirement.
-                    if (!context.getSource().getSender().hasPermission(Permissions.COMMAND_PROFILE_OTHERS)) {
+                    if (!context.getSource().getSender().hasPermission(PERMISSION_OTHERS)) {
                         return suggestions.buildFuture();
                     }
                     CommandSender sender = context.getSource().getSender();
@@ -123,19 +131,20 @@ public final class ProfileCommand implements Subcommand {
     }
 
     private void show(Audience to, Player player) {
-        Optional<ProfileSummary> profile = profiles.lookup(player.getUniqueId());
+        Optional<PlayerProfile> profile = profiles.apply(player.getUniqueId());
         if (profile.isEmpty()) {
             // Online, but nothing cached: they have only just joined, or their profile failed to load.
             messages.send(to, "command.profile.not-loaded", Placeholder.unparsed("player", player.getName()));
             return;
         }
-        ProfileSummary summary = profile.get();
+        PlayerProfile shown = profile.get();
         messages.send(
                 to,
                 "command.profile.show",
-                Placeholder.unparsed("player", summary.name()),
-                Placeholder.unparsed("first-seen", DATE_TIME.format(Instant.ofEpochMilli(summary.firstSeen()))),
-                Placeholder.unparsed("since", DATE_TIME.format(Instant.ofEpochMilli(summary.onlineSince()))),
-                Placeholder.unparsed("joins", String.valueOf(summary.joins())));
+                Placeholder.unparsed("player", shown.name()),
+                Placeholder.unparsed("first-seen", DATE_TIME.format(Instant.ofEpochMilli(shown.firstSeen()))),
+                // While the player is online, lastSeen is the time of this join.
+                Placeholder.unparsed("since", DATE_TIME.format(Instant.ofEpochMilli(shown.lastSeen()))),
+                Placeholder.unparsed("joins", String.valueOf(shown.joins())));
     }
 }

@@ -1,4 +1,4 @@
-package dev.foliate.commands;
+package dev.foliate.core.command;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.tree.LiteralCommandNode;
@@ -10,7 +10,8 @@ import java.util.Set;
 
 /**
  * The plugin's command, made of its {@link Subcommand}s. Adding a subcommand is writing its class
- * and adding it to the list given here: nothing in this class changes.
+ * and handing it over, from {@code FoliatePlugin} or from a module's
+ * {@link SubcommandProvider#subcommands()}: nothing in this class changes.
  */
 public final class RootCommand {
 

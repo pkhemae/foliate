@@ -2,6 +2,7 @@ package dev.foliate.commands;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleManager;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
@@ -9,6 +10,9 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 
 /** {@code info}: the plugin version, the server it runs on and the modules that are enabled. */
 public final class InfoCommand implements Subcommand {
+
+    /** Declared in the plugin.yml with the other nodes. */
+    static final String PERMISSION = "foliate.command.info";
 
     private final ModuleManager modules;
     private final MessageService messages;
@@ -29,7 +33,7 @@ public final class InfoCommand implements Subcommand {
 
     @Override
     public String permission() {
-        return Permissions.COMMAND_INFO;
+        return PERMISSION;
     }
 
     @Override

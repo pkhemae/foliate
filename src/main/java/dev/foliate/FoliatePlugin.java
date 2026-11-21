@@ -1,13 +1,11 @@
 package dev.foliate;
 
 import dev.foliate.commands.InfoCommand;
-import dev.foliate.commands.MenuCommand;
-import dev.foliate.commands.ProfileCommand;
 import dev.foliate.commands.ReloadCommand;
-import dev.foliate.commands.RootCommand;
-import dev.foliate.commands.Subcommand;
-import dev.foliate.contracts.menu.Menus;
 import dev.foliate.core.Platform;
+import dev.foliate.core.command.RootCommand;
+import dev.foliate.core.command.Subcommand;
+import dev.foliate.core.command.SubcommandProvider;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
@@ -70,9 +68,8 @@ public class FoliatePlugin extends JavaPlugin {
         Database database = new Database(
                 getDataPath(), () -> config.get().storage(), ProfileModule.MIGRATIONS, getSLF4JLogger());
         modules.register(database);
-        ProfileModule profiles = new ProfileModule(
-                this, database, messages, placeholders, getSLF4JLogger(), Clock.systemUTC());
-        modules.register(profiles);
+        modules.register(new ProfileModule(
+                this, database, messages, placeholders, getSLF4JLogger(), Clock.systemUTC()));
         modules.register(new ScoreboardModule(this, schedulers, () -> config.get().scoreboard(), messages));
         hook(modules, ZMenuHook.PLUGIN_NAME, () -> new ZMenuHook(this, schedulers, messages));
 
@@ -82,14 +79,13 @@ public class FoliatePlugin extends JavaPlugin {
             return;
         }
 
-        // One class per subcommand: to add one, write it and add it to this list.
+        // One class per subcommand. The plugin's own are listed here; a feature's come from its
+        // module, and only while it runs.
         List<Subcommand> subcommands = new ArrayList<>();
         subcommands.add(new InfoCommand(modules, messages, getPluginMeta().getVersion(), Platform.describe()));
         subcommands.add(new ReloadCommand(modules, messages, schedulers, getSLF4JLogger()));
-        // Only for features that are running: a hook that failed to enable has no menus to open.
-        modules.enabledOf(Menus.class).stream().findFirst().ifPresent(menus -> subcommands.add(new MenuCommand(menus)));
-        if (modules.enabledNames().contains(profiles.name())) {
-            subcommands.add(new ProfileCommand(profiles, messages, getServer()));
+        for (SubcommandProvider feature : modules.enabledOf(SubcommandProvider.class)) {
+            subcommands.addAll(feature.subcommands());
         }
         RootCommand command = new RootCommand("foliate", subcommands);
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> event.registrar()

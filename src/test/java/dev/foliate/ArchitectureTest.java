@@ -123,15 +123,14 @@ class ArchitectureTest {
     @Test
     void theContractsBetweenFeaturesAreOpenToAllButCore() {
         String source = """
-                import dev.foliate.contracts.profile.ProfileLookup;
+                import dev.foliate.contracts.menu.Menus;
                 import dev.foliate.core.message.MessageService;
-                import dev.foliate.modules.profile.ProfileModule;
+                import dev.foliate.hooks.zmenu.ZMenuHook;
                 """;
 
-        assertEquals(List.of("modules.profile.ProfileModule"), foreignReferences("commands", source));
-        assertEquals(List.of("modules.profile.ProfileModule"), foreignReferences("contracts", source));
-        assertEquals(
-                List.of("contracts.profile.ProfileLookup", "modules.profile.ProfileModule"), foreignReferences("core", source));
+        assertEquals(List.of("hooks.zmenu.ZMenuHook"), foreignReferences("modules.profile", source));
+        assertEquals(List.of("hooks.zmenu.ZMenuHook"), foreignReferences("contracts", source));
+        assertEquals(List.of("contracts.menu.Menus", "hooks.zmenu.ZMenuHook"), foreignReferences("core", source));
     }
 
     @Test
