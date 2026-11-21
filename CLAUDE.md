@@ -28,9 +28,12 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
 - `core` is reusable infrastructure and knows nothing of the plugin's features. A module owns its
   settings class and receives a supplier of it (`() -> config.get().scoreboard()`), so a reload takes
   effect; `PluginConfig` only composes the sections into the single `config.yml`.
-- `contracts` holds what features offer each other (`ProfileLookup`, `Menus`): interfaces and value
-  types only, implementations stay in their module or hook. Modules, hooks and commands depend on
-  `core` and `contracts`, never on each other; `ArchitectureTest` enforces it.
+- `contracts` holds what features offer each other (`Menus`): interfaces and value types only,
+  implementations stay in their module or hook. Modules, hooks and commands depend on `core` and
+  `contracts`, never on each other; `ArchitectureTest` enforces it.
+- A feature's subcommands live in its package and its module offers them (`SubcommandProvider`);
+  `commands` only holds those about the whole plugin. A permission node is a `PERMISSION` constant
+  next to the subcommand that checks it, and is declared in `build.gradle.kts`.
 - `FoliatePlugin` is the composition root. Dependencies are passed through constructors: no static
   singletons, no DI container.
 - `onDisable` does no world work. Region tickers are already stopped when it runs.

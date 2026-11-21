@@ -19,8 +19,12 @@ import org.mockbukkit.mockbukkit.ServerMock;
 
 class PluginYmlTest {
 
-    /** How a subcommand declares a node it checks, next to it. */
-    private static final Pattern PERMISSION = Pattern.compile("static final String PERMISSION\\w* = \"([^\"]+)\"");
+    /** How a subcommand declares a node it checks, next to it; on one line or on two. */
+    private static final Pattern PERMISSION =
+            Pattern.compile("static\\s+final\\s+String\\s+PERMISSION\\w*\\s*=\\s*\"([^\"]+)\"");
+
+    /** Any text that looks like a command's node, constant or not: {@code "foliate.command.x"}. */
+    private static final Pattern NODE = Pattern.compile("\"([a-z0-9_-]+\\.command(?:\\.[a-z0-9_-]+)+)\"");
 
     private ServerMock server;
 
@@ -50,15 +54,23 @@ class PluginYmlTest {
     @Test
     void theCodeAndThePluginYmlNameTheSamePermissions() throws IOException {
         Set<String> checked = new TreeSet<>();
+        Set<String> mentioned = new TreeSet<>();
         try (Stream<Path> files = Files.walk(Path.of("src/main/java"))) {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
-                Matcher constant = PERMISSION.matcher(Files.readString(file));
+                String source = Files.readString(file);
+                Matcher constant = PERMISSION.matcher(source);
                 while (constant.find()) {
                     checked.add(constant.group(1));
+                }
+                Matcher node = NODE.matcher(source);
+                while (node.find()) {
+                    mentioned.add(node.group(1));
                 }
             }
         }
 
         assertEquals(checked, new TreeSet<>(PluginYml.permissions()));
+        // A node written inline, without a constant, would escape the comparison above.
+        assertEquals(checked, mentioned, "write each command node as a PERMISSION constant next to its subcommand");
     }
 }
