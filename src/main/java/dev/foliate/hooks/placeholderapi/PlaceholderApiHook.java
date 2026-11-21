@@ -34,9 +34,6 @@ public final class PlaceholderApiHook implements Module {
 
     public static final String PLUGIN_NAME = "PlaceholderAPI";
 
-    private final PluginMeta meta;
-    private final PlaceholderRegistry registry;
-    private final MessageService messages;
     /** {@code &} codes, with both hexadecimal notations: {@code &#rrggbb} and {@code &x&r&r&g&g&b&b}. */
     private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.builder()
             .character('&')
@@ -44,6 +41,10 @@ public final class PlaceholderApiHook implements Module {
             .hexColors()
             .useUnusualXRepeatedCharacterHexFormat()
             .build();
+
+    private final PluginMeta meta;
+    private final PlaceholderRegistry registry;
+    private final MessageService messages;
 
     private final TagResolver papiTag = TagResolver.resolver("papi", (arguments, context) -> {
         // MiniMessage splits tag arguments on ':', which a placeholder may contain
@@ -85,11 +86,16 @@ public final class PlaceholderApiHook implements Module {
         return "placeholderapi";
     }
 
+    /**
+     * @throws PlaceholderApiException when PlaceholderAPI refuses the expansion: a problem of the
+     *     server's setup, such as another expansion with the same identifier, not a bug
+     */
     @Override
-    public void enable() {
+    public void enable() throws PlaceholderApiException {
         FoliateExpansion expansion = new FoliateExpansion(meta, registry);
         if (!expansion.register()) {
-            throw new IllegalStateException("PlaceholderAPI refused the expansion");
+            throw new PlaceholderApiException("PlaceholderAPI refused the expansion '" + expansion.getIdentifier()
+                    + "': another expansion may already use that identifier");
         }
         this.expansion = expansion;
         messages.addSharedResolver(papiTag);

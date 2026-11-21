@@ -26,7 +26,7 @@ public interface Module {
      *
      * @throws ModuleSkippedException if the module has nothing to do in this setup, for example
      *     because it is turned off in the configuration; this is logged as information, not as an
-     *     error
+     *     error. Throw it before setting anything up: {@link #disable()} is not called after it
      * @throws Exception if the module cannot start
      */
     void enable() throws Exception;
