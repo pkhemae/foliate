@@ -13,7 +13,6 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
@@ -80,14 +79,8 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     private static final long LOAD_TIMEOUT_SECONDS = 10;
     private static final long FLUSH_TIMEOUT_SECONDS = 15;
 
-    /** The wait before the first retry of a failed save or late load; it doubles each time. */
-    static final long RETRY_FIRST_MILLIS = 250;
-
-    /** The longest wait between two tries. */
-    static final long RETRY_MAX_MILLIS = 10_000;
-
     /** How many times an error that may or may not pass is tried again before giving up. */
-    static final int UNCERTAIN_RETRIES = 3;
+    static final int UNCERTAIN_RETRIES = Retries.UNCERTAIN_RETRIES;
 
     /** How many players a report of unsaved values names; the others are counted. */
     private static final int REPORTED_IDS = 10;
@@ -162,13 +155,8 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     /** The delay before each player's next retry, so that the shutdown can cut it short. */
     private final Map<UUID, CompletableFuture<@Nullable Void>> retryWaits = new ConcurrentHashMap<>();
 
-    /**
-     * Runs a retry after a delay. Not the plugin's {@code Schedulers}: the server refuses its
-     * async tasks while the plugin is disabled, and the saves of the shutdown must still be
-     * retried then. Replaced in the tests, which do not wait for real delays.
-     */
-    private volatile LongFunction<Executor> retryDelays =
-            millis -> CompletableFuture.delayedExecutor(millis, TimeUnit.MILLISECONDS);
+    /** When the failed saves and late loads are tried again. */
+    private final Retries retries = new Retries();
 
     /** The last database operation queued for each player; the next one is chained after it. */
     private final Map<UUID, CompletableFuture<?>> queues = new ConcurrentHashMap<>();
@@ -373,7 +361,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
             if (cause instanceof SQLException || cause instanceof TimeoutException) {
                 // The database is down or late: one line each, an outage refuses many players.
-                logger.warn("Refused {}: could not load their {} ({})", event.getName(), subject, describe(cause));
+                logger.warn("Refused {}: could not load their {} ({})", event.getName(), subject, Retries.describe(cause));
             } else {
                 logger.error("Could not load the {} of {}", subject, event.getName(), e);
             }
@@ -531,7 +519,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                         }
                     })
                     .exceptionally(error -> {
-                        Throwable cause = unwrap(error);
+                        Throwable cause = Retries.unwrap(error);
                         boolean stillWaiting;
                         synchronized (sessions) {
                             stillWaiting = enabled.get() && pendingJoins.get(id) == load;
@@ -539,12 +527,11 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                                 pendingJoins.remove(id, load);
                             }
                         }
-                        if (stillWaiting && worthRetrying(cause, failures)) {
+                        if (stillWaiting && Retries.worthRetrying(cause, failures)) {
                             if (failures == 0) {
-                                logger.warn("Could not load the {} of {}, retrying: {}", subject, name, describe(cause));
+                                logger.warn("Could not load the {} of {}, retrying: {}", subject, name, Retries.describe(cause));
                             }
-                            retryDelays.apply(retryDelay(failures))
-                                    .execute(() -> loadLate(id, name, joinedAt, load, failures + 1));
+                            retries.after(failures, () -> loadLate(id, name, joinedAt, load, failures + 1));
                         } else if (stillWaiting) {
                             synchronized (sessions) {
                                 pendingJoins.remove(id, load);
@@ -623,7 +610,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                     return null;
                 })
                 .handle((done, error) -> error)
-                .thenCompose(error -> error == null ? saved(id, save) : failed(id, save, failures, unwrap(error)));
+                .thenCompose(error -> error == null ? saved(id, save) : failed(id, save, failures, Retries.unwrap(error)));
     }
 
     private CompletableFuture<@Nullable Void> saved(UUID id, PendingSave<T> save) {
@@ -635,7 +622,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
 
     private CompletableFuture<@Nullable Void> failed(UUID id, PendingSave<T> save, int failures, Throwable cause) {
         boolean stopping = abandoned || !database.isRunning();
-        if (stopping || !worthRetrying(cause, failures)) {
+        if (stopping || !Retries.worthRetrying(cause, failures)) {
             synchronized (sessions) {
                 // Closed, so that a change made from now on is a save of its own.
                 save.start();
@@ -671,7 +658,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         retryStarted(id, cause);
         CompletableFuture<@Nullable Void> wait = new CompletableFuture<>();
         retryWaits.put(id, wait);
-        retryDelays.apply(retryDelay(failures)).execute(() -> wait.complete(null));
+        retries.after(failures, () -> wait.complete(null));
         if (abandoned) {
             // The shutdown stopped waiting meanwhile: one last try, at once.
             wait.complete(null);
@@ -686,7 +673,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     private void retryStarted(UUID id, Throwable cause) {
         synchronized (retrying) {
             if (retrying.add(id) && retrying.size() == 1) {
-                logger.warn("Could not save the {} of {}, retrying: {}", subject, id, describe(cause));
+                logger.warn("Could not save the {} of {}, retrying: {}", subject, id, Retries.describe(cause));
             }
         }
     }
@@ -700,14 +687,6 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         }
     }
 
-    /**
-     * Whether trying again may succeed: always when the database was unreachable, busy or late,
-     * a few times for an error that does not say, never for anything but a database error.
-     */
-    private static boolean worthRetrying(Throwable error, int failures) {
-        return error instanceof SQLException sql && (SqlErrors.mayPass(sql) || failures < UNCERTAIN_RETRIES);
-    }
-
     /** Shortens the shutdown's wait, for the tests. */
     void flushTimeoutSeconds(long seconds) {
         flushTimeoutSeconds = seconds;
@@ -715,23 +694,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
 
     /** Makes the retries run at once, or when a test says. */
     void retryDelays(LongFunction<Executor> delays) {
-        retryDelays = delays;
-    }
-
-    /** How long to wait after a number of failures in a row: doubling, up to a limit. */
-    static long retryDelay(int failures) {
-        return Math.min(RETRY_MAX_MILLIS, RETRY_FIRST_MILLIS << Math.min(failures, 16));
-    }
-
-    private static Throwable unwrap(Throwable error) {
-        return error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
-    }
-
-    /** An error in one line, for a warning that would otherwise repeat a whole stack trace. */
-    private static String describe(Throwable error) {
-        String message = error.getMessage();
-        String first = message == null ? "" : message.lines().findFirst().orElse("");
-        return first.isEmpty() ? error.getClass().getSimpleName() : first;
+        retries.delays(delays);
     }
 
     /**
