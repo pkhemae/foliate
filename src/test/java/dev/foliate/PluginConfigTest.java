@@ -148,6 +148,22 @@ class PluginConfigTest {
         }
     }
 
+    /** ConfigLib would read 1.5 as 1 and write 1 back: a whole-number setting refuses it. */
+    @Test
+    void aDecimalForAWholeNumberIsRefused() throws Exception {
+        for (Map.Entry<String, String> decimal : Map.of(
+                "scoreboard:\n  refresh-ticks: 1.5\n", "scoreboard.refresh-ticks must be a whole number",
+                "storage:\n  mysql:\n    pool-size: 2.0\n", "storage.mysql.pool-size must be a whole number").entrySet()) {
+            Files.writeString(directory.resolve("config.yml"), decimal.getKey());
+            ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
+
+            ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+            assertEquals("config.yml is invalid: " + decimal.getValue(), failure.getMessage());
+            assertEquals(decimal.getKey(), Files.readString(directory.resolve("config.yml")), "the file was rewritten");
+        }
+    }
+
     /** The section is not used then, so what is left in it must not stop the server. */
     @Test
     void theMysqlSectionIsOnlyCheckedWhenItIsUsed() throws Exception {

@@ -1,5 +1,6 @@
 package dev.foliate.core.config;
 
+import de.exlll.configlib.Configuration;
 import de.exlll.configlib.ConfigurationException;
 import de.exlll.configlib.NameFormatter;
 import de.exlll.configlib.NameFormatters;
@@ -12,12 +13,14 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
@@ -65,6 +68,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     private final Supplier<T> defaults;
     private final ConfigMigrator migrator;
     private final YamlConfigurationStore<T> store;
+    private final Class<T> type;
     private volatile @Nullable T current;
 
     /**
@@ -90,6 +94,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
                 .header(header)
                 .build();
         this.store = new YamlConfigurationStore<>(type, properties);
+        this.type = type;
     }
 
     @Override
@@ -139,6 +144,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             }
 
             // An empty file is treated like a missing one: both get the defaults.
+            requireWholeNumbers(type, content, "");
             T config = content.isEmpty()
                     ? defaults.get()
                     : store.read(new ByteArrayInputStream(Yaml.dump(content).getBytes(StandardCharsets.UTF_8)));
@@ -170,6 +176,8 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             // Not chained: the library's messages print the values of the whole section, password
             // included, and a stack trace would print every cause.
             throw new ConfigException(FILE_NAME + " is invalid: " + describe(e));
+        } catch (CharacterCodingException e) {
+            throw new ConfigException(FILE_NAME + " is not saved as UTF-8: save it again as UTF-8 in a text editor", e);
         } catch (IOException | UncheckedIOException e) {
             throw new ConfigException(FILE_NAME + " could not be read or written: " + e.getMessage(), e);
         }
@@ -203,6 +211,26 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         Type type = fields.getLast().getGenericType();
         // Unquoted, YAML reads a number, true, or a value starting with [ or { as something else.
         return path + " must be " + kind(type) + (type == String.class ? ": put it in quotes" : "");
+    }
+
+    /**
+     * ConfigLib reads {@code 1.5} into a whole-number setting as {@code 1}, without a word, and the
+     * file is then written back with {@code 1}: such a value is refused here instead.
+     */
+    private static void requireWholeNumbers(Class<?> settings, Map<?, ?> content, String prefix) throws ConfigException {
+        for (Field field : settings.getDeclaredFields()) {
+            if (Modifier.isStatic(field.getModifiers()) || Modifier.isTransient(field.getModifiers())) {
+                continue;
+            }
+            String path = prefix + NAMES.format(field.getName());
+            Object value = content.get(NAMES.format(field.getName()));
+            if (kind(field.getType()).equals("a whole number") && (value instanceof Double || value instanceof Float)) {
+                throw new ConfigException(path + " must be a whole number");
+            }
+            if (value instanceof Map<?, ?> section && field.getType().isAnnotationPresent(Configuration.class)) {
+                requireWholeNumbers(field.getType(), section, path + ".");
+            }
+        }
     }
 
     /** The field a message of the library is about, if it names one. */

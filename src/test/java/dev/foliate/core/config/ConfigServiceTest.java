@@ -282,6 +282,28 @@ class ConfigServiceTest {
                 logger.lines());
     }
 
+    /** Saved by an editor in Windows-1252, an accent is not UTF-8: say so, not "Input length = 1". */
+    @Test
+    void aFileThatIsNotUtf8IsReportedAsSuch() throws IOException {
+        Files.write(file, "debug: false\n# Bienvenue à tous\n".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+
+        ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+        assertEquals("config.yml is not saved as UTF-8: save it again as UTF-8 in a text editor", failure.getMessage());
+    }
+
+    /** The message is read after the file's name. */
+    @Test
+    void aDocumentThatIsNotSettingsSaysWhatItIs() throws IOException {
+        Files.writeString(file, "- debug\n- other\n");
+        assertEquals("config.yml is not a list of settings (it is a list)",
+                assertThrows(ConfigException.class, service::enable).getMessage());
+
+        Files.writeString(file, "just text\n");
+        assertEquals("config.yml is not a list of settings (it is a single value)",
+                assertThrows(ConfigException.class, service::enable).getMessage());
+    }
+
     @Test
     void fileFromANewerPluginVersionIsRejected() throws IOException {
         Files.writeString(file, "config-version: 2\n");
