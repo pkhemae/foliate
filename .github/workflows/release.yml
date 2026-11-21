@@ -77,7 +77,9 @@ jobs:
           name: release-jar
           path: release/*.jar
           if-no-files-found: error
-          retention-days: 1
+          # "Re-run failed jobs" does not rebuild: publish downloads this artifact again. Seven
+          # days leave time for that; after them, "Re-run all jobs" builds it anew.
+          retention-days: 7
 
   publish:
     needs: build
@@ -112,7 +114,9 @@ jobs:
           case "$version" in
             *-*) flags+=(--prerelease) ;;
           esac
-          # Re-running the job, or a release drafted by hand for the tag, must not fail here.
+          # A release that already exists for the tag, from an earlier attempt or drafted by hand,
+          # gets the files replaced instead of failing here. Re-running only this job needs the
+          # build's artifact, which is kept 7 days.
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
           else
