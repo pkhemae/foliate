@@ -30,13 +30,13 @@ first. The same jar runs on Paper.
 | **Messages** | MiniMessage text in per-language files, shown in each player's language |
 | **Commands** | One class per subcommand, on Paper's native command API, with declared permissions |
 | **Storage** | SQLite out of the box, MySQL or MariaDB by configuration, with schema migrations |
-| **Player data** | Loaded before login, cached, saved in order, flushed on shutdown |
+| **Player data** | Loaded before login, cached, saved in order, retried while the database is unreachable, flushed on shutdown |
 | **Scoreboard** | A per-player scoreboard on the side of the screen, drawn with packets because the Bukkit scoreboard API does not work on Folia |
 | **Integrations** | PlaceholderAPI and zMenu, both optional |
-| **Tests** | Unit tests, and a smoke test that boots a real Folia server in CI |
-| **Tooling** | One command to rename the template, GitHub releases on tag, Renovate |
+| **Tests** | Unit tests, a smoke test that boots a real Folia server, and a headless Minecraft client that joins it, in CI |
+| **Tooling** | One command to rename the template, GitHub releases on tag with a SHA-256 checksum, Renovate |
 
-What you keep is `core/`, the plugin class and the `info` and `reload` commands. Everything under `modules/` and `hooks/`, the `contracts/` they offer each other and the commands that use them are example code that you can delete: the [developer guide](https://github.com/pkhemae/foliate/wiki/Making-it-yours) lists what each removal takes with it.
+What you keep is `core/`, the plugin class and the `info` and `reload` commands. Everything under `modules/` and `hooks/`, with the subcommands each feature offers, is example code that you can delete: the [developer guide](https://github.com/pkhemae/foliate/wiki/Making-it-yours) lists what each removal takes with it. `contracts/` is empty, apart from its `package-info.java`: it is where your features put what they offer each other.
 
 ## Quick start
 
@@ -67,9 +67,9 @@ The [wiki](https://github.com/pkhemae/foliate/wiki) has one page per topic.
 
 | Start here | Guides |
 | --- | --- |
-| [Getting started](https://github.com/pkhemae/foliate/wiki/Getting-started) | [Modules](https://github.com/pkhemae/foliate/wiki/Modules) · [Configuration](https://github.com/pkhemae/foliate/wiki/Configuration) · [Messages](https://github.com/pkhemae/foliate/wiki/Messages) · [Commands](https://github.com/pkhemae/foliate/wiki/Commands) |
-| [Scheduling](https://github.com/pkhemae/foliate/wiki/Scheduling) | [Placeholders](https://github.com/pkhemae/foliate/wiki/Placeholders) · [Menus](https://github.com/pkhemae/foliate/wiki/Menus) · [Scoreboard](https://github.com/pkhemae/foliate/wiki/Scoreboard) · [Storage and player data](https://github.com/pkhemae/foliate/wiki/Storage-and-player-data) |
-| [Making it yours](https://github.com/pkhemae/foliate/wiki/Making-it-yours) | [Optional integrations](https://github.com/pkhemae/foliate/wiki/Optional-integrations) · [Testing](https://github.com/pkhemae/foliate/wiki/Testing) · [Releasing](https://github.com/pkhemae/foliate/wiki/Releasing) |
+| [Getting started](https://github.com/pkhemae/foliate/wiki/Getting-started) | [Architecture](https://github.com/pkhemae/foliate/wiki/Architecture) · [Modules](https://github.com/pkhemae/foliate/wiki/Modules) · [Commands](https://github.com/pkhemae/foliate/wiki/Commands) · [Events](https://github.com/pkhemae/foliate/wiki/Events) · [Configuration](https://github.com/pkhemae/foliate/wiki/Configuration) · [Messages](https://github.com/pkhemae/foliate/wiki/Messages) |
+| [Folia for Bukkit developers](https://github.com/pkhemae/foliate/wiki/Folia-for-Bukkit-developers) | [Scheduling](https://github.com/pkhemae/foliate/wiki/Scheduling) · [Storage and player data](https://github.com/pkhemae/foliate/wiki/Storage-and-player-data) · [Placeholders](https://github.com/pkhemae/foliate/wiki/Placeholders) · [Menus](https://github.com/pkhemae/foliate/wiki/Menus) · [Scoreboard](https://github.com/pkhemae/foliate/wiki/Scoreboard) |
+| [Making it yours](https://github.com/pkhemae/foliate/wiki/Making-it-yours) | [Optional integrations](https://github.com/pkhemae/foliate/wiki/Optional-integrations) · [Testing](https://github.com/pkhemae/foliate/wiki/Testing) · [Debugging](https://github.com/pkhemae/foliate/wiki/Debugging) · [Releasing](https://github.com/pkhemae/foliate/wiki/Releasing) |
 
 ## Requirements
 
@@ -93,5 +93,6 @@ Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Changes are l
 
 ## License
 
-[MIT](LICENSE). PlaceholderAPI and zMenu are separate plugins under their own licenses and are not
-bundled.
+[MIT](LICENSE). The libraries bundled in the plugin jar keep their own licenses, listed in
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES), which the jar carries too. PlaceholderAPI and zMenu are
+separate plugins under their own licenses and are not bundled.
