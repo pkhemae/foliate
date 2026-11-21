@@ -70,7 +70,7 @@ class ArchitectureTest {
                         boolean holdsClasses = inside.anyMatch(path -> path.toString().endsWith(".java")
                                 && !path.getFileName().toString().equals("package-info.java"));
                         Path info = folder.resolve("package-info.java");
-                        if (root == SERVER_TEST && !Files.exists(info)) {
+                        if (root.equals(SERVER_TEST) && !Files.exists(info)) {
                             info = MAIN.resolve(SERVER_TEST.relativize(folder)).resolve("package-info.java");
                         }
                         if (holdsClasses && (!Files.exists(info) || !Files.readString(info).contains("@NullMarked"))) {
@@ -169,7 +169,7 @@ class ArchitectureTest {
 
     /** The unit an imported name belongs to; "root" for a class of the root package. */
     private static String unitOfImport(String name) {
-        String[] parts = name.split("\\.");
+        String[] parts = name.split("\\.", -1);
         if (Character.isUpperCase(parts[0].charAt(0)) || parts[0].equals("*")) {
             return "root";
         }

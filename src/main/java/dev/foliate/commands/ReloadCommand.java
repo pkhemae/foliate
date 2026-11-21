@@ -8,6 +8,7 @@ import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
+import java.util.concurrent.CompletableFuture;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.CommandSender;
 import org.slf4j.Logger;
@@ -53,7 +54,8 @@ public final class ReloadCommand implements Subcommand {
         // command runs, and the result below comes later.
         messages.send(sender, "command.reload.started");
         // Reloading reads files: it must not run on the tick thread the command was typed on.
-        schedulers.async().supply(modules::reloadAll).whenComplete((failures, error) -> reply(sender, () -> {
+        // Its outcome is handled in the callback, which reports any error: nothing waits on it.
+        CompletableFuture<?> _ = schedulers.async().supply(modules::reloadAll).whenComplete((failures, error) -> reply(sender, () -> {
             if (error != null) {
                 logger.error("Reload failed unexpectedly", error);
                 messages.send(sender, "command.reload.error");

@@ -1,6 +1,7 @@
 package dev.foliate.hooks.zmenu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -85,7 +86,7 @@ class ZMenuHookTest {
         hook.swapMenus(fakeZMenu());
 
         assertEquals(1, registered.size());
-        assertTrue(registered.getFirst() != before);
+        assertNotSame(before, registered.getFirst());
     }
 
     @Test
@@ -182,7 +183,7 @@ class ZMenuHookTest {
 
         reload.get(10, TimeUnit.SECONDS);
         assertEquals(1, registered.size());
-        assertTrue(registered.getFirst() != before);
+        assertNotSame(before, registered.getFirst());
     }
 
     /** An interrupted reload is a reload given up on: its task must not swap the menus later. */
@@ -207,6 +208,7 @@ class ZMenuHookTest {
     }
 
     /** Implements only the handful of zMenu methods the hook calls. */
+    @SuppressWarnings("ReferenceEquality") // a proxy is equal to itself only, as Object is
     private InventoryManager fakeZMenu() {
         return (InventoryManager) Proxy.newProxyInstance(
                 getClass().getClassLoader(), new Class<?>[] {InventoryManager.class}, (proxy, method, arguments) -> {

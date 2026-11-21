@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Brings a configuration written by an older version of the plugin up to date before it is mapped
@@ -73,7 +74,7 @@ public final class ConfigMigrator {
         }
     }
 
-    private static Object remove(Map<String, Object> yaml, String path) {
+    private static @Nullable Object remove(Map<String, Object> yaml, String path) {
         int dot = path.indexOf('.');
         if (dot < 0) {
             return yaml.remove(path);

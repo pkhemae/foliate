@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -81,7 +82,7 @@ final class ProfileCommand implements Subcommand {
         // executor (the console, a command block), there is nobody else's profile to show: the
         // command asks for a name.
         node.requires(source -> source.getExecutor() == null
-                        || source.getExecutor() == source.getSender()
+                        || Objects.equals(source.getExecutor(), source.getSender())
                         || source.getSender().hasPermission(PERMISSION_OTHERS))
                 .executes(context -> {
             CommandSourceStack source = context.getSource();

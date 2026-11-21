@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -320,7 +321,7 @@ public final class MessageService implements Module {
             Locale wanted = LOCALE_NAME.matcher(configured).matches()
                     ? Translator.parseLocale(configured.replace('-', '_'))
                     : null;
-            Locale defaultLocale = wanted == null ? null : usable(wanted, languages, builtIn, configured);
+            Locale defaultLocale = wanted == null ? null : usable(wanted, languages, builtIn);
             if (defaultLocale == null) {
                 String problem = "default-locale '" + configured + "' has no usable file in the lang folder";
                 if (strict) {
@@ -328,9 +329,12 @@ public final class MessageService implements Module {
                 }
                 // A setting written wrong must not cost the whole plugin: English is built in.
                 logger.error("{}: using English until it is fixed and reloaded", problem);
-                defaultLocale = usable(Locale.ENGLISH, languages, builtIn, "en");
+                defaultLocale = Objects.requireNonNull(usable(Locale.ENGLISH, languages, builtIn), "English is built in");
             }
-            return new Catalog(Map.copyOf(languages), builtIn.get(Locale.ENGLISH), defaultLocale);
+            return new Catalog(
+                    Map.copyOf(languages),
+                    Objects.requireNonNull(builtIn.get(Locale.ENGLISH), "English is built in"),
+                    defaultLocale);
         } catch (IOException e) {
             throw new MessageException("Language files could not be read: " + e.getMessage(), e);
         }
@@ -346,8 +350,7 @@ public final class MessageService implements Module {
     private @Nullable Locale usable(
             Locale wanted,
             Map<Locale, Map<String, List<String>>> languages,
-            Map<Locale, Map<String, List<String>>> builtIn,
-            String configured) {
+            Map<Locale, Map<String, List<String>>> builtIn) {
         List<Locale> candidates = wanted.getCountry().isEmpty()
                 ? List.of(wanted)
                 : List.of(wanted, Locale.of(wanted.getLanguage()));

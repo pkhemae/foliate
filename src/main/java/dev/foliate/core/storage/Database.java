@@ -155,7 +155,7 @@ public final class Database implements Module {
      * <p>The future fails with the {@link SQLException} thrown by the work, or with
      * {@link IllegalStateException} when the database is not running.
      */
-    public <T> CompletableFuture<T> submit(SqlFunction<T> work) {
+    public <T extends @Nullable Object> CompletableFuture<T> submit(SqlFunction<T> work) {
         ExecutorService threads = executor;
         CompletableFuture<T> future = new CompletableFuture<>();
         if (threads == null) {
@@ -181,7 +181,7 @@ public final class Database implements Module {
      * work that does not depend on queued writes, such as the schema migrations: to read data that
      * a queued write may be about to change, {@code submit} and wait for the future instead.
      */
-    public <T> T call(SqlFunction<T> work) throws SQLException {
+    public <T extends @Nullable Object> T call(SqlFunction<T> work) throws SQLException {
         HikariDataSource source = dataSource;
         if (source == null) {
             throw new SQLException("The database is not running");
