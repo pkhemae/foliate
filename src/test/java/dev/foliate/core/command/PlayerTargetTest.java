@@ -17,8 +17,10 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Entity;
 import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +30,7 @@ import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.ServerMock;
 import org.mockbukkit.mockbukkit.command.ConsoleCommandSenderMock;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
+import org.mockbukkit.mockbukkit.entity.ZombieMock;
 import org.slf4j.helpers.NOPLogger;
 
 /**
@@ -181,6 +184,30 @@ class PlayerTargetTest {
         assertEquals(List.of(), runs);
         assertEquals("Nobody unknown", TestCommands.plain(operator.nextComponentMessage()));
         assertEquals("Gone unknown", TestCommands.plain(operator.nextComponentMessage()));
+    }
+
+    @Test
+    void aNameIsMatchedWholeButWhateverItsCase() throws Exception {
+        PlayerMock operator = operator();
+        player("Alex");
+
+        dispatcher.execute("foliate thing Ale", new CommandSource(operator));
+        dispatcher.execute("foliate thing alex", new CommandSource(operator));
+
+        assertEquals("Ale unknown", TestCommands.plain(operator.nextComponentMessage()));
+        assertEquals(List.of(operator.getName() + " -> Alex"), runs);
+    }
+
+    /** Under execute as @e, the executor may be an entity that is not a player. */
+    @Test
+    void anExecutorThatIsNotAPlayerMustNameAPlayer() throws Exception {
+        PlayerMock operator = operator();
+        Entity zombie = new ZombieMock(server, UUID.randomUUID());
+
+        dispatcher.execute("foliate thing", new CommandSource(operator, zombie));
+
+        assertEquals(List.of(), runs);
+        assertEquals("name required", TestCommands.plain(operator.nextComponentMessage()));
     }
 
     /** A player the sender cannot see, such as one who vanished, is reported as not online. */
