@@ -20,11 +20,13 @@ import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.helpers.NOPLogger;
 
 /**
- * Two files loaded at the same time, as two services reloading from two threads would. ConfigLib
- * reads and writes every file with one YAML loader and one YAML dumper, shared by the whole library,
- * that keep what they are working on in fields: without the lock {@link ConfigService} takes around
- * them, a file fails to load on a state the other left half-built, or takes the other's values.
- * Without it, this test failed every time it was run.
+ * Two services loaded at the same time from two threads. The plugin does not do that today, since
+ * its {@code ModuleManager} loads modules one at a time, but {@link ConfigService} must stay safe
+ * if a service is ever loaded outside it. ConfigLib reads and writes every file with one YAML
+ * loader and one YAML dumper, shared by all its stores, that keep what they are working on in
+ * fields: without the lock {@link ConfigService} takes around them, a file fails to load on a state
+ * the other left half-built, or takes the other's values. Without it, this test failed every time
+ * it was run.
  */
 class ConfigServiceConcurrencyTest {
 

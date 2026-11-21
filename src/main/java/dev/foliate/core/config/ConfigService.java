@@ -59,9 +59,11 @@ import org.slf4j.Logger;
  * only then publishes it, so readers see either the old one or the new one, never a mix, and an
  * invalid file leaves both the previous configuration and the file itself untouched.
  *
- * <p>Two files may load at the same time, as when two services reload from different threads:
- * the part of loading that runs ConfigLib is taken in turn by every service (see
- * {@code CONFIGLIB}), the rest, reading and writing the file included, runs in parallel.
+ * <p>Two services may load at the same time. Today they never do, since the {@code ModuleManager}
+ * enables and reloads modules one at a time, but a service loaded outside it, such as a second
+ * file reloaded by a command of its own, stays safe: the part of loading that runs ConfigLib is
+ * taken in turn by every service (see {@code CONFIGLIB}), and the rest runs in parallel. One
+ * service loaded twice at the same time is not safe: both loads would write the same file.
  *
  * <p>Read {@link #get()} each time a value is needed rather than keeping the result in a field:
  * that is what makes a reload take effect.
@@ -88,14 +90,18 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     /**
      * Held by every service of the plugin while ConfigLib maps a file to settings or settings to
      * text. ConfigLib is not thread-safe across stores: every {@code YamlConfigurationStore} reads
-     * with one YAML loader and writes with one YAML dumper, held in static fields and shared by the
-     * whole library, and both keep what they are working on in fields of their own (the dumper, for
-     * one, the object it is writing and the nodes it has written). Two files rendered at once then
-     * fail ({@code NullPointerException: value Node must be provided}), or come out with the other's
+     * with one YAML loader and writes with one YAML dumper, held in static fields and shared by all
+     * the stores of the plugin's copy of the library (it is relocated, so other plugins have their
+     * own), and both keep what they are working on in fields of their own (the dumper, for one, the
+     * object it is writing and the nodes it has written). Two files rendered at once would fail
+     * ({@code NullPointerException: value Node must be provided}), or come out with the other's
      * values or with YAML aliases that leave the file unreadable.
-     * The lock is static for that reason: one per service would not stop two files from meeting.
-     * Only ConfigLib's calls are held: the file is read and written, and the settings validated,
-     * outside it.
+     *
+     * <p>The plugin does not load two files at once today: the {@code ModuleManager} enables and
+     * reloads its modules one at a time. The lock makes each service safe on its own, should one
+     * ever be loaded outside it. It is static because one per service would not stop two files from
+     * meeting. Only ConfigLib's calls are held: the file is read and written, and the settings
+     * validated, outside it.
      */
     private static final Object CONFIGLIB = new Object();
 
