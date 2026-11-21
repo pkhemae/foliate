@@ -63,7 +63,7 @@ class MessageServiceTest {
     void setUp() throws Exception {
         config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
-        messages = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        messages = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
     }
 
@@ -71,6 +71,24 @@ class MessageServiceTest {
     void bundledFilesAreCopiedOnFirstStart() {
         assertTrue(Files.exists(directory.resolve("lang/en.yml")));
         assertTrue(Files.exists(directory.resolve("lang/fr.yml")));
+    }
+
+    /** Which languages the jar holds is the plugin's to say, not the message service's. */
+    @Test
+    void onlyTheBuiltInLanguagesItIsGivenAreCopied(@TempDir Path elsewhere) throws Exception {
+        MessageService englishOnly = new MessageService(
+                elsewhere, List.of("en"), MessageServiceTest::bundled, () -> "en", NOPLogger.NOP_LOGGER);
+
+        englishOnly.enable();
+
+        assertTrue(Files.exists(elsewhere.resolve("lang/en.yml")));
+        assertFalse(Files.exists(elsewhere.resolve("lang/fr.yml")));
+    }
+
+    @Test
+    void englishMustBeBuiltIn() {
+        assertThrows(IllegalArgumentException.class, () -> new MessageService(
+                directory, List.of("fr"), MessageServiceTest::bundled, () -> "fr", NOPLogger.NOP_LOGGER));
     }
 
     @Test
@@ -202,7 +220,7 @@ class MessageServiceTest {
         assertTrue(folder.setWritable(false));
         try {
             MessageService fresh = new MessageService(
-                    directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+                    directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
             fresh.enable();
 
@@ -219,7 +237,7 @@ class MessageServiceTest {
         Files.writeString(directory.resolve("config.yml"), "default-locale: zz\n");
         config.reload();
         RecordingLogger logger = new RecordingLogger();
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
 
         fresh.enable();
 
@@ -335,7 +353,7 @@ class MessageServiceTest {
     @Test
     void brokenExtraLanguageIsSkippedAtStartupButRefusedOnReload() throws Exception {
         Files.writeString(directory.resolve("lang/de.yml"), "greeting: [unclosed\n");
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
         fresh.enable();
 
@@ -348,7 +366,7 @@ class MessageServiceTest {
     @Test
     void extraLanguageThatContainsItselfIsSkippedAtStartupAndReportedOnReload() throws Exception {
         Files.writeString(directory.resolve("lang/de.yml"), "greeting: &x {b: *x}\n");
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
         fresh.enable();
 
@@ -362,7 +380,7 @@ class MessageServiceTest {
     @Test
     void brokenFileOfTheDefaultLocaleDoesNotStopTheServerFromStarting() throws Exception {
         Files.writeString(directory.resolve("lang/en.yml"), "greeting: [unclosed\n");
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
         fresh.enable();
 
@@ -377,7 +395,7 @@ class MessageServiceTest {
     void folderNamedLikeALanguageFileIsIgnored() throws Exception {
         Files.createDirectories(directory.resolve("lang/de.yml"));
         RecordingLogger logger = new RecordingLogger();
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
 
         fresh.enable();
         fresh.reload();
@@ -391,7 +409,7 @@ class MessageServiceTest {
         Files.writeString(directory.resolve("lang/fr-CA.yml"), "greeting: \"Allo <player>\"\n");
         Files.writeString(directory.resolve("lang/fr_CA.yml"), "greeting: \"Salut <player>\"\n");
         RecordingLogger logger = new RecordingLogger();
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
 
         fresh.enable();
 
@@ -407,7 +425,7 @@ class MessageServiceTest {
     void brokenFileDoesNotHideAGoodOneForTheSameLanguage() throws Exception {
         Files.writeString(directory.resolve("lang/fr-CA.yml"), "greeting: [unclosed\n");
         Files.writeString(directory.resolve("lang/fr_CA.yml"), "greeting: \"Salut <player>\"\n");
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
         fresh.enable();
 
@@ -420,7 +438,7 @@ class MessageServiceTest {
         Files.writeString(directory.resolve("lang/fr.yml"), "greeting: [unclosed\n");
         Files.writeString(directory.resolve("config.yml"), "default-locale: fr\n");
         config.reload();
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
         fresh.enable();
 

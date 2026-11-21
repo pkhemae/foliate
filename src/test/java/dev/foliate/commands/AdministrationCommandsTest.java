@@ -56,7 +56,7 @@ class AdministrationCommandsTest {
 
         ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         MessageService messages = new MessageService(
-                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         ModuleManager modules = new ModuleManager(NOPLogger.NOP_LOGGER);
         modules.register(config);
         modules.register(messages);

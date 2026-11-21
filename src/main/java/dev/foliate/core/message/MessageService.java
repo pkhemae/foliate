@@ -59,9 +59,6 @@ import org.slf4j.Logger;
  */
 public final class MessageService implements Module {
 
-    /** Locales shipped in the jar under {@code lang/}. English must stay: it is the last resort. */
-    private static final List<String> BUNDLED_LOCALES = List.of("en", "fr");
-
     /** In the lang folder: the built-in languages already copied there. */
     private static final String OFFERED_FILE = ".built-in";
 
@@ -72,6 +69,7 @@ public final class MessageService implements Module {
     private static final Pattern LOCALE_NAME = Pattern.compile("[a-zA-Z]{2,3}([_-][a-zA-Z]{2,4})?");
 
     private final Path directory;
+    private final List<String> bundledLocales;
     private final Function<String, @Nullable InputStream> resources;
     private final Supplier<String> defaultLocale;
     private final Logger logger;
@@ -82,15 +80,22 @@ public final class MessageService implements Module {
 
     /**
      * @param dataDirectory the plugin data folder; messages are read from its {@code lang} folder
+     * @param bundledLocales the languages shipped in the jar under {@code lang/}, such as
+     *     {@code en} for {@code lang/en.yml}; English must be one of them: it is the last resort
      * @param resources opens a file bundled in the jar, or returns null when it does not exist
      * @param defaultLocale the current {@code default-locale} setting, read at each load
      */
     public MessageService(
             Path dataDirectory,
+            List<String> bundledLocales,
             Function<String, @Nullable InputStream> resources,
             Supplier<String> defaultLocale,
             Logger logger) {
+        if (!bundledLocales.contains("en")) {
+            throw new IllegalArgumentException("English (en) must be built in: it is the last resort for every message");
+        }
         this.directory = dataDirectory.resolve("lang");
+        this.bundledLocales = List.copyOf(bundledLocales);
         this.resources = resources;
         this.defaultLocale = defaultLocale;
         this.logger = logger;
@@ -269,7 +274,7 @@ public final class MessageService implements Module {
         try {
             Map<Locale, Map<String, List<String>>> builtIn = new HashMap<>();
             Map<String, String> bundledFiles = new HashMap<>();
-            for (String name : BUNDLED_LOCALES) {
+            for (String name : bundledLocales) {
                 String content = readBundled(name);
                 bundledFiles.put(name, content);
                 builtIn.put(Translator.parseLocale(name), parse(name + EXTENSION + " (built in)", content));

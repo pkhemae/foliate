@@ -243,7 +243,7 @@ class ProfileStorageOnMysqlTest {
     void aPlayerWhoJoinsTwiceIsCountedTwice() throws Exception {
         ServerMock server = MockBukkit.mock();
         MessageService messages = new MessageService(
-                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         ProfileModule profiles = new ProfileModule(
                 MockBukkit.createMockPlugin(),
@@ -278,7 +278,7 @@ class ProfileStorageOnMysqlTest {
     void changesToEachPlayerLandInOrderOnARealPool() throws Exception {
         ServerMock server = MockBukkit.mock();
         MessageService messages = new MessageService(
-                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         ProfileModule profiles = new ProfileModule(
                 MockBukkit.createMockPlugin(), database, messages, new PlaceholderRegistry(), NOPLogger.NOP_LOGGER, Clock.systemUTC());
