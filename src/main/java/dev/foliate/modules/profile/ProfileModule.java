@@ -17,6 +17,7 @@ import java.util.UUID;
 import java.util.function.UnaryOperator;
 import org.bukkit.Server;
 import org.bukkit.plugin.Plugin;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
@@ -43,6 +44,7 @@ public final class ProfileModule implements Module, SubcommandProvider {
     private final PlaceholderRegistry placeholders;
     private final PlayerStore<PlayerProfile> store;
     private final ProfileRepository repository = new ProfileRepository();
+    private volatile PlaceholderRegistry.@Nullable Registration joinsPlaceholder;
 
     public ProfileModule(
             Plugin plugin,
@@ -77,14 +79,18 @@ public final class ProfileModule implements Module, SubcommandProvider {
             throw new ModuleSkippedException("it needs the database, which is not running");
         }
         store.enable();
-        placeholders.register("joins", player -> player == null
+        joinsPlaceholder = placeholders.register("joins", player -> player == null
                 ? null
                 : find(player.getUniqueId()).map(profile -> String.valueOf(profile.joins())).orElse(null));
     }
 
     @Override
     public void disable() {
-        placeholders.unregister("joins");
+        PlaceholderRegistry.Registration joins = joinsPlaceholder;
+        if (joins != null) {
+            joins.unregister();
+            joinsPlaceholder = null;
+        }
         store.disable();
     }
 

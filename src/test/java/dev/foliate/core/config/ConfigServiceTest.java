@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import de.exlll.configlib.Comment;
 import de.exlll.configlib.Configuration;
@@ -13,11 +15,15 @@ import de.exlll.configlib.SerializeWith;
 import de.exlll.configlib.Serializer;
 import dev.foliate.testing.RecordingLogger;
 import java.io.IOException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
@@ -101,6 +107,7 @@ class ConfigServiceTest {
 
     private static final String HEADER = "Test configuration.";
     private static final List<Consumer<Map<String, Object>>> NO_MIGRATIONS = List.of();
+    private static final Set<PosixFilePermission> OWNER_ONLY = PosixFilePermissions.fromString("rw-------");
 
     @TempDir
     Path directory;
@@ -239,7 +246,7 @@ class ConfigServiceTest {
     void anEmptyKnownSectionIsNotReported() throws Exception {
         RecordingLogger logger = new RecordingLogger();
         ConfigService<PluginConfigShape> watched = new ConfigService<>(
-                directory, logger, PluginConfigShape.class, PluginConfigShape::new, NO_MIGRATIONS, HEADER);
+                directory, "config.yml", logger, PluginConfigShape.class, PluginConfigShape::new, NO_MIGRATIONS, HEADER);
         Files.writeString(file, "section: {}\n");
 
         watched.enable();
@@ -276,7 +283,7 @@ class ConfigServiceTest {
         Files.writeString(file, "debug: false\nleftover: {}\n");
         RecordingLogger logger = new RecordingLogger();
         ConfigService<Settings> watched =
-                new ConfigService<>(directory, logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+                new ConfigService<>(directory, "config.yml", logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
 
         watched.enable();
 
@@ -311,7 +318,7 @@ class ConfigServiceTest {
     @Test
     void aWholeNumberReadByASerializerOfItsOwnMayBeWrittenAsADecimal() throws Exception {
         ConfigService<TimedSettings> timed =
-                new ConfigService<>(directory, NOPLogger.NOP_LOGGER, TimedSettings.class, TimedSettings::new, NO_MIGRATIONS, HEADER);
+                new ConfigService<>(directory, "config.yml", NOPLogger.NOP_LOGGER, TimedSettings.class, TimedSettings::new, NO_MIGRATIONS, HEADER);
         timed.enable(); // writes cooldown: 1.5
 
         timed.reload();
@@ -431,8 +438,241 @@ class ConfigServiceTest {
         assertThrows(IllegalStateException.class, forgotten::enable);
     }
 
+    /** The file holds the database password: rewriting it must not make it readable by all. */
+    @Test
+    void rewrittenFileKeepsItsPermissions() throws Exception {
+        assumePosix();
+        Files.writeString(file, "debug: true\n");
+        Files.setPosixFilePermissions(file, OWNER_ONLY);
+
+        service.enable();
+
+        assertTrue(Files.readString(file).contains("config-version: 1"), "the file was rewritten");
+        assertEquals(OWNER_ONLY, Files.getPosixFilePermissions(file));
+    }
+
+    @Test
+    void backupOfAMigratedFileHasTheFilesPermissions() throws Exception {
+        assumePosix();
+        ConfigService<SettingsV2> migrating = serviceOf(
+                SettingsV2.class,
+                SettingsV2::new,
+                List.of(yaml -> ConfigMigrator.rename(yaml, "verbose", "debug")));
+        Files.writeString(file, "config-version: 1\nverbose: true\n");
+        Files.setPosixFilePermissions(file, OWNER_ONLY);
+
+        migrating.enable();
+
+        assertEquals(OWNER_ONLY, Files.getPosixFilePermissions(directory.resolve("config.yml.v1.bak")));
+        assertEquals(OWNER_ONLY, Files.getPosixFilePermissions(file));
+    }
+
+    /** A plugin may keep some settings in a file of their own, next to config.yml. */
+    @Test
+    void anotherFileIsLoadedUnderItsOwnName() throws Exception {
+        ConfigService<Settings> rewards = new ConfigService<>(
+                directory, "rewards.yml", NOPLogger.NOP_LOGGER, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+        Files.writeString(directory.resolve("rewards.yml"), "debug: true\n");
+
+        rewards.enable();
+        service.enable();
+
+        assertTrue(rewards.get().debug());
+        assertFalse(service.get().debug());
+        assertTrue(Files.readString(directory.resolve("rewards.yml")).contains("config-version: 1"));
+        assertEquals("config:rewards", rewards.name());
+        assertEquals("config", service.name());
+    }
+
+    @Test
+    void messagesNameTheFileTheyAreAbout() throws IOException {
+        ConfigService<Settings> rewards = new ConfigService<>(
+                directory, "rewards.yml", NOPLogger.NOP_LOGGER, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+        Files.writeString(directory.resolve("rewards.yml"), "debug: [unclosed\n");
+
+        ConfigException failure = assertThrows(ConfigException.class, rewards::enable);
+
+        assertTrue(failure.getMessage().startsWith("rewards.yml is not valid YAML"), failure.getMessage());
+    }
+
+    @Test
+    void fileNameMustBeAYamlFileOfTheDataFolder() {
+        for (String name : List.of("../config.yml", "sub/config.yml", "config.txt", ".yml")) {
+            assertThrows(IllegalArgumentException.class, () -> new ConfigService<>(
+                    directory, name, NOPLogger.NOP_LOGGER, Settings.class, Settings::new, NO_MIGRATIONS, HEADER), name);
+        }
+    }
+
+    /** A config.yml linked from elsewhere, such as a secrets folder, stays a link. */
+    @Test
+    void linkedFileIsWrittenThroughToItsTarget() throws Exception {
+        Path target = Files.createDirectories(directory.resolve("secrets")).resolve("foliate.yml");
+        Files.writeString(target, "debug: true\n");
+        try {
+            Files.createSymbolicLink(file, Path.of("secrets", "foliate.yml"));
+        } catch (UnsupportedOperationException | IOException e) {
+            assumeTrue(false, "symbolic links are not available here");
+        }
+
+        service.enable();
+
+        assertTrue(service.get().debug());
+        assertTrue(Files.isSymbolicLink(file), "the link was replaced by a file");
+        assertTrue(Files.readString(target).contains("config-version: 1"), "the target was not rewritten");
+    }
+
+    /**
+     * A link whose target the server may not reach holds the administrator's settings all the
+     * same: running on the defaults instead, say on the default database, would be worse than not
+     * starting.
+     */
+    @Test
+    void linkToAFolderTheServerCannotEnterIsRefused() throws Exception {
+        assumePosix();
+        Path secrets = Files.createDirectories(directory.resolve("secrets"));
+        Files.writeString(secrets.resolve("foliate.yml"), "debug: true\n");
+        link(file, Path.of("secrets", "foliate.yml"));
+        Files.setPosixFilePermissions(secrets, PosixFilePermissions.fromString("---------"));
+        try {
+            assumeFalse(Files.isReadable(secrets.resolve("foliate.yml")), "running as a user who may read any file");
+
+            ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+            assertEquals("config.yml could not be read or written (permission denied)", failure.getMessage());
+        } finally {
+            Files.setPosixFilePermissions(secrets, PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    @Test
+    void reloadThroughALinkThatCannotBeFollowedKeepsTheRunningSettings() throws Exception {
+        assumePosix();
+        Path secrets = Files.createDirectories(directory.resolve("secrets"));
+        Files.writeString(secrets.resolve("foliate.yml"), "debug: true\n");
+        link(file, Path.of("secrets", "foliate.yml"));
+        service.enable();
+        Files.setPosixFilePermissions(secrets, PosixFilePermissions.fromString("---------"));
+        try {
+            assumeFalse(Files.isReadable(secrets.resolve("foliate.yml")), "running as a user who may read any file");
+
+            assertThrows(ConfigException.class, service::reload);
+
+            assertTrue(service.get().debug());
+        } finally {
+            Files.setPosixFilePermissions(secrets, PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    @Test
+    void linkThatLoopsIsRefused() throws Exception {
+        link(file, Path.of("config.yml"));
+
+        ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+        assertTrue(failure.getMessage().startsWith("config.yml could not be read or written ("), failure.getMessage());
+        assertFalse(failure.getMessage().contains(directory.toString()), failure.getMessage());
+    }
+
+    /** A link made before the file exists, such as to a secrets folder still empty, is a fresh install. */
+    @Test
+    void linkToAFileNotYetCreatedGetsTheDefaultsWrittenThrough() throws Exception {
+        Path target = Files.createDirectories(directory.resolve("secrets")).resolve("foliate.yml");
+        link(file, Path.of("secrets", "foliate.yml"));
+
+        service.enable();
+
+        assertFalse(service.get().debug());
+        assertTrue(Files.isSymbolicLink(file), "the link was replaced by a file");
+        assertTrue(Files.readString(target).contains("config-version: 1"), "the target was not written");
+    }
+
+    /** Nothing was loaded from the file: the console must not say the administrator's settings were. */
+    @Test
+    void fileThatCannotBeCreatedSaysTheDefaultsAreUsed() throws Exception {
+        link(file, Path.of("missing-folder", "foliate.yml"));
+        RecordingLogger logger = new RecordingLogger();
+        ConfigService<Settings> watched =
+                new ConfigService<>(directory, "config.yml", logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+
+        watched.enable();
+
+        assertEquals(
+                List.of("WARN config.yml could not be created (a file or folder is missing): the default settings are used"),
+                logger.lines());
+    }
+
+    private static void link(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | IOException e) {
+            assumeTrue(false, "symbolic links are not available here");
+        }
+    }
+
+    /** A valid file the server may not write is used as it is, with a word in the console. */
+    @Test
+    void readOnlyFileIsLoadedAndLeftAsItIs() throws Exception {
+        assumePosix();
+        String mine = "debug: true\n";
+        Files.writeString(file, mine);
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("r--r--r--"));
+        assumeFalse(Files.isWritable(file), "running as a user who may write any file");
+        RecordingLogger logger = new RecordingLogger();
+        ConfigService<Settings> watched =
+                new ConfigService<>(directory, "config.yml", logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+
+        watched.enable();
+
+        assertTrue(watched.get().debug());
+        assertEquals(mine, Files.readString(file));
+        assertEquals(
+                List.of("WARN config.yml is read-only: the settings were loaded, but the file was not brought up to date"),
+                logger.lines());
+    }
+
+    @Test
+    void fileInAFolderThatCannotBeWrittenIsLoadedWithAWarning() throws Exception {
+        assumePosix();
+        Files.writeString(file, "debug: true\n");
+        Set<PosixFilePermission> before = Files.getPosixFilePermissions(directory);
+        Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("r-x------"));
+        try {
+            assumeFalse(Files.isWritable(directory), "running as a user who may write any folder");
+            RecordingLogger logger = new RecordingLogger();
+            ConfigService<Settings> watched =
+                    new ConfigService<>(directory, "config.yml", logger, Settings.class, Settings::new, NO_MIGRATIONS, HEADER);
+
+            watched.enable();
+
+            assertTrue(watched.get().debug());
+            assertEquals(1, logger.lines().size(), logger.lines().toString());
+            String warning = logger.lines().getFirst();
+            assertTrue(warning.startsWith("WARN config.yml could not be updated (permission denied)"), warning);
+            assertFalse(warning.contains(directory.toString()), warning);
+        } finally {
+            Files.setPosixFilePermissions(directory, before);
+        }
+    }
+
+    /** The message reaches whoever ran /foliate reload, who has no business knowing the server's folders. */
+    @Test
+    void aFileThatCannotBeReadIsReportedWithoutItsPath() throws IOException {
+        assumePosix();
+        Files.writeString(file, "debug: true\n");
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("---------"));
+        assumeFalse(Files.isReadable(file), "running as a user who may read any file");
+
+        ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+        assertEquals("config.yml could not be read or written (permission denied)", failure.getMessage());
+    }
+
+    private static void assumePosix() {
+        assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"), "POSIX permissions only");
+    }
+
     private <T extends ConfigRoot> ConfigService<T> serviceOf(
             Class<T> type, Supplier<T> defaults, List<Consumer<Map<String, Object>>> migrations) {
-        return new ConfigService<>(directory, NOPLogger.NOP_LOGGER, type, defaults, migrations, HEADER);
+        return new ConfigService<>(directory, "config.yml", NOPLogger.NOP_LOGGER, type, defaults, migrations, HEADER);
     }
 }

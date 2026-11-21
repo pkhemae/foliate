@@ -7,6 +7,7 @@ import de.exlll.configlib.NameFormatters;
 import de.exlll.configlib.SerializeWith;
 import de.exlll.configlib.YamlConfigurationProperties;
 import de.exlll.configlib.YamlConfigurationStore;
+import dev.foliate.core.io.FileErrors;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.yaml.Yaml;
 import dev.foliate.core.yaml.YamlException;
@@ -17,9 +18,15 @@ import java.io.UncheckedIOException;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
@@ -27,6 +34,7 @@ import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -42,9 +50,10 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
- * Loads {@code config.yml} into a settings class and hands out the current instance. It knows
- * nothing about what the settings are: the class, its defaults and its migrations are given by the
- * caller.
+ * Loads a YAML file of the data folder, such as {@code config.yml}, into a settings class and hands
+ * out the current instance. It knows nothing about what the settings are: the file, the class, its
+ * defaults and its migrations are given by the caller. A plugin that keeps some settings in a file
+ * of their own, such as {@code rewards.yml}, registers one service per file.
  *
  * <p>Safe to read from any thread. A reload builds and validates a new configuration first and
  * only then publishes it, so readers see either the old one or the new one, never a mix, and an
@@ -57,7 +66,14 @@ import org.slf4j.Logger;
  */
 public final class ConfigService<T extends ConfigRoot> implements Module {
 
-    private static final String FILE_NAME = "config.yml";
+    /** The plugin's main file, whose module keeps the plain name {@code config}. */
+    private static final String MAIN_FILE = "config.yml";
+
+    /** A file directly in the data folder: {@code config.yml}, {@code rewards.yml}. */
+    private static final Pattern FILE_NAME = Pattern.compile("([\\w-]+)\\.yml");
+
+    /** How many symbolic links to follow to the file before giving up, as the system does. */
+    private static final int MAX_LINKS = 40;
 
     /** How the settings are named in the file. */
     private static final NameFormatter NAMES = NameFormatters.LOWER_KEBAB_CASE;
@@ -65,6 +81,8 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     /** How the library names a field in its messages: {@code for field 'private int a.Settings.port'}. */
     private static final Pattern FIELD = Pattern.compile("for field '[^']* ([\\w.$]+)\\.(\\w+)'");
 
+    private final String fileName;
+    private final String name;
     private final Path file;
     private final Logger logger;
     private final Supplier<T> defaults;
@@ -74,6 +92,9 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     private volatile @Nullable T current;
 
     /**
+     * @param fileName the file in the data folder, such as {@code config.yml}; it names the module
+     *     too: {@code config} for {@code config.yml}, {@code config:rewards} for {@code rewards.yml},
+     *     so each file has its own and none takes the name of a feature
      * @param type the settings class, annotated for ConfigLib
      * @param defaults the settings of a fresh install
      * @param migrations the steps that upgrade a file written by an older version, see
@@ -82,12 +103,20 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
      */
     public ConfigService(
             Path dataDirectory,
+            String fileName,
             Logger logger,
             Class<T> type,
             Supplier<T> defaults,
             List<Consumer<Map<String, Object>>> migrations,
             String header) {
-        this.file = dataDirectory.resolve(FILE_NAME);
+        Matcher valid = FILE_NAME.matcher(fileName);
+        if (!valid.matches()) {
+            throw new IllegalArgumentException(
+                    "'" + fileName + "' is not the name of a .yml file directly in the data folder");
+        }
+        this.fileName = fileName;
+        this.name = fileName.equals(MAIN_FILE) ? "config" : "config:" + valid.group(1);
+        this.file = dataDirectory.resolve(fileName);
         this.logger = logger;
         this.defaults = defaults;
         this.migrator = new ConfigMigrator(migrations);
@@ -101,7 +130,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
 
     @Override
     public String name() {
-        return "config";
+        return name;
     }
 
     @Override
@@ -135,13 +164,13 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     private T load() throws ConfigException {
         try {
             Files.createDirectories(file.getParent());
-            String onDisk = Files.exists(file) ? Files.readString(file) : null;
+            String onDisk = read();
             Map<String, Object> content = onDisk == null ? Map.of() : Yaml.parse(onDisk);
 
             Optional<Map<String, Object>> migrated = migrator.migrate(content);
             Path backup = null;
             if (migrated.isPresent() && onDisk != null) {
-                backup = file.resolveSibling(FILE_NAME + ".v" + content.get(ConfigMigrator.VERSION_KEY) + ".bak");
+                backup = file.resolveSibling(fileName + ".v" + content.get(ConfigMigrator.VERSION_KEY) + ".bak");
                 content = migrated.get();
             }
 
@@ -156,32 +185,31 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
                 // at the old version and migrated, needlessly, the next time it is loaded.
                 throw new IllegalStateException(config.getClass().getSimpleName() + " starts at config-version "
                         + config.configVersion() + " but the migration steps lead to version "
-                        + migrator.targetVersion() + ": " + FILE_NAME + " would be written at the wrong version");
+                        + migrator.targetVersion() + ": " + fileName + " would be written at the wrong version");
             }
             config.validate();
 
-            if (backup != null) {
-                Files.writeString(backup, onDisk);
-                logger.info("{} was written by an older version: migrated, previous file kept as {}", FILE_NAME, backup.getFileName());
-            }
             String rendered = render(config);
             if (!rendered.equals(onDisk)) {
-                reportUnknownSettings(content, rendered);
-                write(rendered);
+                boolean written = save(rendered, onDisk != null,
+                        backup == null ? null : new Backup(backup, Objects.requireNonNull(onDisk)));
+                reportUnknownSettings(content, rendered, written);
             }
             return config;
         } catch (ConfigException e) {
-            throw new ConfigException(FILE_NAME + " is invalid: " + e.getMessage(), e);
+            throw new ConfigException(fileName + " is invalid: " + e.getMessage(), e);
         } catch (YamlException e) {
-            throw new ConfigException(FILE_NAME + " is " + e.getMessage(), e);
+            throw new ConfigException(fileName + " is " + e.getMessage(), e);
         } catch (ConfigurationException e) {
             // Not chained: the library's messages print the values of the whole section, password
             // included, and a stack trace would print every cause.
-            throw new ConfigException(FILE_NAME + " is invalid: " + describe(e));
+            throw new ConfigException(fileName + " is invalid: " + describe(e));
         } catch (CharacterCodingException e) {
-            throw new ConfigException(FILE_NAME + " is not saved as UTF-8: save it again as UTF-8 in a text editor", e);
-        } catch (IOException | UncheckedIOException e) {
-            throw new ConfigException(FILE_NAME + " could not be read or written: " + e.getMessage(), e);
+            throw new ConfigException(fileName + " is not saved as UTF-8: save it again as UTF-8 in a text editor", e);
+        } catch (IOException e) {
+            throw new ConfigException(fileName + " could not be read or written (" + FileErrors.reason(e) + ")", e);
+        } catch (UncheckedIOException e) {
+            throw new ConfigException(fileName + " could not be read or written (" + FileErrors.reason(Objects.requireNonNull(e.getCause())) + ")", e);
         }
     }
 
@@ -317,7 +345,8 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         return out.toString(StandardCharsets.UTF_8);
     }
 
-    private void reportUnknownSettings(Map<String, Object> content, String rendered) throws YamlException {
+    private void reportUnknownSettings(Map<String, Object> content, String rendered, boolean written)
+            throws YamlException {
         Set<String> known = settings(Yaml.parse(rendered));
         Set<String> unknown = settings(content);
         unknown.removeAll(known);
@@ -325,7 +354,8 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         unknown.removeIf(setting -> known.stream().anyMatch(path -> path.startsWith(setting + ".")));
         // A whole unknown section shows up as its leaves; a known list shows up as one key.
         for (String setting : unknown) {
-            logger.warn("{}: '{}' is not a setting of this plugin and was removed from the file", FILE_NAME, setting);
+            logger.warn("{}: '{}' is not a setting of this plugin{}",
+                    fileName, setting, written ? " and was removed from the file" : "");
         }
     }
 
@@ -350,14 +380,136 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         });
     }
 
-    /** Writes through a temporary file, so a crash mid-write cannot leave a truncated config. */
-    private void write(String rendered) throws IOException {
-        Path temporary = file.resolveSibling(FILE_NAME + ".tmp");
-        Files.writeString(temporary, rendered);
-        try {
-            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+    /**
+     * The text of the file, or null when there is none yet. Whether it exists is decided without
+     * following a link: a link whose target cannot be reached (a folder the server may not enter,
+     * a loop) is a read error, never a fresh install, which would run the plugin on the defaults in
+     * place of the administrator's settings. Only a link whose target does not exist yet is one.
+     */
+    private @Nullable String read() throws IOException {
+        if (!Files.isSymbolicLink(file) && !Files.exists(file)) {
+            return null;
         }
+        try {
+            return Files.readString(file);
+        } catch (NoSuchFileException e) {
+            return null;
+        }
+    }
+
+    /** The text of the file before a migration, to keep under another name. */
+    private record Backup(Path path, String content) {}
+
+    /**
+     * Brings the file up to date, after keeping the previous one when it is migrated. A file the
+     * server may not write, because the administrator made it read-only or the folder is mounted
+     * read-only, is left as it is: the settings it holds are valid and already loaded, so the
+     * plugin runs with them and the console says why the file did not change.
+     *
+     * @param existed whether the settings came from the file, rather than being the defaults of a
+     *     file not created yet
+     * @return whether the file was written
+     */
+    private boolean save(String rendered, boolean existed, @Nullable Backup backup) {
+        try {
+            Path target = target();
+            if (Files.exists(target) && !Files.isWritable(target)) {
+                logger.warn("{} is read-only: the settings were loaded, but the file was not brought up to date",
+                        fileName);
+                return false;
+            }
+            if (backup != null) {
+                writeLike(target, backup.path(), backup.content());
+                logger.info("{} was written by an older version: migrated, previous file kept as {}",
+                        fileName, backup.path().getFileName());
+            }
+            write(target, rendered);
+            return true;
+        } catch (IOException e) {
+            if (existed) {
+                logger.warn("{} could not be updated ({}): the settings were loaded, but the file was not brought up to date",
+                        fileName, FileErrors.reason(e));
+            } else {
+                logger.warn("{} could not be created ({}): the default settings are used", fileName, FileErrors.reason(e));
+            }
+            return false;
+        }
+    }
+
+    /**
+     * The file to write: the file itself, or the one it links to. Replacing a link with a file
+     * would cut it from where the administrator keeps the real one, such as a folder of secrets.
+     */
+    private Path target() throws IOException {
+        Path target = file;
+        for (int links = 0; Files.isSymbolicLink(target); links++) {
+            if (links == MAX_LINKS) {
+                throw new FileSystemException(fileName, null, "too many levels of symbolic links");
+            }
+            target = target.resolveSibling(Files.readSymbolicLink(target));
+        }
+        return target;
+    }
+
+    /**
+     * Writes through a temporary file next to the target, so a crash mid-write cannot leave a
+     * truncated config.
+     */
+    private static void write(Path target, String rendered) throws IOException {
+        Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
+        try {
+            writeLike(target, temporary, rendered);
+            try {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            try {
+                Files.deleteIfExists(temporary);
+            } catch (IOException ignored) {
+                // The folder refused the file in the first place.
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Writes a file that stands for {@code model}, such as its replacement or its backup, with the
+     * permissions of {@code model} when it exists: the file holds the database password, and one
+     * that only its owner may read must not come back readable by all.
+     *
+     * <p>The file is created readable by its owner alone, in the same call that creates it, so that
+     * nobody else can open it before the text is written; only then are the model's group, owner and
+     * permissions given to it, in that order. The group and the owner are copied when the server is
+     * allowed to, each on its own: a server that may not give the file away (it usually may not)
+     * may still give it the model's group, when it is a member, so that whoever shares that group
+     * keeps access. Nothing is copied where the file system has no POSIX permissions.
+     */
+    private static void writeLike(Path model, Path destination, String content) throws IOException {
+        Files.deleteIfExists(destination);
+        PosixFileAttributeView from = Files.getFileAttributeView(model, PosixFileAttributeView.class);
+        PosixFileAttributes attributes = from != null && Files.exists(model) ? from.readAttributes() : null;
+        if (attributes == null) {
+            Files.createFile(destination);
+            Files.writeString(destination, content);
+            return;
+        }
+        Files.createFile(destination, PosixFilePermissions.asFileAttribute(
+                EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)));
+        Files.writeString(destination, content);
+        PosixFileAttributeView to =
+                Objects.requireNonNull(Files.getFileAttributeView(destination, PosixFileAttributeView.class));
+        try {
+            to.setGroup(attributes.group());
+        } catch (IOException | SecurityException e) {
+            // Not a member of the model's group: the file keeps the server's.
+        }
+        try {
+            to.setOwner(attributes.owner());
+        } catch (IOException | SecurityException e) {
+            // Only a privileged user may give a file away: it stays the server's.
+        }
+        to.setPermissions(attributes.permissions());
     }
 }

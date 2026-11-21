@@ -15,6 +15,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockbukkit.mockbukkit.MockBukkit;
+import org.slf4j.helpers.NOPLogger;
 
 /**
  * Covers what can run without a PlaceholderAPI server: the expansion's answers and the conversion
@@ -37,7 +38,7 @@ class PlaceholderApiHookTest {
 
     @Test
     void expansionAnswersFromTheRegistry() {
-        PlaceholderRegistry registry = new PlaceholderRegistry();
+        PlaceholderRegistry registry = new PlaceholderRegistry(NOPLogger.NOP_LOGGER);
         registry.register("version", player -> "1.0");
         FoliateExpansion expansion = new FoliateExpansion(plugin.getPluginMeta(), registry);
 
@@ -46,8 +47,19 @@ class PlaceholderApiHookTest {
     }
 
     @Test
+    void failingPlaceholderDoesNotReachPlaceholderApi() {
+        PlaceholderRegistry registry = new PlaceholderRegistry(NOPLogger.NOP_LOGGER);
+        registry.register("broken", player -> {
+            throw new IllegalStateException("boom");
+        });
+        FoliateExpansion expansion = new FoliateExpansion(plugin.getPluginMeta(), registry);
+
+        assertNull(expansion.onRequest(null, "broken"));
+    }
+
+    @Test
     void expansionIsNamedAfterThePluginAndSurvivesReloads() {
-        FoliateExpansion expansion = new FoliateExpansion(plugin.getPluginMeta(), new PlaceholderRegistry());
+        FoliateExpansion expansion = new FoliateExpansion(plugin.getPluginMeta(), new PlaceholderRegistry(NOPLogger.NOP_LOGGER));
 
         assertEquals("foliate", expansion.getIdentifier());
         assertEquals(plugin.getPluginMeta().getVersion(), expansion.getVersion());

@@ -4,14 +4,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -63,7 +67,7 @@ class MessageServiceTest {
     void setUp() throws Exception {
         config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
-        messages = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        messages = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
     }
 
@@ -71,6 +75,24 @@ class MessageServiceTest {
     void bundledFilesAreCopiedOnFirstStart() {
         assertTrue(Files.exists(directory.resolve("lang/en.yml")));
         assertTrue(Files.exists(directory.resolve("lang/fr.yml")));
+    }
+
+    /** Which languages the jar holds is the plugin's to say, not the message service's. */
+    @Test
+    void onlyTheBuiltInLanguagesItIsGivenAreCopied(@TempDir Path elsewhere) throws Exception {
+        MessageService englishOnly = new MessageService(
+                elsewhere, List.of("en"), MessageServiceTest::bundled, () -> "en", NOPLogger.NOP_LOGGER);
+
+        englishOnly.enable();
+
+        assertTrue(Files.exists(elsewhere.resolve("lang/en.yml")));
+        assertFalse(Files.exists(elsewhere.resolve("lang/fr.yml")));
+    }
+
+    @Test
+    void englishMustBeBuiltIn() {
+        assertThrows(IllegalArgumentException.class, () -> new MessageService(
+                directory, List.of("fr"), MessageServiceTest::bundled, () -> "fr", NOPLogger.NOP_LOGGER));
     }
 
     @Test
@@ -132,6 +154,65 @@ class MessageServiceTest {
         assertTrue(colors(rendered).stream().noneMatch(NamedTextColor.RED::equals));
     }
 
+    /** A prefix that names itself used to recurse until the stack overflowed, on every message. */
+    @Test
+    void prefixThatUsesItselfRendersAsText() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "prefix: \"<prefix><prefix>[P] \"\n");
+
+        messages.reload();
+
+        assertEquals("<prefix><prefix>[P] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
+    }
+
+    @Test
+    void prefixSeesTheArgumentsOfTheMessage() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "prefix: \"[<player>] \"\n");
+
+        messages.reload();
+
+        assertEquals("[Alex] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
+    }
+
+    /** A prefix that ends with an open colour, as many are written, colours the message after it. */
+    @Test
+    void colourLeftOpenByThePrefixCarriesOnIntoTheMessage() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "prefix: \"<gray>[P] <yellow>\"\n");
+
+        messages.reload();
+
+        Component rendered = messages.render(Locale.ENGLISH, "greeting", Placeholder.unparsed("player", "Alex"));
+        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText().serialize(rendered));
+        assertEquals(NamedTextColor.YELLOW, colorOf(rendered, "Hello Alex"));
+    }
+
+    @Test
+    void prefixIsInsertedWhateverTheCaseOfItsTagAndWhenSelfClosing() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "a: \"<PREFIX>x\"\nb: \"<prefix/>y\"\n");
+
+        messages.reload();
+
+        assertEquals("[P] x", plain(Locale.ENGLISH, "a", "Alex"));
+        assertEquals("[P] y", plain(Locale.ENGLISH, "b", "Alex"));
+    }
+
+    @Test
+    void escapedPrefixTagStaysText() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "a: \"\\\\<prefix> and \\\\\\\\<prefix>\"\n");
+
+        messages.reload();
+
+        // An escaped tag is text; an escaped backslash is one backslash, followed by the prefix.
+        assertEquals("<prefix> and \\[P] ", plain(Locale.ENGLISH, "a", "Alex"));
+    }
+
+    /** What the code passes is never searched for the prefix: a parsed argument cannot make it recurse. */
+    @Test
+    void prefixTagInAParsedArgumentStaysText() {
+        Component rendered = messages.render(Locale.ENGLISH, "greeting", Placeholder.parsed("player", "<prefix>"));
+
+        assertEquals("[P] Hello <prefix>", PlainTextComponentSerializer.plainText().serialize(rendered));
+    }
+
     @Test
     void invalidFileOnReloadKeepsThePreviousMessages() throws Exception {
         Files.writeString(directory.resolve("lang/en.yml"), "greeting: [unclosed\n");
@@ -183,7 +264,7 @@ class MessageServiceTest {
         assertTrue(folder.setWritable(false));
         try {
             MessageService fresh = new MessageService(
-                    directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+                    directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
             fresh.enable();
 
@@ -200,7 +281,7 @@ class MessageServiceTest {
         Files.writeString(directory.resolve("config.yml"), "default-locale: zz\n");
         config.reload();
         RecordingLogger logger = new RecordingLogger();
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
 
         fresh.enable();
 
@@ -316,7 +397,7 @@ class MessageServiceTest {
     @Test
     void brokenExtraLanguageIsSkippedAtStartupButRefusedOnReload() throws Exception {
         Files.writeString(directory.resolve("lang/de.yml"), "greeting: [unclosed\n");
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
         fresh.enable();
 
@@ -325,10 +406,38 @@ class MessageServiceTest {
         assertThrows(MessageException.class, fresh::reload);
     }
 
+    /** The message reaches whoever ran /foliate reload: it names the file, not the server's folders. */
+    @Test
+    void languageFileThatCannotBeReadIsReportedWithoutItsPath() throws Exception {
+        Path english = directory.resolve("lang/en.yml");
+        assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"), "POSIX permissions only");
+        Files.setPosixFilePermissions(english, PosixFilePermissions.fromString("---------"));
+        assumeFalse(Files.isReadable(english), "running as a user who may read any file");
+
+        MessageException failure = assertThrows(MessageException.class, messages::reload);
+
+        assertEquals("lang/en.yml could not be read (permission denied)", failure.getMessage());
+    }
+
+    /** It used to overflow the stack, which no part of the plugin catches. */
+    @Test
+    void extraLanguageThatContainsItselfIsSkippedAtStartupAndReportedOnReload() throws Exception {
+        Files.writeString(directory.resolve("lang/de.yml"), "greeting: &x {b: *x}\n");
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+
+        fresh.enable();
+
+        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render(Locale.GERMAN, "greeting", Placeholder.unparsed("player", "Alex"))));
+        MessageException failure = assertThrows(MessageException.class, fresh::reload);
+        assertEquals("lang/de.yml is not valid YAML (a value contains itself: an alias * inside the & it names,"
+                + " line 1, column 18)", failure.getMessage());
+    }
+
     @Test
     void brokenFileOfTheDefaultLocaleDoesNotStopTheServerFromStarting() throws Exception {
         Files.writeString(directory.resolve("lang/en.yml"), "greeting: [unclosed\n");
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
         fresh.enable();
 
@@ -343,7 +452,7 @@ class MessageServiceTest {
     void folderNamedLikeALanguageFileIsIgnored() throws Exception {
         Files.createDirectories(directory.resolve("lang/de.yml"));
         RecordingLogger logger = new RecordingLogger();
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
 
         fresh.enable();
         fresh.reload();
@@ -357,7 +466,7 @@ class MessageServiceTest {
         Files.writeString(directory.resolve("lang/fr-CA.yml"), "greeting: \"Allo <player>\"\n");
         Files.writeString(directory.resolve("lang/fr_CA.yml"), "greeting: \"Salut <player>\"\n");
         RecordingLogger logger = new RecordingLogger();
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
 
         fresh.enable();
 
@@ -373,7 +482,7 @@ class MessageServiceTest {
     void brokenFileDoesNotHideAGoodOneForTheSameLanguage() throws Exception {
         Files.writeString(directory.resolve("lang/fr-CA.yml"), "greeting: [unclosed\n");
         Files.writeString(directory.resolve("lang/fr_CA.yml"), "greeting: \"Salut <player>\"\n");
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
         fresh.enable();
 
@@ -386,7 +495,7 @@ class MessageServiceTest {
         Files.writeString(directory.resolve("lang/fr.yml"), "greeting: [unclosed\n");
         Files.writeString(directory.resolve("config.yml"), "default-locale: fr\n");
         config.reload();
-        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+        MessageService fresh = new MessageService(directory, List.of("en", "fr"), MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
 
         fresh.enable();
 
@@ -478,6 +587,26 @@ class MessageServiceTest {
         }
         component.children().forEach(child -> colors.addAll(colors(child)));
         return colors;
+    }
+
+    /** The colour a piece of text is shown in, inherited from the components around it. */
+    private static net.kyori.adventure.text.format.TextColor colorOf(Component component, String text) {
+        return colorOf(component, text, null);
+    }
+
+    private static net.kyori.adventure.text.format.TextColor colorOf(
+            Component component, String text, net.kyori.adventure.text.format.TextColor inherited) {
+        net.kyori.adventure.text.format.TextColor color = component.color() != null ? component.color() : inherited;
+        if (component instanceof net.kyori.adventure.text.TextComponent part && part.content().contains(text)) {
+            return color;
+        }
+        for (Component child : component.children()) {
+            net.kyori.adventure.text.format.TextColor found = colorOf(child, text, color);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     private static InputStream bundled(String name) {

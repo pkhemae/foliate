@@ -1,5 +1,6 @@
 package dev.foliate.core.message;
 
+import dev.foliate.core.io.FileErrors;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.yaml.Yaml;
 import dev.foliate.core.yaml.YamlException;
@@ -58,19 +59,20 @@ import org.slf4j.Logger;
  */
 public final class MessageService implements Module {
 
-    /** Locales shipped in the jar under {@code lang/}. English must stay: it is the last resort. */
-    private static final List<String> BUNDLED_LOCALES = List.of("en", "fr");
-
     /** In the lang folder: the built-in languages already copied there. */
     private static final String OFFERED_FILE = ".built-in";
 
     private static final String PREFIX_KEY = "prefix";
+
+    /** How a message asks for the prefix. MiniMessage tag names ignore case. */
+    private static final List<String> PREFIX_TAGS = List.of("<" + PREFIX_KEY + ">", "<" + PREFIX_KEY + "/>");
     private static final String EXTENSION = ".yml";
 
     /** {@code en}, {@code pt_BR}, {@code fr-CA}: what a language file may be called. */
     private static final Pattern LOCALE_NAME = Pattern.compile("[a-zA-Z]{2,3}([_-][a-zA-Z]{2,4})?");
 
     private final Path directory;
+    private final List<String> bundledLocales;
     private final Function<String, @Nullable InputStream> resources;
     private final Supplier<String> defaultLocale;
     private final Logger logger;
@@ -81,15 +83,22 @@ public final class MessageService implements Module {
 
     /**
      * @param dataDirectory the plugin data folder; messages are read from its {@code lang} folder
+     * @param bundledLocales the languages shipped in the jar under {@code lang/}, such as
+     *     {@code en} for {@code lang/en.yml}; English must be one of them: it is the last resort
      * @param resources opens a file bundled in the jar, or returns null when it does not exist
      * @param defaultLocale the current {@code default-locale} setting, read at each load
      */
     public MessageService(
             Path dataDirectory,
+            List<String> bundledLocales,
             Function<String, @Nullable InputStream> resources,
             Supplier<String> defaultLocale,
             Logger logger) {
+        if (!bundledLocales.contains("en")) {
+            throw new IllegalArgumentException("English (en) must be built in: it is the last resort for every message");
+        }
         this.directory = dataDirectory.resolve("lang");
+        this.bundledLocales = List.copyOf(bundledLocales);
         this.resources = resources;
         this.defaultLocale = defaultLocale;
         this.logger = logger;
@@ -131,7 +140,14 @@ public final class MessageService implements Module {
         sharedResolvers.remove(resolver);
     }
 
-    /** Sends a chat message to each member of the audience, in their own language. */
+    /**
+     * Sends a chat message to each member of the audience, in their own language.
+     *
+     * <p>Each viewer's message is rendered here, on the calling thread, one viewer after the other:
+     * a shared tag such as {@code <papi>} is evaluated on this thread for every viewer, including
+     * players whose region this thread does not own. Send a message that may contain such a tag
+     * to a group of players from each player's own scheduler, not to the whole group at once.
+     */
     public void send(Audience audience, String key, TagResolver... arguments) {
         audience.forEachAudience(viewer -> {
             Component message = render(viewer, key, arguments);
@@ -241,23 +257,70 @@ public final class MessageService implements Module {
 
         // When two resolvers know the same tag the last one wins: shared tags go first, so that
         // what the caller passes for this message always takes precedence.
-        TagResolver.Builder resolver = TagResolver.builder().resolvers(sharedResolvers);
+        TagResolver resolver = TagResolver.builder().resolvers(sharedResolvers).resolvers(arguments).build();
         List<String> prefix = current.find(locale, PREFIX_KEY);
-        if (prefix != null) {
-            // Parsed on purpose: the prefix is MiniMessage written by the administrator.
-            resolver.resolver(Placeholder.parsed(PREFIX_KEY, String.join("\n", prefix)));
+        String text = prefix == null ? template : insertPrefix(template, String.join("\n", prefix));
+        return deserialize(viewer, text, resolver);
+    }
+
+    /**
+     * Puts the prefix's own text in place of each {@code <prefix>} tag of a message, before the
+     * message is parsed, as if the administrator had written it there: a colour the prefix leaves
+     * open carries on into the message, and the prefix sees the shared tags and the message's
+     * arguments. Done in one pass that does not look at what it inserts, and with no tag named
+     * {@code prefix} when parsing: a {@code <prefix>} inside the prefix, or in a value passed with
+     * {@link Placeholder#parsed}, is shown as text instead of recursing forever.
+     *
+     * <p>Only the message, written by the administrator, is searched: values passed by the code
+     * are resolved by MiniMessage afterwards and never pass through here, so a player cannot
+     * inject anything by typing {@code <prefix>}. A tag escaped as {@code \<prefix>} stays text.
+     * The tag is found wherever it is written, inside the quoted argument of another tag too
+     * ({@code <hover:show_text:'<prefix>'>}), where a prefix holding that same quote would end the
+     * argument early.
+     */
+    private static String insertPrefix(String template, String prefix) {
+        StringBuilder text = new StringBuilder(template.length() + prefix.length());
+        int backslashes = 0;
+        int i = 0;
+        while (i < template.length()) {
+            char c = template.charAt(i);
+            if (c == '<' && backslashes % 2 == 0) {
+                int length = prefixTagLength(template, i);
+                if (length > 0) {
+                    text.append(prefix);
+                    i += length;
+                    backslashes = 0;
+                    continue;
+                }
+            }
+            backslashes = c == '\\' ? backslashes + 1 : 0;
+            text.append(c);
+            i++;
         }
-        resolver.resolvers(arguments);
+        return text.toString();
+    }
+
+    /** The length of {@code <prefix>} or {@code <prefix/>}, in any case, at that index; 0 if absent. */
+    private static int prefixTagLength(String template, int index) {
+        for (String tag : PREFIX_TAGS) {
+            if (template.regionMatches(true, index, tag, 0, tag.length())) {
+                return tag.length();
+            }
+        }
+        return 0;
+    }
+
+    private Component deserialize(@Nullable Pointered viewer, String template, TagResolver resolver) {
         return viewer == null
-                ? miniMessage.deserialize(template, resolver.build())
-                : miniMessage.deserialize(template, viewer, resolver.build());
+                ? miniMessage.deserialize(template, resolver)
+                : miniMessage.deserialize(template, viewer, resolver);
     }
 
     private Catalog load(boolean strict) throws MessageException {
         try {
             Map<Locale, Map<String, List<String>>> builtIn = new HashMap<>();
             Map<String, String> bundledFiles = new HashMap<>();
-            for (String name : BUNDLED_LOCALES) {
+            for (String name : bundledLocales) {
                 String content = readBundled(name);
                 bundledFiles.put(name, content);
                 builtIn.put(Translator.parseLocale(name), parse(name + EXTENSION + " (built in)", content));
@@ -336,7 +399,7 @@ public final class MessageService implements Module {
                     Objects.requireNonNull(builtIn.get(Locale.ENGLISH), "English is built in"),
                     defaultLocale);
         } catch (IOException e) {
-            throw new MessageException("Language files could not be read: " + e.getMessage(), e);
+            throw new MessageException("The lang folder could not be read (" + FileErrors.reason(e) + ")", e);
         }
     }
 
@@ -379,7 +442,7 @@ public final class MessageService implements Module {
             copyBuiltInLanguages(bundledFiles);
         } catch (IOException e) {
             // A folder the server may not write to (mounted read-only) holds what it holds.
-            logger.warn("The built-in languages could not be copied to the lang folder: {}", e.toString());
+            logger.warn("The built-in languages could not be copied to the lang folder ({})", FileErrors.reason(e));
         }
     }
 
@@ -420,7 +483,7 @@ public final class MessageService implements Module {
         } catch (CharacterCodingException e) {
             throw new MessageException("lang/" + fileName + " is not saved as UTF-8: save it again as UTF-8", e);
         } catch (IOException e) {
-            throw new MessageException("lang/" + fileName + " could not be read (" + e.getMessage() + ")", e);
+            throw new MessageException("lang/" + fileName + " could not be read (" + FileErrors.reason(e) + ")", e);
         }
     }
 

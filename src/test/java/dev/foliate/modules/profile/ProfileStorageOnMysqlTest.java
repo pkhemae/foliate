@@ -243,13 +243,13 @@ class ProfileStorageOnMysqlTest {
     void aPlayerWhoJoinsTwiceIsCountedTwice() throws Exception {
         ServerMock server = MockBukkit.mock();
         MessageService messages = new MessageService(
-                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         ProfileModule profiles = new ProfileModule(
                 MockBukkit.createMockPlugin(),
                 database,
                 messages,
-                new PlaceholderRegistry(),
+                new PlaceholderRegistry(NOPLogger.NOP_LOGGER),
                 NOPLogger.NOP_LOGGER,
                 Clock.systemUTC());
         profiles.enable();
@@ -278,10 +278,10 @@ class ProfileStorageOnMysqlTest {
     void changesToEachPlayerLandInOrderOnARealPool() throws Exception {
         ServerMock server = MockBukkit.mock();
         MessageService messages = new MessageService(
-                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         ProfileModule profiles = new ProfileModule(
-                MockBukkit.createMockPlugin(), database, messages, new PlaceholderRegistry(), NOPLogger.NOP_LOGGER, Clock.systemUTC());
+                MockBukkit.createMockPlugin(), database, messages, new PlaceholderRegistry(NOPLogger.NOP_LOGGER), NOPLogger.NOP_LOGGER, Clock.systemUTC());
         profiles.enable();
         int players = 40;
         int changes = 100;

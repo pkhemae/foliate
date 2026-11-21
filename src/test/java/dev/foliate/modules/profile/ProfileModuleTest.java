@@ -47,7 +47,7 @@ class ProfileModuleTest {
     private Database database;
     private ProfileModule profiles;
     private final TestClock clock = new TestClock(1_000);
-    private final PlaceholderRegistry placeholders = new PlaceholderRegistry();
+    private final PlaceholderRegistry placeholders = new PlaceholderRegistry(NOPLogger.NOP_LOGGER);
     private final ProfileRepository repository = new ProfileRepository();
 
     @BeforeEach
@@ -56,7 +56,7 @@ class ProfileModuleTest {
         ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
         messages = new MessageService(
-                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         database = new Database(
                 directory, () -> config.get().storage(), ProfileModule.MIGRATIONS, NOPLogger.NOP_LOGGER);
@@ -230,6 +230,15 @@ class ProfileModuleTest {
 
         assertEquals("1", placeholders.resolve("joins", player));
         assertNull(placeholders.resolve("joins", null));
+    }
+
+    /** The registry refuses a name taken twice: the module gives its own back when it stops. */
+    @Test
+    void joinsPlaceholderIsGivenBackWhenTheModuleStops() throws Exception {
+        profiles.disable();
+
+        assertNull(placeholders.resolve("joins", null));
+        profiles.enable();
     }
 
     @Test

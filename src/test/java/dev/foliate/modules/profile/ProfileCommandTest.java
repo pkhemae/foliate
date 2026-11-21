@@ -52,7 +52,7 @@ class ProfileCommandTest {
         ConfigService<PluginConfig> config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
         MessageService messages = new MessageService(
-                directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+                directory, List.of("en", "fr"), getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         dispatcher = TestCommands.registerExecuteAs(
                 TestCommands.dispatcher(new ProfileCommand(id -> Optional.ofNullable(profiles.get(id)), messages, server)),
