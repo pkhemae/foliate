@@ -64,6 +64,10 @@ public final class Database implements Module {
         if (!settings.enabled()) {
             throw new ModuleSkippedException("storage is turned off in config.yml");
         }
+        if (dataSource != null) {
+            // A second pool and set of threads would leak the first ones.
+            throw new IllegalStateException("The database is already running");
+        }
 
         HikariConfig pool = new HikariConfig();
         pool.setPoolName("Foliate");
@@ -73,6 +77,12 @@ public final class Database implements Module {
             pool.setJdbcUrl("jdbc:sqlite:" + dataDirectory.resolve("data.db").toAbsolutePath());
             // SQLite allows a single writer: one connection avoids "database is locked" errors.
             threads = 1;
+            // Read by the driver as pragmas of every connection. Foreign keys are off by default in
+            // SQLite and always on in MySQL: the same scripts must behave the same on both. The
+            // write-ahead log syncs the disk less often than the rollback journal; it keeps recent
+            // writes in data.db-wal until they are copied into data.db.
+            pool.addDataSourceProperty("foreign_keys", "true");
+            pool.addDataSourceProperty("journal_mode", "WAL");
         } else {
             StorageSettings.Mysql mysql = settings.mysql();
             pool.setJdbcUrl("jdbc:mysql://" + mysql.host() + ":" + mysql.port() + "/" + mysql.database());
@@ -110,15 +120,19 @@ public final class Database implements Module {
     public void disable() {
         ExecutorService threads = executor;
         if (threads != null) {
+            // Not running from here on: what is submitted now fails at once instead of queuing.
+            executor = null;
             threads.shutdown();
             try {
                 if (!threads.awaitTermination(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                     logger.warn("Some database writes did not finish within {} seconds", SHUTDOWN_TIMEOUT_SECONDS);
+                    // Interrupted rather than left running against a closed pool.
+                    threads.shutdownNow();
                 }
             } catch (InterruptedException e) {
+                threads.shutdownNow();
                 Thread.currentThread().interrupt();
             }
-            executor = null;
         }
         HikariDataSource source = dataSource;
         if (source != null) {
