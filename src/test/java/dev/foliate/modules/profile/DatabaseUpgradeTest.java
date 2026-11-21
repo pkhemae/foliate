@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -65,6 +66,28 @@ class DatabaseUpgradeTest {
                             "Steve_The_Miner1", 1_763_000_000_000L, 1_763_000_000_000L, 1),
                     new PlayerProfile(UUID.fromString("d41f8c09-6e2b-47a3-8c5d-0b9e3f1a7d24"),
                             "Notch", 1_700_000_000_000L, 1_763_650_000_000L, 3)));
+
+    /**
+     * What sqlite3 writes for a table that a migration rebuilt (its name in double quotes), and for
+     * values that hold backslashes, a line break or a quote: as sqlite3 3.43 wrote it.
+     */
+    private static final String REBUILT_TABLE_DUMP = """
+            PRAGMA foreign_keys=OFF;
+            BEGIN TRANSACTION;
+            CREATE TABLE IF NOT EXISTS "upgrade_notes" (id VARCHAR(36) PRIMARY KEY, body VARCHAR(200) NOT NULL);
+            INSERT INTO upgrade_notes VALUES('path','C:\\new\\path');
+            INSERT INTO upgrade_notes VALUES('trailing','ends with \\');
+            INSERT INTO upgrade_notes VALUES('lines',replace('é\\n\\','\\n',char(10)));
+            INSERT INTO upgrade_notes VALUES('quote','it''s');
+            COMMIT;
+            """;
+
+    /** The rows of {@link #REBUILT_TABLE_DUMP}, as SQLite holds them. */
+    private static final Map<String, String> REBUILT_TABLE_ROWS = Map.of(
+            "path", "C:\\new\\path",
+            "trailing", "ends with \\",
+            "lines", "é\n\\",
+            "quote", "it's");
 
     @TempDir
     Path directory;
@@ -122,6 +145,44 @@ class DatabaseUpgradeTest {
                 """.formatted(TestMysql.HOST, TestMysql.PORT, TestMysql.DATABASE, TestMysql.USER, TestMysql.PASSWORD));
 
         upgradeAndCheck(snapshot);
+    }
+
+    /** A snapshot whose table was rebuilt would otherwise fail only in the CI database job, at release time. */
+    @Test
+    void aDumpOfARebuiltTableLoadsIntoSqliteAsItWasWritten() throws Exception {
+        String url = "jdbc:sqlite:" + directory.resolve("data.db");
+        try (Connection connection = DriverManager.getConnection(url)) {
+            SqlDump.load(connection, REBUILT_TABLE_DUMP);
+        }
+
+        try (Connection connection = DriverManager.getConnection(url)) {
+            assertEquals(REBUILT_TABLE_ROWS, notes(connection));
+        }
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "FOLIATE_TEST_MYSQL_PORT", matches = "\\d+")
+    void aDumpOfARebuiltTableLoadsIntoMysqlAsItWasWritten() throws Exception {
+        try (Connection connection = TestMysql.connect()) {
+            dropAllTables(connection);
+            SqlDump.load(connection, REBUILT_TABLE_DUMP);
+        }
+
+        // Read on a connection of its own, in the server's usual mode.
+        try (Connection connection = TestMysql.connect()) {
+            assertEquals(REBUILT_TABLE_ROWS, notes(connection));
+        }
+    }
+
+    private static Map<String, String> notes(Connection connection) throws SQLException {
+        Map<String, String> notes = new TreeMap<>();
+        try (Statement statement = connection.createStatement();
+                ResultSet rows = statement.executeQuery("SELECT id, body FROM upgrade_notes")) {
+            while (rows.next()) {
+                notes.put(rows.getString(1), rows.getString(2));
+            }
+        }
+        return notes;
     }
 
     static Stream<String> snapshots() {

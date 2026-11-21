@@ -35,9 +35,11 @@ Do it for every release, at the commit that is tagged, before the tag is pushed.
    ```
 
    Keep the dump as `sqlite3` writes it: the tables (`foliate_migrations` included) as the
-   migrations created them, then their rows. The test skips the `PRAGMA`, `BEGIN TRANSACTION` and
-   `COMMIT` lines, which MySQL does not understand, so the same dump serves SQLite, MySQL and
-   MariaDB. The `CREATE TABLE` statements are the migrations' own text, portable by rule.
+   migrations created them, then their rows. The same dump serves SQLite, MySQL and MariaDB, but
+   it is SQLite's SQL, not portable SQL: a table that a migration rebuilt or renamed comes back as
+   `CREATE TABLE IF NOT EXISTS "name"`, and a backslash in a value is not an escape. The test
+   loads it on MySQL and MariaDB with `ANSI_QUOTES` and `NO_BACKSLASH_ESCAPES`, which read it as
+   SQLite does, and skips the `PRAGMA`, `BEGIN TRANSACTION` and `COMMIT` lines.
 4. Add the folder to `DatabaseUpgradeTest.SNAPSHOTS`, with the rows the writer stored, written out
    as values: not a reference to the writer's list, which later versions will change.
    `everySnapshotIsChecked` fails while a folder and the list disagree.
