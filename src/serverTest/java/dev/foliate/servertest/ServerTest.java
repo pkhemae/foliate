@@ -2,6 +2,7 @@ package dev.foliate.servertest;
 
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.scheduler.EntityRetiredException;
+import dev.foliate.core.scheduler.SchedulerChecks;
 import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.core.scheduler.TaskHandle;
 import dev.foliate.core.storage.Database;
@@ -169,6 +170,7 @@ public final class ServerTest {
                 .thenCompose(marker -> entityTimerStopsWhenCancelled(marker)
                         .thenCompose(ignored -> teleportFromAnotherThread(marker, spawn))
                         .thenCompose(ignored -> removedEntityIsReported(marker)))
+                .thenCompose(ignored -> removedEntityStopsItsTimer(world, spawn))
                 .thenCompose(ignored -> schedulers.global().run(this::commandsAreRegistered))
                 .thenCompose(ignored -> databaseAnswers())
                 .thenCompose(ignored -> schedulers.async().run(this::everyModuleReloads))
@@ -375,6 +377,34 @@ public final class ServerTest {
                     check(cause instanceof EntityRetiredException, "work for a removed entity was not rejected");
                     return null;
                 }));
+    }
+
+    /**
+     * Removes an entity while a timer runs on it: the server stops the timer, and the schedulers
+     * must forget it then, or it would keep the entity referenced until shutdown.
+     */
+    private CompletableFuture<Void> removedEntityStopsItsTimer(World world, Location spawn) {
+        AtomicInteger runs = new AtomicInteger();
+        return schedulers.region(spawn)
+                .supply(() -> world.spawn(spawn, Marker.class, entity -> entity.setPersistent(false)))
+                .thenCompose(entity -> {
+                    TaskHandle timer = schedulers.entity(entity)
+                            .runTimer(Ticks.duration(1), Ticks.duration(1), () -> runs.incrementAndGet());
+                    check(SchedulerChecks.isTracked(schedulers, timer), "an entity timer was not tracked");
+                    return eventually(() -> CompletableFuture.completedFuture(
+                                    runs.get() > 0 ? null : "an entity timer never ran"))
+                            .thenCompose(ignored -> schedulers.entity(entity).run(entity::remove))
+                            .thenCompose(ignored -> eventually(() -> CompletableFuture.completedFuture(
+                                    SchedulerChecks.isTracked(schedulers, timer)
+                                            ? "the timer of a removed entity was still tracked"
+                                            : null)))
+                            .thenCompose(ignored -> {
+                                int stopped = runs.get();
+                                return after(Duration.ofSeconds(1)).thenRun(() -> check(
+                                        runs.get() == stopped,
+                                        "the timer of a removed entity kept running (" + (runs.get() - stopped) + " more runs)"));
+                            });
+                });
     }
 
     /** Run from the console, on the global region, like a command typed in the server console. */

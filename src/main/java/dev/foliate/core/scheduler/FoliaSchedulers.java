@@ -98,6 +98,14 @@ public final class FoliaSchedulers implements Schedulers {
         server.getAsyncScheduler().cancelTasks(plugin);
     }
 
+    /**
+     * Whether a timer is still among those {@link #shutdown()} cancels. For the server test, which
+     * lives in this package: an entity timer must be forgotten once its entity is removed.
+     */
+    boolean isTracked(TaskHandle timer) {
+        return timer instanceof ScheduledHandle handle && timers.contains(handle.task);
+    }
+
     private static long ticks(Duration duration) {
         return Math.max(1L, duration.toMillis() / MILLIS_PER_TICK);
     }
