@@ -263,8 +263,12 @@ public final class MessageService implements Module {
 
             Map<Locale, Map<String, List<String>>> languages = new HashMap<>();
             try (Stream<Path> files = Files.list(directory)) {
+                // Sorted, so that which of two files for the same language wins does not depend on
+                // the file system.
                 List<Path> languageFiles = files.filter(path -> path.getFileName().toString().endsWith(EXTENSION))
+                        .sorted()
                         .toList();
+                Map<Locale, String> sources = new HashMap<>();
                 for (Path file : languageFiles) {
                     String fileName = file.getFileName().toString();
                     String name = fileName.substring(0, fileName.length() - EXTENSION.length());
@@ -272,10 +276,19 @@ public final class MessageService implements Module {
                         logger.warn("Ignoring lang/{}: the file name is not a locale such as 'en' or 'pt_BR'", fileName);
                         continue;
                     }
+                    if (!Files.isRegularFile(file)) {
+                        logger.warn("Ignoring lang/{}: it is not a file", fileName);
+                        continue;
+                    }
                     Locale locale = Translator.parseLocale(name.replace('-', '_'));
+                    String earlier = sources.putIfAbsent(locale, fileName);
+                    if (earlier != null) {
+                        logger.warn("Ignoring lang/{}: lang/{} is already the file of this language", fileName, earlier);
+                        continue;
+                    }
                     Map<String, List<String>> onDisk;
                     try {
-                        onDisk = parse(fileName, Files.readString(file));
+                        onDisk = parse(fileName, read(file, fileName));
                     } catch (MessageException e) {
                         if (strict) {
                             throw e;
@@ -313,6 +326,15 @@ public final class MessageService implements Module {
             return new Catalog(Map.copyOf(languages), builtIn.get(Locale.ENGLISH), defaultLocale);
         } catch (IOException e) {
             throw new MessageException("Language files could not be read: " + e.getMessage(), e);
+        }
+    }
+
+    /** Reads a language file; a file that cannot be read is handled like one that is broken. */
+    private static String read(Path file, String fileName) throws MessageException {
+        try {
+            return Files.readString(file);
+        } catch (IOException e) {
+            throw new MessageException("lang/" + fileName + " could not be read (" + e.getMessage() + ")", e);
         }
     }
 
