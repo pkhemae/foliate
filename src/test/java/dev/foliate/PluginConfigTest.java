@@ -106,7 +106,23 @@ class PluginConfigTest {
 
             ConfigException failure = assertThrows(ConfigException.class, service::enable);
 
-            assertEquals("config.yml is invalid: storage.mysql.password must be text", failure.getMessage());
+            assertEquals("config.yml is invalid: storage.mysql.password must be text: put it in quotes", failure.getMessage());
+            assertFalse(describe(failure).contains("s3cret"), describe(failure));
+        }
+    }
+
+    /**
+     * SnakeYAML's own messages repeat tokens of the file: an alias, a tag, or a number it failed
+     * to read. A generated password can start with any of these signs.
+     */
+    @Test
+    void aPasswordThatIsNotValidYamlIsNeverShown() throws Exception {
+        for (String password : new String[] {"*s3cret", "!s3cret", "!!s3cret abc", "!!int s3cret", "\"s3cret", "@s3cret", "s3cret: x"}) {
+            Files.writeString(directory.resolve("config.yml"), "storage:\n  mysql:\n    password: " + password + "\n");
+            ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
+
+            ConfigException failure = assertThrows(ConfigException.class, service::enable, password);
+
             assertFalse(describe(failure).contains("s3cret"), describe(failure));
         }
     }
@@ -119,8 +135,9 @@ class PluginConfigTest {
                 "storage:\n  enabled: maybe\n", "storage.enabled must be true or false",
                 "storage:\n  mysql: hello\n", "storage.mysql must be a section of settings",
                 "storage:\n  mysql:\n    pool-size: 99999999999\n", "storage.mysql.pool-size must be a whole number",
-                "scoreboard:\n  lines: hello\n", "scoreboard.lines must be a list of texts",
-                "scoreboard:\n  lines:\n    - {a: b}\n", "scoreboard.lines must be a list of texts");
+                "scoreboard:\n  lines: hello\n", "scoreboard.lines must be a list (each entry: text)",
+                "scoreboard:\n  lines:\n    - {a: b}\n", "scoreboard.lines must be a list (each entry: text)",
+                "storage:\n  mysql:\n    password: 123456\n", "storage.mysql.password must be text: put it in quotes");
         for (Map.Entry<String, String> mistake : expected.entrySet()) {
             Files.writeString(directory.resolve("config.yml"), mistake.getKey());
             ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);

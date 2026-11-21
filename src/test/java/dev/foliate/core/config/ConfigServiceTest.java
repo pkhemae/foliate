@@ -218,7 +218,7 @@ class ConfigServiceTest {
 
         ConfigException failure = assertThrows(ConfigException.class, service::enable);
 
-        assertEquals("config.yml is not valid YAML (found duplicate key debug, line 3, column 1)", failure.getMessage());
+        assertEquals("config.yml is not valid YAML (a key appears twice, line 3, column 1)", failure.getMessage());
     }
 
     /** The position is given, never the line itself: it may hold a password. */
@@ -230,6 +230,42 @@ class ConfigServiceTest {
 
         assertFalse(failure.getMessage().contains("s3cret-pw"), failure.getMessage());
         assertTrue(failure.getMessage().contains("line"), failure.getMessage());
+    }
+
+    /** Nested known sections left empty are filled with their defaults, not reported. */
+    @Test
+    void anEmptyKnownSectionIsNotReported() throws Exception {
+        RecordingLogger logger = new RecordingLogger();
+        ConfigService<PluginConfigShape> watched = new ConfigService<>(
+                directory, logger, PluginConfigShape.class, PluginConfigShape::new, NO_MIGRATIONS, HEADER);
+        Files.writeString(file, "section: {}\n");
+
+        watched.enable();
+
+        assertEquals(List.of(), logger.lines());
+    }
+
+    /** A settings class with a nested section. */
+    @Configuration
+    static final class PluginConfigShape implements ConfigRoot {
+
+        private int configVersion = 1;
+        private Section section = new Section();
+
+        private PluginConfigShape() {}
+
+        @Override
+        public int configVersion() {
+            return configVersion;
+        }
+
+        @Override
+        public void validate() {}
+
+        @Configuration
+        static final class Section {
+            private boolean flag = true;
+        }
     }
 
     @Test

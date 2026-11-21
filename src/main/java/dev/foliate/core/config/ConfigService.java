@@ -1,6 +1,7 @@
 package dev.foliate.core.config;
 
 import de.exlll.configlib.ConfigurationException;
+import de.exlll.configlib.NameFormatter;
 import de.exlll.configlib.NameFormatters;
 import de.exlll.configlib.YamlConfigurationProperties;
 import de.exlll.configlib.YamlConfigurationStore;
@@ -53,6 +54,9 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
 
     private static final String FILE_NAME = "config.yml";
 
+    /** How the settings are named in the file. */
+    private static final NameFormatter NAMES = NameFormatters.LOWER_KEBAB_CASE;
+
     /** How the library names a field in its messages: {@code for field 'private int a.Settings.port'}. */
     private static final Pattern FIELD = Pattern.compile("for field '[^']* ([\\w.$]+)\\.(\\w+)'");
 
@@ -82,7 +86,7 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         this.defaults = defaults;
         this.migrator = new ConfigMigrator(migrations);
         YamlConfigurationProperties properties = YamlConfigurationProperties.newBuilder()
-                .setNameFormatter(NameFormatters.LOWER_KEBAB_CASE)
+                .setNameFormatter(NAMES)
                 .header(header)
                 .build();
         this.store = new YamlConfigurationStore<>(type, properties);
@@ -194,20 +198,32 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
             return "a setting has a value of the wrong kind";
         }
         String path = fields.stream()
-                .map(field -> NameFormatters.LOWER_KEBAB_CASE.format(field.getName()))
+                .map(field -> NAMES.format(field.getName()))
                 .collect(Collectors.joining("."));
-        return path + " must be " + kind(fields.getLast().getGenericType());
+        Type type = fields.getLast().getGenericType();
+        // Unquoted, YAML reads a number, true, or a value starting with [ or { as something else.
+        return path + " must be " + kind(type) + (type == String.class ? ": put it in quotes" : "");
     }
 
     /** The field a message of the library is about, if it names one. */
     private static Optional<Field> field(@Nullable String message) {
-        Matcher matcher = message == null ? null : FIELD.matcher(message);
-        if (matcher == null || !matcher.find()) {
+        if (message == null) {
+            return Optional.empty();
+        }
+        // The last match: the library quotes the value before naming the field, and a value could
+        // contain text that looks like a field.
+        Matcher matcher = FIELD.matcher(message);
+        String owner = null;
+        String name = null;
+        while (matcher.find()) {
+            owner = matcher.group(1);
+            name = matcher.group(2);
+        }
+        if (owner == null || name == null) {
             return Optional.empty();
         }
         try {
-            Class<?> owner = Class.forName(matcher.group(1), false, ConfigService.class.getClassLoader());
-            return Optional.of(owner.getDeclaredField(matcher.group(2)));
+            return Optional.of(Class.forName(owner, false, ConfigService.class.getClassLoader()).getDeclaredField(name));
         } catch (ClassNotFoundException | NoSuchFieldException | LinkageError e) {
             return Optional.empty();
         }
@@ -216,8 +232,12 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     /** The kind of value a setting of this type takes, as the administrator writes it. */
     private static String kind(Type type) {
         if (type instanceof ParameterizedType generic && generic.getRawType() instanceof Class<?> raw) {
+            Type[] arguments = generic.getActualTypeArguments();
             if (Collection.class.isAssignableFrom(raw)) {
-                return "a list of " + plural(kind(generic.getActualTypeArguments()[0]));
+                return "a list (each entry: " + kind(arguments[0]) + ")";
+            }
+            if (Map.class.isAssignableFrom(raw)) {
+                return "a section (each value: " + kind(arguments[1]) + ")";
             }
             return kind(raw);
         }
@@ -248,15 +268,6 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
         return "a section of settings";
     }
 
-    private static String plural(String kind) {
-        return switch (kind) {
-            case "text" -> "texts";
-            case "a whole number" -> "whole numbers";
-            case "a number" -> "numbers";
-            default -> kind.startsWith("a ") ? kind.substring(2) + "s" : kind;
-        };
-    }
-
     private String render(T config) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         store.write(config, out);
@@ -264,8 +275,11 @@ public final class ConfigService<T extends ConfigRoot> implements Module {
     }
 
     private void reportUnknownSettings(Map<String, Object> content, String rendered) throws YamlException {
+        Set<String> known = settings(Yaml.parse(rendered));
         Set<String> unknown = settings(content);
-        unknown.removeAll(settings(Yaml.parse(rendered)));
+        unknown.removeAll(known);
+        // An empty section the plugin knows, such as 'scoreboard: {}', was filled with defaults.
+        unknown.removeIf(setting -> known.stream().anyMatch(path -> path.startsWith(setting + ".")));
         // A whole unknown section shows up as its leaves; a known list shows up as one key.
         for (String setting : unknown) {
             logger.warn("{}: '{}' is not a setting of this plugin and was removed from the file", FILE_NAME, setting);

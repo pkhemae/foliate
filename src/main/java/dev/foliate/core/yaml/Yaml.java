@@ -7,7 +7,13 @@ import org.snakeyaml.engine.v2.api.DumpSettings;
 import org.snakeyaml.engine.v2.api.Load;
 import org.snakeyaml.engine.v2.api.LoadSettings;
 import org.snakeyaml.engine.v2.common.FlowStyle;
+import org.snakeyaml.engine.v2.exceptions.ComposerException;
+import org.snakeyaml.engine.v2.exceptions.ConstructorException;
+import org.snakeyaml.engine.v2.exceptions.DuplicateKeyException;
 import org.snakeyaml.engine.v2.exceptions.MarkedYamlEngineException;
+import org.snakeyaml.engine.v2.exceptions.ParserException;
+import org.snakeyaml.engine.v2.exceptions.ReaderException;
+import org.snakeyaml.engine.v2.exceptions.ScannerException;
 import org.snakeyaml.engine.v2.exceptions.YamlEngineException;
 
 /**
@@ -33,7 +39,8 @@ public final class Yaml {
         try {
             root = new Load(LoadSettings.builder().build()).loadFromString(document);
         } catch (YamlEngineException e) {
-            throw new YamlException("not valid YAML (" + explain(e) + ")", e);
+            // Not chained: the library's message quotes the line, which may hold a password.
+            throw new YamlException("not valid YAML (" + explain(e) + ")");
         }
         if (root == null) {
             return new LinkedHashMap<>();
@@ -79,17 +86,25 @@ public final class Yaml {
     }
 
     /**
-     * The problem and where it is, such as {@code found duplicate key port, line 6, column 3}.
-     * Only the position is taken from the mark: printed whole, it quotes the line, which may hold
-     * a password.
+     * What is wrong, in fixed words, and where, such as {@code a key appears twice, line 6,
+     * column 3}. Nothing is taken from the library's text: it repeats tokens of the file (an
+     * alias, a tag, a key) and its marks quote the line, any of which may be a password.
      */
     private static String explain(YamlEngineException failure) {
-        if (failure instanceof MarkedYamlEngineException marked && marked.getProblem() != null) {
-            return marked.getProblem().strip() + marked.getProblemMark()
+        String problem = switch (failure) {
+            case DuplicateKeyException duplicate -> "a key appears twice";
+            case ComposerException alias -> "a value starts with * or &: put it in quotes";
+            case ConstructorException tag -> "a value starts with !: put it in quotes";
+            case ScannerException scanner -> "a quote, a bracket or the indentation is wrong";
+            case ParserException parser -> "the indentation or a list is wrong";
+            case ReaderException reader -> "it contains a character that is not allowed";
+            default -> "a value cannot be read: put it in quotes";
+        };
+        if (failure instanceof MarkedYamlEngineException marked) {
+            problem += marked.getProblemMark()
                     .map(mark -> ", line " + (mark.getLine() + 1) + ", column " + (mark.getColumn() + 1))
                     .orElse("");
         }
-        String message = failure.getMessage();
-        return message == null ? "unknown error" : message.lines().findFirst().orElse("unknown error").strip();
+        return problem;
     }
 }
