@@ -78,7 +78,7 @@ class AdministrationCommandsTest {
         });
         assertTrue(modules.enableAll());
 
-        dispatcher = TestCommands.foliate(
+        dispatcher = TestCommands.dispatcher(
                 new InfoCommand(modules, messages, "1.2.3", "Test 26.2"),
                 new ReloadCommand(modules, messages, schedulers, NOPLogger.NOP_LOGGER));
     }

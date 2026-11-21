@@ -55,7 +55,7 @@ class ProfileCommandTest {
                 directory, getClass().getClassLoader()::getResourceAsStream, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
         messages.enable();
         dispatcher = TestCommands.registerExecuteAs(
-                TestCommands.foliate(new ProfileCommand(id -> Optional.ofNullable(profiles.get(id)), messages, server)),
+                TestCommands.dispatcher(new ProfileCommand(id -> Optional.ofNullable(profiles.get(id)), messages, server)),
                 server);
     }
 

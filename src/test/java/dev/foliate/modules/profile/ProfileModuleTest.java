@@ -188,7 +188,7 @@ class ProfileModuleTest {
         PluginYml.registerPermissions(server);
         List<Subcommand> subcommands = profiles.subcommands();
 
-        TestCommands.foliate(subcommands.toArray(Subcommand[]::new)).execute("foliate profile", new CommandSource(player));
+        TestCommands.dispatcher(subcommands.toArray(Subcommand[]::new)).execute("foliate profile", new CommandSource(player));
 
         assertEquals(List.of("profile"), subcommands.stream().map(Subcommand::name).toList());
         assertEquals(1_700_003_600_000L, profiles.find(id).orElseThrow().lastSeen());

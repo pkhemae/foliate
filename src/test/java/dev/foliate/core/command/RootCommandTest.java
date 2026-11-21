@@ -44,7 +44,7 @@ class RootCommandTest {
     @Test
     void eachSubcommandChecksItsOwnPermission() throws Exception {
         CommandDispatcher<CommandSourceStack> commands =
-                TestCommands.foliate(stub("first", "test.first"), stub("second", "test.second"));
+                TestCommands.dispatcher(stub("first", "test.first"), stub("second", "test.second"));
         PlayerMock player = server.addPlayer();
         player.addAttachment(plugin, "test.first", true);
 
@@ -55,7 +55,7 @@ class RootCommandTest {
     @Test
     void subcommandThatSetsItsOwnRequirementStillNeedsItsPermission() {
         Subcommand restricted = stub("secret", "test.secret", node -> node.requires(source -> true).executes(context -> 1));
-        CommandDispatcher<CommandSourceStack> commands = TestCommands.foliate(restricted);
+        CommandDispatcher<CommandSourceStack> commands = TestCommands.dispatcher(restricted);
         PlayerMock player = server.addPlayer();
         player.addAttachment(plugin, "test.other", true);
 
@@ -65,7 +65,7 @@ class RootCommandTest {
     @Test
     void commandIsHiddenWhenItsOnlySubcommandIsUnavailable() {
         Subcommand playersOnly = availableOnlyTo("menu", "test.menu", source -> source.getSender() instanceof Player);
-        CommandDispatcher<CommandSourceStack> commands = TestCommands.foliate(playersOnly);
+        CommandDispatcher<CommandSourceStack> commands = TestCommands.dispatcher(playersOnly);
 
         assertThrows(
                 CommandSyntaxException.class,
@@ -74,7 +74,7 @@ class RootCommandTest {
 
     @Test
     void playerWithoutAnyPermissionCannotSeeTheCommand() {
-        CommandDispatcher<CommandSourceStack> commands = TestCommands.foliate(stub("first", "test.first"));
+        CommandDispatcher<CommandSourceStack> commands = TestCommands.dispatcher(stub("first", "test.first"));
         PlayerMock player = server.addPlayer();
 
         assertThrows(CommandSyntaxException.class, () -> commands.execute("foliate first", new CommandSource(player)));
