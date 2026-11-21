@@ -13,7 +13,6 @@ import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -40,20 +39,12 @@ import org.slf4j.helpers.NOPLogger;
 
 /**
  * The storage of profiles on a real MySQL or MariaDB server, through the same {@link Database} and
- * migrations as the plugin. It runs only where such a server is given by the environment: CI
- * starts both, and {@code FOLIATE_TEST_MYSQL_PORT} is what turns it on. The other variables
- * default to a local server whose root account has no password, and to a database named
- * {@code foliate_test}. The plugin's tables are dropped from that database first: point it at a
- * throwaway one, never at the data of a real server.
+ * migrations as the plugin. It runs only where such a server is given by the environment, as
+ * {@link TestMysql} describes: CI starts both. The plugin's tables are dropped from that database
+ * first.
  */
 @EnabledIfEnvironmentVariable(named = "FOLIATE_TEST_MYSQL_PORT", matches = "\\d+")
 class ProfileStorageOnMysqlTest {
-
-    private static final String HOST = env("FOLIATE_TEST_MYSQL_HOST", "127.0.0.1");
-    private static final String PORT = env("FOLIATE_TEST_MYSQL_PORT", "3306");
-    private static final String DATABASE = env("FOLIATE_TEST_MYSQL_DATABASE", "foliate_test");
-    private static final String USER = env("FOLIATE_TEST_MYSQL_USER", "root");
-    private static final String PASSWORD = env("FOLIATE_TEST_MYSQL_PASSWORD", "");
 
     @TempDir
     Path directory;
@@ -64,7 +55,7 @@ class ProfileStorageOnMysqlTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        try (Connection connection = DriverManager.getConnection(url(), USER, PASSWORD);
+        try (Connection connection = TestMysql.connect();
                 Statement statement = connection.createStatement()) {
             statement.execute("DROP TABLE IF EXISTS foliate_profiles");
             statement.execute("DROP TABLE IF EXISTS foliate_migrations");
@@ -83,7 +74,7 @@ class ProfileStorageOnMysqlTest {
                     properties:
                       sessionVariables: "wait_timeout=4321"
                       useAffectedRows: true
-                """.formatted(HOST, PORT, DATABASE, USER, PASSWORD));
+                """.formatted(TestMysql.HOST, TestMysql.PORT, TestMysql.DATABASE, TestMysql.USER, TestMysql.PASSWORD));
         config = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
         config.enable();
         database = newDatabase();
@@ -117,7 +108,7 @@ class ProfileStorageOnMysqlTest {
         for (int round = 0; round < 3; round++) {
             database.disable();
             database = null;
-            try (Connection connection = DriverManager.getConnection(url(), USER, PASSWORD);
+            try (Connection connection = TestMysql.connect();
                     Statement statement = connection.createStatement()) {
                 statement.execute("DROP TABLE IF EXISTS foliate_profiles");
                 statement.execute("DROP TABLE IF EXISTS foliate_migrations");
@@ -329,7 +320,7 @@ class ProfileStorageOnMysqlTest {
                 PreparedStatement update = (PreparedStatement) result;
                 return Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {PreparedStatement.class}, (self, call, parameters) -> {
                     if (call.getName().equals("executeUpdate")) {
-                        try (Connection other = DriverManager.getConnection(url(), USER, PASSWORD)) {
+                        try (Connection other = TestMysql.connect()) {
                             repository.save(other, theirs);
                         }
                         return 0;
@@ -361,14 +352,5 @@ class ProfileStorageOnMysqlTest {
                 return rows.getInt(1);
             }
         });
-    }
-
-    private static String url() {
-        return "jdbc:mysql://" + HOST + ":" + PORT + "/" + DATABASE;
-    }
-
-    private static String env(String name, String fallback) {
-        String value = System.getenv(name);
-        return value == null ? fallback : value;
     }
 }
