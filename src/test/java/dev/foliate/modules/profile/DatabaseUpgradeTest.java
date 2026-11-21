@@ -68,6 +68,14 @@ class DatabaseUpgradeTest {
                             "Notch", 1_700_000_000_000L, 1_763_650_000_000L, 3)));
 
     /**
+     * The scripts that earlier versions ran and this one no longer lists, because their module was
+     * removed: the plugin only warns about them, and the history of an older database keeps them.
+     * Listing them here makes removing a module a deliberate change, without editing the frozen
+     * snapshots. A script that is neither here nor in the plugin's list was renamed, and fails.
+     */
+    private static final Set<String> RETIRED = Set.of();
+
+    /**
      * What sqlite3 writes for a table that a migration rebuilt (its name in double quotes), and for
      * values that hold backslashes, a line break or a quote: as sqlite3 3.43 wrote it.
      */
@@ -197,9 +205,16 @@ class DatabaseUpgradeTest {
         assertDoesNotThrow(database::enable, "This version does not start on the database left by " + snapshot
                 + ": the servers that update from it would lose their storage (see upgrade/README.md)");
 
-        assertEquals(new TreeSet<>(FoliatePlugin.MIGRATIONS), history(),
-                "The history of the database left by " + snapshot + " must end with every migration of this version"
-                        + " recorded, and none it does not list (a renamed script runs again)");
+        Set<String> history = history();
+        Set<String> missing = new TreeSet<>(FoliatePlugin.MIGRATIONS);
+        missing.removeAll(history);
+        assertEquals(Set.of(), missing, "Migrations of this version not recorded in the database left by " + snapshot);
+        Set<String> unknown = new TreeSet<>(history);
+        unknown.removeAll(FoliatePlugin.MIGRATIONS);
+        unknown.removeAll(RETIRED);
+        assertEquals(Set.of(), unknown, "The database left by " + snapshot + " ran migrations that this version"
+                + " neither lists nor retires: a renamed script runs again under its new name. Those of a removed"
+                + " module go in RETIRED");
 
         for (PlayerProfile stored : SNAPSHOTS.get(snapshot)) {
             assertEquals(stored, find(stored.id()), "The profile of " + stored.name() + " in " + snapshot);

@@ -56,3 +56,17 @@ Do it for every release, at the commit that is tagged, before the tag is pushed.
   that update: make it on purpose.
 - Removing a snapshot means that the plugin no longer starts on that version's database. Only do it
   on purpose, and say in the changelog what the servers on that version must do.
+
+## Removing a module
+
+The snapshots keep the history and the tables of a module that a later version removes. The plugin
+starts anyway: it only warns about scripts it no longer lists, and leaves their tables alone. The
+test asks for the same thing to be said on purpose. Add the module's scripts to
+`DatabaseUpgradeTest.RETIRED`, and leave the snapshots as they are: a script that the history holds
+and that is neither listed nor retired fails the test, since it is what a renamed script looks like.
+Remove the module's rows from `UpgradeSnapshotWriter` and from the expected rows in
+`DatabaseUpgradeTest.SNAPSHOTS`.
+
+These tests live with the profile module, whose repository they read. When the profile module
+itself is removed, move them to a module that still has tables, without the profile rows, or
+remove them with this folder when no module stores anything any more.
