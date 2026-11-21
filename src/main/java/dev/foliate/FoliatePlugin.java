@@ -74,7 +74,7 @@ public class FoliatePlugin extends JavaPlugin {
                 this, database, messages, placeholders, getSLF4JLogger(), Clock.systemUTC());
         modules.register(profiles);
         modules.register(new ScoreboardModule(this, schedulers, () -> config.get().scoreboard(), messages));
-        Menus menus = hook(modules, ZMenuHook.PLUGIN_NAME, () -> new ZMenuHook(this, schedulers, messages));
+        hook(modules, ZMenuHook.PLUGIN_NAME, () -> new ZMenuHook(this, schedulers, messages));
 
         if (!modules.enableAll()) {
             failedToStart("a required module failed to enable");
@@ -86,9 +86,8 @@ public class FoliatePlugin extends JavaPlugin {
         List<Subcommand> subcommands = new ArrayList<>();
         subcommands.add(new InfoCommand(modules, messages, getPluginMeta().getVersion(), Platform.describe()));
         subcommands.add(new ReloadCommand(modules, messages, schedulers, getSLF4JLogger()));
-        if (menus != null) {
-            subcommands.add(new MenuCommand(menus));
-        }
+        // Only for features that are running: a hook that failed to enable has no menus to open.
+        modules.enabledOf(Menus.class).stream().findFirst().ifPresent(menus -> subcommands.add(new MenuCommand(menus)));
         if (modules.enabledNames().contains(profiles.name())) {
             subcommands.add(new ProfileCommand(profiles, messages, getServer()));
         }
