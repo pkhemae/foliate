@@ -19,7 +19,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongFunction;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
@@ -158,8 +157,8 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     /** When the failed saves and late loads are tried again. */
     private final Retries retries = new Retries();
 
-    /** The last database operation queued for each player; the next one is chained after it. */
-    private final Map<UUID, CompletableFuture<?>> queues = new ConcurrentHashMap<>();
+    /** Each player's reads and saves, one after the other. */
+    private final PlayerQueues queues = new PlayerQueues();
 
     /**
      * Each player's last queued save, until it starts: a newer value replaces the one it will write
@@ -246,15 +245,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      * queue in turn, as {@link #awaitWrites} counts it.
      */
     private void reportWhenSettled() {
-        CompletableFuture<?>[] undone =
-                queues.values().stream().filter(tail -> !tail.isDone()).toArray(CompletableFuture[]::new);
-        if (undone.length == 0) {
-            reportLost();
-            return;
-        }
-        CompletableFuture<?> _ = CompletableFuture.allOf(undone)
-                .handle((done, error) -> null)
-                .thenRun(this::reportWhenSettled);
+        queues.whenSettled(this::reportLost);
     }
 
     /** Logs, in one line, the players whose latest value could not be saved. */
@@ -323,24 +314,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      * of that work queued in turn (a value loaded in the background is saved by its callback).
      */
     public boolean awaitWrites(long timeoutSeconds) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
-        try {
-            while (true) {
-                CompletableFuture<?>[] pending =
-                        queues.values().stream().filter(tail -> !tail.isDone()).toArray(CompletableFuture[]::new);
-                if (pending.length == 0) {
-                    return true;
-                }
-                CompletableFuture.allOf(pending)
-                        .handle((done, error) -> null)
-                        .get(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
-            }
-        } catch (TimeoutException | ExecutionException e) {
-            return false;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        }
+        return queues.await(timeoutSeconds);
     }
 
     /**
@@ -575,7 +549,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
 
     /** Reads a player's stored value, ahead of the other players' saves but after their own. */
     private CompletableFuture<Optional<T>> read(UUID id) {
-        return enqueue(id, () -> database.submitFirst(connection -> repository.find(connection, id)));
+        return queues.enqueue(id, () -> database.submitFirst(connection -> repository.find(connection, id)));
     }
 
     /**
@@ -592,7 +566,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         }
         PendingSave<T> save = new PendingSave<>(value);
         waitingSaves.put(id, save);
-        CompletableFuture<?> _ = enqueue(id, () -> persist(id, save, 0)).exceptionally(error -> {
+        CompletableFuture<?> _ = queues.enqueue(id, () -> persist(id, save, 0)).exceptionally(error -> {
             logger.error("Could not save the {} of {}", subject, id, error);
             return null;
         });
@@ -728,42 +702,6 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             throw new IllegalStateException("The " + subject + " lifecycle changed the id in " + step);
         }
         return value;
-    }
-
-    /**
-     * Queues database work for a player behind whatever is already queued for them. Without this,
-     * two saves of the same player could run on two storage threads and land in either order.
-     *
-     * @param work starts the database work when the operation leaves the player's queue, that is
-     *     once everything queued before it is done; the next operation waits for its future
-     */
-    private <R extends @Nullable Object> CompletableFuture<R> enqueue(UUID id, Supplier<CompletableFuture<R>> work) {
-        CompletableFuture<R> result = new CompletableFuture<>();
-        // What the queue holds is not the database work itself but a gate that opens once the
-        // callbacks of its result have run: a callback that queues more work (the late join does)
-        // has then queued it before anyone waiting for the queue is released.
-        CompletableFuture<Void> gate = new CompletableFuture<>();
-        AtomicReference<CompletableFuture<R>> chained = new AtomicReference<>();
-        queues.compute(id, (key, tail) -> {
-            CompletableFuture<?> previous = tail == null ? CompletableFuture.completedFuture(null) : tail;
-            chained.set(previous.handle((done, error) -> null).thenCompose(ignored -> work.get()));
-            return gate;
-        });
-        // Registered outside compute(): a future that is already complete would run this at once,
-        // and updating the map from inside one of its own updates is not allowed.
-        // Its own outcome goes to result, which the callers observe: this future is not one to wait on.
-        CompletableFuture<?> _ = chained.get().whenComplete((value, error) -> {
-            if (error == null) {
-                result.complete(value);
-            } else {
-                result.completeExceptionally(error.getCause() != null ? error.getCause() : error);
-            }
-            gate.complete(null);
-            // Drop the queue once this is its last operation, or the map would keep one entry per
-            // player ever seen. If a later operation chained after this one, the entry is theirs.
-            queues.remove(id, gate);
-        });
-        return result;
     }
 
     /** One load after a join; {@code leftAt} is written and read under the store's lock. */
