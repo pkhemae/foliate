@@ -49,7 +49,7 @@ class ArchitectureTest {
                     continue; // the composition root
                 }
                 for (String reference : foreignReferences(unit, Files.readString(file))) {
-                    violations.add(file + " (" + unit + ") refers to dev.foliate." + reference);
+                    violations.add(file + " (" + unit + ") refers to " + BASE + "." + reference);
                 }
             }
         }

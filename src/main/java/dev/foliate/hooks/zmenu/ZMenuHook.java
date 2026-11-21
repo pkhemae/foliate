@@ -1,6 +1,5 @@
 package dev.foliate.hooks.zmenu;
 
-import dev.foliate.contracts.menu.MenuException;
 import dev.foliate.contracts.menu.Menus;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;

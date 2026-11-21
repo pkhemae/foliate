@@ -30,8 +30,8 @@ import org.bukkit.entity.Player;
  *   <li>the online players are suggested while typing;
  *   <li>it reads the profile from the cache, through {@link ProfileLookup}: a command runs on the
  *       region of whoever typed it, so it must never wait for the database;
- *   <li>it reaches the profile feature through an interface of {@code core}, because commands
- *       depend on {@code core} only.
+ *   <li>it reaches the profile feature through an interface of {@code contracts}, because
+ *       commands never depend on a module.
  * </ul>
  *
  * <p>{@link Subcommand} says another player must be reached through the schedulers. Here only
