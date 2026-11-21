@@ -78,10 +78,10 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     private final Map<UUID, PendingLogin<T>> loggingIn = new ConcurrentHashMap<>();
 
     /**
-     * Players whose value is being loaded after their join, because no pre-login was seen, with
-     * the time they quit if they did so before it was loaded: the value is then saved as of then.
+     * The load of each player whose value is being loaded after their join, because no pre-login
+     * was seen. A quit takes it out and records its time: the value is then saved as of then.
      */
-    private final Map<UUID, OptionalLong> pendingJoins = new ConcurrentHashMap<>();
+    private final Map<UUID, LateJoin> pendingJoins = new ConcurrentHashMap<>();
 
     /**
      * Makes "the player quit" and "their late value is cached" atomic: whichever comes second must
@@ -315,50 +315,56 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             PendingLogin<T> pending = loggingIn.remove(id);
             if (pending != null && now - pending.at() <= LOGIN_TTL_MILLIS) {
                 // The server disconnects an old session before the new one joins, and its quit hands
-                // over what it saved. Were it still here, its value would be the freshest one.
+                // over what it saved. Should a join ever come first, starting from the old
+                // session's value at least loses none of its changes (its quit would then take
+                // this session's value out of the cache: the store tells sessions apart by id only).
                 T current = online.get(id);
                 T joined = applyJoined(id, current != null ? current : pending.value(), name, now);
                 online.put(id, joined);
                 write(id, joined);
                 return;
             }
-            pendingJoins.put(id, OptionalLong.empty());
-        }
-        // No usable pre-login: the plugin was enabled while the player connected, or the login
-        // took longer than anyone should wait. Load without blocking the tick; until then they
-        // simply have no value. Known limit: a second login of the same player while this load
-        // is still running reads the database before this join is saved, so the new session
-        // does not count this join. It needs a re-login within the moment the load takes, right
-        // after the plugin was enabled; it loses that one join, nothing else.
-        read(id).thenAccept(stored -> {
-                    T joined = applyJoined(id, stored.orElseGet(() -> keepingId(id, lifecycle.create(id, name, now), "create")), name, now);
-                    // Queued under the same lock as the quit's save, so the two reach the database
-                    // in the order the player's session went.
-                    synchronized (sessions) {
-                        OptionalLong left = pendingJoins.remove(id);
-                        if (left == null) {
-                            // The store was disabled meanwhile: saved as it saved the others.
-                            write(id, applyLeft(id, joined, clock.millis()));
-                        } else if (left.isPresent()) {
-                            // Gone while the value was loading: nobody to cache it for.
-                            write(id, applyLeft(id, joined, left.getAsLong()));
-                        } else {
-                            online.put(id, joined);
-                            write(id, joined);
+            // No usable pre-login: the plugin was enabled while the player connected, or the login
+            // took longer than anyone should wait. Load without blocking the tick; until then they
+            // simply have no value. Queued under the lock too, so that a disable() cannot run in
+            // between and find nothing to wait for. Known limit: a second login of the same player
+            // while this load is still running reads the database before this join is saved, so
+            // the new session does not count this join. It needs a re-login within the moment the
+            // load takes, right after the plugin was enabled; it loses that one join, nothing else.
+            LateJoin load = new LateJoin();
+            pendingJoins.put(id, load);
+            read(id).thenAccept(stored -> {
+                        T joined = applyJoined(id, stored.orElseGet(() -> keepingId(id, lifecycle.create(id, name, now), "create")), name, now);
+                        // Queued under the same lock as the quit's save, so the two reach the
+                        // database in the order the player's session went.
+                        synchronized (sessions) {
+                            if (pendingJoins.remove(id, load)) {
+                                online.put(id, joined);
+                                write(id, joined);
+                            } else {
+                                // Gone while the value was loading (the quit recorded when), or
+                                // the store was disabled meanwhile: saved as the others were.
+                                write(id, applyLeft(id, joined, load.leftAt.orElse(clock.millis())));
+                            }
                         }
-                    }
-                })
-                .exceptionally(error -> {
-                    pendingJoins.remove(id);
-                    logger.error("Could not load the {} of {}", subject, name, error);
-                    return null;
-                });
+                    })
+                    .exceptionally(error -> {
+                        synchronized (sessions) {
+                            pendingJoins.remove(id, load);
+                        }
+                        logger.error("Could not load the {} of {}", subject, name, error);
+                        return null;
+                    });
+        }
     }
 
     void quit(UUID id) {
         long now = clock.millis();
         synchronized (sessions) {
-            pendingJoins.computeIfPresent(id, (key, loading) -> OptionalLong.of(now));
+            LateJoin loading = pendingJoins.remove(id);
+            if (loading != null) {
+                loading.leftAt = OptionalLong.of(now);
+            }
             T value = online.remove(id);
             if (value != null) {
                 T saved = applyLeft(id, value, now);
@@ -455,6 +461,16 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             queues.remove(id, gate);
         });
         return result;
+    }
+
+    /** One load after a join; {@code leftAt} is written and read under the store's lock. */
+    private static final class LateJoin {
+        OptionalLong leftAt = OptionalLong.empty();
+    }
+
+    /** Whether the store is enabled. For tests that wait for the shutdown to begin. */
+    boolean enabled() {
+        return enabled.get();
     }
 
     /** A value loaded at pre-login, and when. */

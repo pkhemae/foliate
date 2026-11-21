@@ -471,11 +471,15 @@ class PlayerStoreTest {
         AsyncPlayerPreLoginEvent login =
                 new AsyncPlayerPreLoginEvent("Alex", InetAddress.getLoopbackAddress(), UUID.randomUUID(), false);
 
+        // Held, so that the load is still running when it is waited for: an interrupted wait
+        // only fails for a result that is not there yet.
+        CountDownLatch release = holdStorageThread();
         Thread.currentThread().interrupt();
         try {
             store.onPreLogin(login);
         } finally {
             assertTrue(Thread.interrupted(), "the interruption was not kept");
+            release.countDown();
         }
 
         assertEquals(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, login.getLoginResult());
@@ -508,12 +512,35 @@ class PlayerStoreTest {
         clock.set(9_000);
 
         CompletableFuture<Void> disabling = CompletableFuture.runAsync(store::disable);
-        Thread.sleep(200);
-        release.countDown();
+        while (store.enabled()) {
+            Thread.onSpinWait();
+        }
+        release.countDown(); // the store is off: the load completes while disable() waits for it
         disabling.get(20, TimeUnit.SECONDS);
 
         assertTrue(store.find(id).isEmpty());
         assertEquals(9_000, stored(id).orElseThrow().lastSeen());
+    }
+
+    /**
+     * A load that a quit and a new join overtook belongs to the first session: it is saved as of
+     * that quit, and only the new load is cached.
+     */
+    @Test
+    void lateLoadOvertakenByAQuitAndANewJoinIsSavedAsOfTheQuit() throws Exception {
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        CountDownLatch release = holdStorageThread();
+        store.join(id, "Alex"); // no pre-login: the load waits behind the hold
+        clock.set(9_000);
+        store.quit(id);
+        clock.set(12_000);
+        store.join(id, "Alex"); // a second load, behind the first
+
+        release.countDown();
+        flush();
+
+        assertTrue(store.find(id).isPresent(), "the second session has no value");
+        assertEquals(12_000, store.find(id).orElseThrow().lastSeen());
     }
 
     @Test
