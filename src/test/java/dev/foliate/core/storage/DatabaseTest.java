@@ -179,6 +179,37 @@ class DatabaseTest {
         assertEquals(1, chained.get(1, TimeUnit.SECONDS));
     }
 
+    /**
+     * A query that never answers (a frozen server) does not hold the shutdown past its grace: its
+     * future fails, so its caller reports it while the server still logs.
+     */
+    @Test
+    void disableFailsWhatIsStillRunningOnceTheGraceEnds() throws Exception {
+        database.enable();
+        database.graceSeconds(1);
+        CountDownLatch never = new CountDownLatch(1);
+        CompletableFuture<Boolean> stuck = database.submit(connection -> {
+            // Deaf to the interruption, as a driver blocked on a socket is.
+            while (true) {
+                try {
+                    return never.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException ignored) {
+                    // keep waiting
+                }
+            }
+        });
+        CompletableFuture<Integer> queued = database.submit(connection -> 1);
+
+        long start = System.nanoTime();
+        database.disable();
+        long tookMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        never.countDown();
+
+        assertTrue(stuck.isCompletedExceptionally(), "the stuck query was left pending");
+        assertTrue(queued.isCompletedExceptionally(), "the queued work was left pending");
+        assertTrue(tookMillis < 6_000, "the shutdown took " + tookMillis + " ms");
+    }
+
     @Test
     void submitAfterDisableFailsInsteadOfHanging() throws Exception {
         database.enable();

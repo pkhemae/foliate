@@ -792,9 +792,9 @@ class PlayerStoreTest {
         flush();
         repository.failSaves(1, new CountDownLatch(1), id, true);
 
-        store.update(id, visit -> withVisits(visit, 50));
-        store.quit(id); // joins the save, which fails and waits for its retry
+        store.update(id, visit -> withVisits(visit, 50)); // its save fails and waits for its retry
         waitUntil(() -> pendingRetries.size() == 1);
+        store.quit(id); // joins that save
         store.beginLogin(id, "Alex"); // would wait for the retry, then time out
         store.join(id, "Alex");
         List<Runnable> retries = List.copyOf(pendingRetries);
@@ -827,6 +827,58 @@ class PlayerStoreTest {
         assertTrue(logger.lines().stream().noneMatch(line -> line.contains("could not be saved")), logger.lines().toString());
         database.enable();
         assertEquals(50, stored(id).orElseThrow().visits());
+    }
+
+    /**
+     * A login does not start from a value the database refuses: while a save fails for a reason
+     * not known to pass, and once it is given up, the login reads what is stored.
+     */
+    @Test
+    void aLoginDoesNotStartFromAValueTheDatabaseRefuses() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        repository.failSaves(Integer.MAX_VALUE, new CountDownLatch(0), id, false);
+        CountDownLatch release = holdStorageThread();
+        store.update(id, visit -> withVisits(visit, 50)); // refused, once it runs
+        store.quit(id);
+        CompletableFuture<Void> login = CompletableFuture.runAsync(() -> {
+            try {
+                store.beginLogin(id, "Alex"); // starts from the waiting save's value
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        login.get(5, TimeUnit.SECONDS);
+        release.countDown();
+        flush(); // the save is refused and given up
+        repository.failSaves(0, new CountDownLatch(0), null, true);
+
+        store.join(id, "Alex"); // the refused value is dropped: loaded from the database
+        waitUntil(() -> store.find(id).isPresent());
+
+        // The stored value counted one visit: this join is the second. From the refused value
+        // (50 visits), the session would count 51, and every save of it would be refused.
+        assertEquals(2, store.find(id).orElseThrow().visits());
+    }
+
+    /**
+     * A save queued by a callback after the shutdown stopped waiting (a late load that was still
+     * reading) is part of the report: the report waits for it too.
+     */
+    @Test
+    void theShutdownReportCountsASaveQueuedAfterItStoppedWaiting() throws Exception {
+        UUID id = UUID.randomUUID();
+        store.flushTimeoutSeconds(1);
+        CountDownLatch release = holdStorageThread();
+        store.join(id, "Alex"); // no pre-login: the read waits behind the hold
+        repository.failSaves(Integer.MAX_VALUE, new CountDownLatch(0), id, true);
+
+        store.disable(); // stops waiting after a second, while the read is still queued
+        release.countDown(); // the read ends, its callback queues the save, which is lost
+
+        waitUntil(() -> logger.lines().stream().anyMatch(line -> line.contains("could not be saved")));
+        assertTrue(logger.lines().stream().anyMatch(line -> line.contains("of 1 player")), logger.lines().toString());
     }
 
     /** What could not be saved is reported in one line when the store stops, not one per player. */
