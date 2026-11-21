@@ -5,14 +5,18 @@ import dev.foliate.core.yaml.Yaml;
 import dev.foliate.core.yaml.YamlException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
@@ -54,6 +58,9 @@ public final class MessageService implements Module {
 
     /** Locales shipped in the jar under {@code lang/}. English must stay: it is the last resort. */
     private static final List<String> BUNDLED_LOCALES = List.of("en", "fr");
+
+    /** In the lang folder: the built-in languages already copied there. */
+    private static final String OFFERED_FILE = ".built-in";
 
     private static final String PREFIX_KEY = "prefix";
     private static final String EXTENSION = ".yml";
@@ -254,12 +261,7 @@ public final class MessageService implements Module {
                 builtIn.put(Translator.parseLocale(name), parse(name + EXTENSION + " (built in)", content));
             }
 
-            if (Files.notExists(directory)) {
-                Files.createDirectories(directory);
-                for (Map.Entry<String, String> bundled : bundledFiles.entrySet()) {
-                    Files.writeString(directory.resolve(bundled.getKey() + EXTENSION), bundled.getValue());
-                }
-            }
+            offerBuiltInLanguages(bundledFiles);
 
             Map<Locale, Map<String, List<String>>> languages = new HashMap<>();
             try (Stream<Path> files = Files.list(directory)) {
@@ -314,17 +316,18 @@ public final class MessageService implements Module {
             }
 
             String configured = defaultLocale.get();
-            Locale defaultLocale = LOCALE_NAME.matcher(configured).matches()
+            Locale wanted = LOCALE_NAME.matcher(configured).matches()
                     ? Translator.parseLocale(configured.replace('-', '_'))
                     : null;
-            if (defaultLocale != null && !languages.containsKey(defaultLocale) && builtIn.containsKey(defaultLocale)) {
-                // Deleted: the built-in text is the same safety net as for a file that is broken.
-                logger.warn("lang/{}{} is missing: using its built-in text", configured, EXTENSION);
-                languages.put(defaultLocale, Map.copyOf(builtIn.get(defaultLocale)));
-            }
-            if (defaultLocale == null || !languages.containsKey(defaultLocale)) {
-                throw new MessageException(
-                        "default-locale '" + configured + "' has no usable file in the lang folder");
+            Locale defaultLocale = wanted == null ? null : usable(wanted, languages, builtIn, configured);
+            if (defaultLocale == null) {
+                String problem = "default-locale '" + configured + "' has no usable file in the lang folder";
+                if (strict) {
+                    throw new MessageException(problem);
+                }
+                // A setting written wrong must not cost the whole plugin: English is built in.
+                logger.error("{}: using English until it is fixed and reloaded", problem);
+                defaultLocale = usable(Locale.ENGLISH, languages, builtIn, "en");
             }
             return new Catalog(Map.copyOf(languages), builtIn.get(Locale.ENGLISH), defaultLocale);
         } catch (IOException e) {
@@ -332,10 +335,77 @@ public final class MessageService implements Module {
         }
     }
 
+    /**
+     * The locale to use for the configured default: it, or its language when it names a country
+     * ({@code en_US} uses {@code en}), as for a player. A language built into the jar is usable
+     * even when its file was deleted: its built-in text stands in, as for a file that is broken.
+     *
+     * @return null when neither has a file or built-in text
+     */
+    private @Nullable Locale usable(
+            Locale wanted,
+            Map<Locale, Map<String, List<String>>> languages,
+            Map<Locale, Map<String, List<String>>> builtIn,
+            String configured) {
+        List<Locale> candidates = wanted.getCountry().isEmpty()
+                ? List.of(wanted)
+                : List.of(wanted, Locale.of(wanted.getLanguage()));
+        for (Locale candidate : candidates) {
+            if (languages.containsKey(candidate)) {
+                return candidate;
+            }
+        }
+        for (Locale candidate : candidates) {
+            if (builtIn.containsKey(candidate)) {
+                logger.warn("default-locale '{}': lang/{}{} is missing, using its built-in text",
+                        configured, candidate, EXTENSION);
+                languages.put(candidate, Map.copyOf(builtIn.get(candidate)));
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Copies each language built into the jar to the folder once: on the first start, and when an
+     * update brings a new one. The folder is the administrator's: a built-in language whose file
+     * they deleted is not copied again, which {@value #OFFERED_FILE} remembers.
+     */
+    private void offerBuiltInLanguages(Map<String, String> bundledFiles) throws IOException {
+        Files.createDirectories(directory);
+        Path record = directory.resolve(OFFERED_FILE);
+        Set<String> offered = new TreeSet<>();
+        if (Files.exists(record)) {
+            Files.readAllLines(record).stream()
+                    .map(String::strip)
+                    .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                    .forEach(offered::add);
+        }
+        boolean changed = false;
+        for (Map.Entry<String, String> bundled : new TreeMap<>(bundledFiles).entrySet()) {
+            if (offered.add(bundled.getKey())) {
+                changed = true;
+                Path file = directory.resolve(bundled.getKey() + EXTENSION);
+                if (Files.notExists(file)) {
+                    Files.writeString(file, bundled.getValue());
+                }
+            }
+        }
+        if (changed) {
+            List<String> lines = new ArrayList<>(List.of(
+                    "# The built-in languages already copied to this folder, one per line.",
+                    "# Delete a language's file to stop offering it: it is not copied again."));
+            lines.addAll(offered);
+            Files.write(record, lines);
+        }
+    }
+
     /** Reads a language file; a file that cannot be read is handled like one that is broken. */
     private static String read(Path file, String fileName) throws MessageException {
         try {
             return Files.readString(file);
+        } catch (CharacterCodingException e) {
+            throw new MessageException("lang/" + fileName + " is not saved as UTF-8: save it again as UTF-8", e);
         } catch (IOException e) {
             throw new MessageException("lang/" + fileName + " could not be read (" + e.getMessage() + ")", e);
         }
