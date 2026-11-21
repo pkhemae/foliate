@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.foliate.testing.RecordingLogger;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
@@ -15,6 +16,7 @@ import java.sql.Statement;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.helpers.NOPLogger;
@@ -78,11 +80,11 @@ class MigrationsTest {
     @Test
     void rebuildingATableKeepsTheRowsThatReferToIt() throws Exception {
         try (Connection connection = sqlite()) {
-            new Migrations(NOPLogger.NOP_LOGGER, List.of("003_parents.sql"), StorageSettings.Type.SQLITE).apply(connection);
+            new Migrations(NOPLogger.NOP_LOGGER, List.of("parents/003_parents.sql"), StorageSettings.Type.SQLITE).apply(connection);
             execute(connection, "INSERT INTO parents (id, name) VALUES (1, 'a')");
             execute(connection, "INSERT INTO children (id, parent) VALUES (10, 1)");
 
-            new Migrations(NOPLogger.NOP_LOGGER, List.of("003_parents.sql", "004_rebuild_parents.sql"), StorageSettings.Type.SQLITE)
+            new Migrations(NOPLogger.NOP_LOGGER, List.of("parents/003_parents.sql", "parents/004_rebuild_parents.sql"), StorageSettings.Type.SQLITE)
                     .apply(connection);
 
             assertEquals(1, count(connection, "children"));
@@ -95,15 +97,15 @@ class MigrationsTest {
     @Test
     void aMigrationThatBreaksAForeignKeyIsRefused() throws Exception {
         try (Connection connection = sqlite()) {
-            new Migrations(NOPLogger.NOP_LOGGER, List.of("003_parents.sql"), StorageSettings.Type.SQLITE).apply(connection);
+            new Migrations(NOPLogger.NOP_LOGGER, List.of("parents/003_parents.sql"), StorageSettings.Type.SQLITE).apply(connection);
             execute(connection, "INSERT INTO parents (id, name) VALUES (1, 'a')");
             execute(connection, "INSERT INTO children (id, parent) VALUES (10, 1)");
 
             SQLException failure = assertThrows(SQLException.class, () -> new Migrations(
-                            NOPLogger.NOP_LOGGER, List.of("003_parents.sql", "005_orphan_children.sql"), StorageSettings.Type.SQLITE)
+                            NOPLogger.NOP_LOGGER, List.of("parents/003_parents.sql", "parents/005_orphan_children.sql"), StorageSettings.Type.SQLITE)
                     .apply(connection));
 
-            assertTrue(failure.getMessage().contains("005_orphan_children.sql"), failure.getMessage());
+            assertTrue(failure.getMessage().contains("parents/005_orphan_children.sql"), failure.getMessage());
             assertEquals(1, count(connection, "parents"), "the migration was not rolled back");
         }
     }
@@ -146,17 +148,79 @@ class MigrationsTest {
         }
     }
 
-    /** Running the rest on a schema they do not expect could damage it. */
+    /**
+     * Two modules each own their scripts. When the first appends one, the second's must neither
+     * move nor run again: scripts are known by name, not by their position in the plugin's list.
+     */
     @Test
-    void aRenamedOrReorderedMigrationStopsTheStart() throws Exception {
+    void aModuleThatAddsAScriptLeavesTheOthersAlone() throws Exception {
+        List<String> notes = List.of("001_create_notes.sql");
+        List<String> parents = List.of("parents/003_parents.sql");
+        try (Connection connection = sqlite()) {
+            new Migrations(NOPLogger.NOP_LOGGER, concat(parents, notes), StorageSettings.Type.SQLITE).apply(connection);
+
+            List<String> parentsThen = concat(parents, List.of("parents/004_rebuild_parents.sql"));
+            new Migrations(NOPLogger.NOP_LOGGER, concat(parentsThen, notes), StorageSettings.Type.SQLITE).apply(connection);
+            // The order of the modules does not matter either.
+            new Migrations(NOPLogger.NOP_LOGGER, concat(notes, parentsThen), StorageSettings.Type.SQLITE).apply(connection);
+
+            assertEquals(0, count(connection, "parents"));
+            assertEquals(3, count(connection, "foliate_migrations"));
+        }
+    }
+
+    /**
+     * Inserted before a script of its module that already ran, a new one would run after it here
+     * and before it on a new database: the schemas would differ.
+     */
+    @Test
+    void aScriptInsertedBeforeOneThatRanIsRefused() throws Exception {
+        try (Connection connection = sqlite()) {
+            new Migrations(NOPLogger.NOP_LOGGER, List.of("parents/003_parents.sql"), StorageSettings.Type.SQLITE).apply(connection);
+
+            SQLException failure = assertThrows(SQLException.class, () -> new Migrations(
+                            NOPLogger.NOP_LOGGER,
+                            List.of("parents/002_create_pets.sql", "parents/003_parents.sql"),
+                            StorageSettings.Type.SQLITE)
+                    .apply(connection));
+
+            assertTrue(failure.getMessage().contains("append new migrations at the end"), failure.getMessage());
+        }
+    }
+
+    /** MySQL compares the names without case, and its key holds 191 characters. */
+    @Test
+    void namesTheHistoryCannotTellApartOrHoldAreRefused() {
+        assertThrows(IllegalArgumentException.class, () -> new Migrations(
+                NOPLogger.NOP_LOGGER, List.of("parents/a.sql", "Parents/A.sql"), StorageSettings.Type.SQLITE));
+        assertThrows(IllegalArgumentException.class, () -> new Migrations(
+                NOPLogger.NOP_LOGGER, List.of("x".repeat(188) + ".sql"), StorageSettings.Type.SQLITE));
+    }
+
+    /** Renamed, or left behind by a module that was removed: worth a line, not a failed start. */
+    @Test
+    void aScriptTheDatabaseRanButNoModuleListsIsReported() throws Exception {
+        RecordingLogger logger = new RecordingLogger();
         try (Connection connection = sqlite()) {
             new Migrations(NOPLogger.NOP_LOGGER, List.of("001_create_notes.sql"), StorageSettings.Type.SQLITE).apply(connection);
 
-            SQLException failure = assertThrows(SQLException.class, () ->
-                    new Migrations(NOPLogger.NOP_LOGGER, List.of("001_create_visits.sql"), StorageSettings.Type.SQLITE).apply(connection));
-
-            assertTrue(failure.getMessage().contains("renamed or reordered"), failure.getMessage());
+            new Migrations(logger, List.of("001_create_visits.sql"), StorageSettings.Type.SQLITE).apply(connection);
         }
+
+        assertTrue(
+                logger.lines().stream().anyMatch(line -> line.startsWith("WARN The database ran the migration 001_create_notes.sql")),
+                logger.lines().toString());
+    }
+
+    /** The history knows scripts by name: the second one would never run. */
+    @Test
+    void aScriptListedTwiceIsRefused() {
+        assertThrows(IllegalArgumentException.class, () -> new Migrations(
+                NOPLogger.NOP_LOGGER, List.of("001_create_notes.sql", "001_create_notes.sql"), StorageSettings.Type.SQLITE));
+    }
+
+    private static List<String> concat(List<String> first, List<String> second) {
+        return Stream.concat(first.stream(), second.stream()).toList();
     }
 
     /**

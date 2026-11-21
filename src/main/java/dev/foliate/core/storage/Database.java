@@ -42,13 +42,16 @@ public final class Database implements Module {
 
     /**
      * @param settings the current storage settings; read when the database starts
-     * @param migrations the names of the SQL scripts under {@code migrations/}, in the order they
-     *     apply; each part of the plugin that needs a table brings its own
+     * @param migrations the names of the SQL scripts under {@code migrations/}: each module that
+     *     needs a table brings its own, named after it ({@code profile/001_create_profiles.sql}) and
+     *     in the order they apply; the modules' lists go together in any order
+     * @throws IllegalArgumentException when two scripts have the same name
      */
     public Database(
             Path dataDirectory, Supplier<StorageSettings> settings, List<String> migrations, Logger logger) {
         this.dataDirectory = dataDirectory;
         this.settings = settings;
+        Migrations.requireUniqueNames(migrations);
         this.migrations = List.copyOf(migrations);
         this.logger = logger;
     }
