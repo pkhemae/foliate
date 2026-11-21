@@ -27,7 +27,7 @@ import org.bukkit.entity.Player;
  *       with the source as typed, and {@code /execute as} only swaps the executor afterwards (see
  *       {@link Subcommand#isAvailableTo}). A source with no player as executor, such as the console
  *       or a command block, is asked to name a player;
- *   <li>the name argument requires {@code others} of the sender, who {@code /execute as} does not
+ *   <li>the name argument requires {@code others} of the sender, whom {@code /execute as} does not
  *       change. A player who is offline, or whom the sender cannot see (one who vanished), is
  *       reported as not online;
  *   <li>the players online are suggested while typing, only to a sender with {@code others}, and
@@ -39,11 +39,17 @@ import org.bukkit.entity.Player;
  * typed) and {@code <section>.others-denied}. They name the command and what it shows, so a player
  * reads which one refused.
  *
- * <p>Folia: the action runs on the region of whoever typed the command (the global region for the
- * console), not on the target's. It may read the target's name and unique id, which are safe from
- * any thread, and data the plugin keeps by unique id, such as a cache; anything of the target's
- * body, location or world goes through the target's scheduler. The checks here only read the
- * sender, the executor reference, the name and the unique id.
+ * <p>Folia: the action runs on the sender's region, not on the target's: the region of the player
+ * who typed the command, the global region for the console, the block's region for a command
+ * block. It may read the target's name and unique id, which are safe from any thread, and data the
+ * plugin keeps by unique id, such as a cache; anything of the target's body, location or world
+ * goes through the target's scheduler. The checks here only read the sender, the executor
+ * reference, the name and the unique id.
+ *
+ * <p>The target was online when it was checked, but a player's quit is handled on their own
+ * region, in parallel with the action: an action that looks the target up, in a cache for
+ * example, must cope with finding nothing, as the profile command does with its
+ * {@code not-loaded} message.
  *
  * <p>A subcommand creates one in its constructor, from its {@code PERMISSION_OTHERS} constant and
  * the section of its messages, and calls {@link #addTo} from its {@link Subcommand#build}, with
@@ -64,8 +70,9 @@ public final class PlayerTarget {
          * Does what the subcommand is for, once every check has passed.
          *
          * @param sender who typed the command, to answer
-         * @param target the player it is about, who may be the sender; online, and visible to the
-         *     sender when named
+         * @param target the player it is about, who may be the sender: online when checked, and
+         *     visible to the sender when named. They may have quit since, from their own region,
+         *     so data looked up by their unique id may be missing
          */
         void run(CommandSender sender, Player target);
     }
