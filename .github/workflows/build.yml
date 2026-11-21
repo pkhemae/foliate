@@ -217,9 +217,24 @@ jobs:
             echo "still=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # A name that is a Java keyword once lower-cased would give a project that does not compile.
+      - name: A reserved name is refused, before anything is rewritten
+        if: steps.template.outputs.still == 'true'
+        run: |
+          if ./gradlew renameTemplate -PnewName=Static -PnewGroup=com.example.skylands -PnewRepository=acme/skylands; then
+            echo "::error::renameTemplate accepted Static"
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::The refused rename changed the tree"
+            git status --short
+            exit 1
+          fi
+
+      # With the configuration cache, which a developer may have turned on for every build.
       - name: Rename it
         if: steps.template.outputs.still == 'true'
-        run: ./gradlew renameTemplate -PnewName=Skylands -PnewGroup=com.example.skylands -PnewRepository=acme/skylands
+        run: ./gradlew renameTemplate -PnewName=Skylands -PnewGroup=com.example.skylands -PnewRepository=acme/skylands --configuration-cache
 
       - name: Nothing of the template's name is left
         if: steps.template.outputs.still == 'true'
