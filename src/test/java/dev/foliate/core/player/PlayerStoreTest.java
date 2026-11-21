@@ -434,10 +434,63 @@ class PlayerStoreTest {
         release.countDown();
         flush();
 
-        assertEquals(1, repository.saves.get() - before, "the changes were not written together");
+        // The first save left the player's queue at once, to wait for the storage thread: every
+        // change after it joined the second one.
+        assertEquals(2, repository.saves.get() - before, "the changes were not written together");
         Visit stored = stored(id).orElseThrow();
         assertEquals(10_001, stored.visits());
         assertEquals(5_000, stored.lastSeen(), "the quit was not part of the write");
+    }
+
+    /** A change made while a save is running is not part of it: it is saved after it. */
+    @Test
+    void aChangeMadeWhileASaveRunsIsSavedAfterIt() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        CountDownLatch inSave = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        repository.duringSave = () -> {
+            inSave.countDown();
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        };
+        int before = repository.saves.get();
+
+        store.update(id, visit -> withVisits(visit, 50));
+        assertTrue(inSave.await(10, TimeUnit.SECONDS));
+        store.update(id, visit -> withVisits(visit, 60));
+        repository.duringSave = () -> {};
+        release.countDown();
+        flush();
+
+        assertEquals(2, repository.saves.get() - before);
+        assertEquals(60, stored(id).orElseThrow().visits());
+    }
+
+    /**
+     * A save that left the player's queue and waits for the database (a free thread, a connection
+     * that may never come) is closed: a change made meanwhile is a save of its own, which a
+     * failure of the first one cannot take down with it.
+     */
+    @Test
+    void aSaveWaitingForTheDatabaseTakesNoMoreChanges() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        int before = repository.saves.get();
+        CountDownLatch release = holdStorageThread();
+
+        store.update(id, visit -> withVisits(visit, 50)); // leaves the queue, waits for the thread
+        store.update(id, visit -> withVisits(visit, 60));
+        release.countDown();
+        flush();
+
+        assertEquals(2, repository.saves.get() - before, "the second change joined a save that had left the queue");
+        assertEquals(60, stored(id).orElseThrow().visits());
     }
 
     /** A save that could not run must not keep the changes made after it from being saved. */
@@ -738,6 +791,9 @@ class PlayerStoreTest {
 
     private static final class VisitRepository implements PlayerRepository<Visit> {
 
+        /** Runs inside each save, to hold one while it is running. */
+        volatile Runnable duringSave = () -> {};
+
         /** How many rows were written, to tell a coalesced save from one per change. */
         final java.util.concurrent.atomic.AtomicInteger saves = new java.util.concurrent.atomic.AtomicInteger();
 
@@ -758,6 +814,7 @@ class PlayerStoreTest {
         @Override
         public void save(Connection connection, Visit visit) throws SQLException {
             saves.incrementAndGet();
+            duringSave.run();
             try (PreparedStatement update = connection.prepareStatement(
                     "UPDATE test_visits SET name = ?, last_seen = ?, visits = ? WHERE id = ?")) {
                 update.setString(1, visit.name());

@@ -42,10 +42,11 @@ import org.slf4j.Logger;
  *   <li><b>Write behind, in order.</b> A change replaces the cached value at once and is saved on
  *       a storage thread. Every read and write for one player is queued behind the previous one,
  *       so a late save can never overwrite a newer one, whatever the size of the pool.
- *   <li><b>Write the latest value only.</b> A save that is queued and has not started yet takes
- *       the value as it is when it starts: changes made meanwhile join it instead of queuing saves
- *       of their own. A thousand changes in a row are two writes, not a thousand, and a login
- *       waits for those two at most.
+ *   <li><b>Write the latest value only.</b> A save still waiting in the player's queue takes the
+ *       value as it is when it leaves the queue: changes made meanwhile join it instead of queuing
+ *       saves of their own. A thousand changes in a row are a few writes, not a thousand, and a
+ *       login waits for those few at most. A read queued behind a waiting save may therefore see
+ *       a change made after the read was queued: never an older one.
  *   <li><b>Never invent data.</b> When the stored value is not known yet, wait for it: saving a
  *       fresh one would erase the real one.
  *   <li><b>Flush on shutdown.</b> The last saves are queued like the others, then waited for,
@@ -393,7 +394,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     }
 
     private CompletableFuture<Optional<T>> read(UUID id) {
-        return enqueue(id, connection -> repository.find(connection, id));
+        return enqueue(id, () -> connection -> repository.find(connection, id));
     }
 
     /**
@@ -410,12 +411,16 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         }
         PendingSave<T> save = new PendingSave<>(value);
         waitingSaves.put(id, save);
-        enqueue(id, connection -> {
-                    // From here on, a change queues a save of its own, behind this one.
+        enqueue(id, () -> {
+                    // Leaving the player's queue: from here on, a change queues a save of its own.
+                    // Closed now rather than once a connection is found, so that the changes made
+                    // while it waits for one are not lost with it if it never gets one.
                     T latest = save.start();
                     waitingSaves.remove(id, save);
-                    repository.save(connection, latest);
-                    return null;
+                    return connection -> {
+                        repository.save(connection, latest);
+                        return null;
+                    };
                 })
                 .exceptionally(error -> {
                     waitingSaves.remove(id, save);
@@ -460,8 +465,11 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     /**
      * Queues database work for a player behind whatever is already queued for them. Without this,
      * two saves of the same player could run on two storage threads and land in either order.
+     *
+     * @param work gives the database work when the operation leaves the player's queue, that is
+     *     once everything queued before it is done
      */
-    private <R> CompletableFuture<R> enqueue(UUID id, SqlFunction<R> work) {
+    private <R> CompletableFuture<R> enqueue(UUID id, Supplier<SqlFunction<R>> work) {
         CompletableFuture<R> result = new CompletableFuture<>();
         // What the queue holds is not the database work itself but a gate that opens once the
         // callbacks of its result have run: a callback that queues more work (the late join does)
@@ -470,7 +478,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         AtomicReference<CompletableFuture<R>> chained = new AtomicReference<>();
         queues.compute(id, (key, tail) -> {
             CompletableFuture<?> previous = tail == null ? CompletableFuture.completedFuture(null) : tail;
-            chained.set(previous.handle((done, error) -> null).thenCompose(ignored -> database.submit(work)));
+            chained.set(previous.handle((done, error) -> null).thenCompose(ignored -> database.submit(work.get())));
             return gate;
         });
         // Registered outside compute(): a future that is already complete would run this at once,
