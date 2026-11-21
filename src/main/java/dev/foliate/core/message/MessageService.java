@@ -29,6 +29,7 @@ import net.kyori.adventure.identity.Identity;
 import net.kyori.adventure.pointer.Pointered;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.minimessage.tag.Tag;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.title.Title;
@@ -244,13 +245,24 @@ public final class MessageService implements Module {
         TagResolver.Builder resolver = TagResolver.builder().resolvers(sharedResolvers);
         List<String> prefix = current.find(locale, PREFIX_KEY);
         if (prefix != null) {
-            // Parsed on purpose: the prefix is MiniMessage written by the administrator.
-            resolver.resolver(Placeholder.parsed(PREFIX_KEY, String.join("\n", prefix)));
+            // The prefix is MiniMessage written by the administrator, parsed on its own and
+            // inserted as a component: with the shared tags and this message's arguments, but
+            // without itself, so a <prefix> inside the prefix stays text instead of recursing
+            // forever. Parsed only when the message uses it.
+            String prefixTemplate = String.join("\n", prefix);
+            TagResolver withoutPrefix =
+                    TagResolver.builder().resolvers(sharedResolvers).resolvers(arguments).build();
+            resolver.tag(PREFIX_KEY, (queue, context) ->
+                    Tag.selfClosingInserting(deserialize(viewer, prefixTemplate, withoutPrefix)));
         }
         resolver.resolvers(arguments);
+        return deserialize(viewer, template, resolver.build());
+    }
+
+    private Component deserialize(@Nullable Pointered viewer, String template, TagResolver resolver) {
         return viewer == null
-                ? miniMessage.deserialize(template, resolver.build())
-                : miniMessage.deserialize(template, viewer, resolver.build());
+                ? miniMessage.deserialize(template, resolver)
+                : miniMessage.deserialize(template, viewer, resolver);
     }
 
     private Catalog load(boolean strict) throws MessageException {

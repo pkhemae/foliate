@@ -132,6 +132,25 @@ class MessageServiceTest {
         assertTrue(colors(rendered).stream().noneMatch(NamedTextColor.RED::equals));
     }
 
+    /** A prefix that names itself used to recurse until the stack overflowed, on every message. */
+    @Test
+    void prefixThatUsesItselfRendersAsText() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "prefix: \"<prefix><prefix>[P] \"\n");
+
+        messages.reload();
+
+        assertEquals("<prefix><prefix>[P] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
+    }
+
+    @Test
+    void prefixSeesTheArgumentsOfTheMessage() throws Exception {
+        Files.writeString(directory.resolve("lang/en.yml"), "prefix: \"[<player>] \"\n");
+
+        messages.reload();
+
+        assertEquals("[Alex] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
+    }
+
     @Test
     void invalidFileOnReloadKeepsThePreviousMessages() throws Exception {
         Files.writeString(directory.resolve("lang/en.yml"), "greeting: [unclosed\n");
