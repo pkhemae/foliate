@@ -1,15 +1,18 @@
 package dev.foliate.core.player;
 
 import dev.foliate.core.storage.Database;
-import dev.foliate.core.storage.SqlFunction;
+import dev.foliate.core.storage.SqlErrors;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -38,21 +41,27 @@ import org.slf4j.Logger;
  *
  * <ol>
  *   <li><b>Load before the player exists.</b> The pre-login event runs off the tick threads, so it
- *       can wait for the database. The value is then held until the join.
+ *       can wait for the database. The value is then held until the join. The read goes ahead of
+ *       the other players' saves: someone is waiting for it.
  *   <li><b>Read from the cache only.</b> Events, commands and placeholders run on many threads and
  *       none of them may block: {@link #find} reads an immutable value from a concurrent map.
  *   <li><b>Write behind, in order.</b> A change replaces the cached value at once and is saved on
  *       a storage thread. Every read and write for one player is queued behind the previous one,
  *       so a late save can never overwrite a newer one, whatever the size of the pool.
- *   <li><b>Write the latest value only.</b> A save still waiting in the player's queue takes the
- *       value as it is when it leaves the queue: changes made meanwhile join it instead of queuing
- *       saves of their own. A thousand changes in a row are a few writes, not a thousand, and a
- *       login waits for those few at most. A read queued behind a waiting save may therefore see
- *       a change made after the read was queued: never an older one.
+ *   <li><b>Write the latest value only.</b> A save takes the value as it is when it starts on a
+ *       storage thread: changes made while it waits join it instead of queuing saves of their own.
+ *       A thousand changes in a row are one write, not a thousand, and a login waits for that one
+ *       at most. A read queued behind a waiting save may therefore see a change made after the
+ *       read was queued: never an older one.
+ *   <li><b>Retry what failed.</b> A save that fails for a reason that may pass (the database is
+ *       unreachable, busy or timed out) keeps the player's latest value and is tried again, ever
+ *       less often, until it succeeds. The player's later reads and saves wait behind it. An
+ *       outage is logged once when it starts and once when it ends, not once per save.
  *   <li><b>Never invent data.</b> When the stored value is not known yet, wait for it: saving a
  *       fresh one would erase the real one.
  *   <li><b>Flush on shutdown.</b> The last saves are queued like the others, then waited for,
- *       before the database closes.
+ *       before the database closes. The players whose value could not be saved in time are
+ *       reported in one line.
  * </ol>
  *
  * <p>A store is a component of a module, not a module: the module calls {@link #enable()} and
@@ -62,6 +71,15 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
 
     private static final long LOAD_TIMEOUT_SECONDS = 10;
     private static final long FLUSH_TIMEOUT_SECONDS = 15;
+
+    /** The wait before the first retry of a failed save or late load; it doubles each time. */
+    static final long RETRY_FIRST_MILLIS = 250;
+
+    /** The longest wait between two tries. */
+    static final long RETRY_MAX_MILLIS = 10_000;
+
+    /** How many players a report of unsaved values names; the others are counted. */
+    private static final int REPORTED_IDS = 10;
 
     /**
      * How long a value loaded at pre-login waits for its join. A connection can end between the
@@ -99,6 +117,24 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     private final Object sessions = new Object();
 
     private final AtomicBoolean enabled = new AtomicBoolean();
+
+    /**
+     * Each player's last session that ended, until a while after: a login whose read began before
+     * that quit read an older value than the quit saved. See {@link #beginLogin}.
+     */
+    private final Map<UUID, Left<T>> recentlyLeft = new ConcurrentHashMap<>();
+
+    /** Counts the logins and quits, to tell which came first. Read and written under the lock. */
+    private long sessionEvents;
+
+    /** Set when the shutdown stops waiting: the saves still being retried then give up. */
+    private volatile boolean abandoned;
+
+    /** Whether saves are failing, so that an outage is logged when it starts and ends only. */
+    private final AtomicBoolean failing = new AtomicBoolean();
+
+    /** Players whose latest value could not be saved and was given up, for the shutdown's report. */
+    private final Set<UUID> lost = ConcurrentHashMap.newKeySet();
 
     /** The last database operation queued for each player; the next one is chained after it. */
     private final Map<UUID, CompletableFuture<?>> queues = new ConcurrentHashMap<>();
@@ -166,9 +202,23 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             online.clear();
             loggingIn.clear();
             pendingJoins.clear();
+            recentlyLeft.clear();
         }
+        Set<UUID> unsaved = new TreeSet<>();
         if (!awaitWrites(FLUSH_TIMEOUT_SECONDS)) {
-            logger.warn("Some player {}s were not saved within {} seconds", subject, FLUSH_TIMEOUT_SECONDS);
+            // The saves still being retried stop; those already running get the database's own
+            // grace period, but cannot be counted on.
+            abandoned = true;
+            unsaved.addAll(queues.keySet());
+        }
+        unsaved.addAll(lost);
+        if (!unsaved.isEmpty()) {
+            logger.warn(
+                    "The {}s of {} players could not be saved: their latest changes are probably lost ({}{})",
+                    subject,
+                    unsaved.size(),
+                    String.join(", ", unsaved.stream().limit(REPORTED_IDS).map(UUID::toString).toList()),
+                    unsaved.size() > REPORTED_IDS ? ", ..." : "");
         }
     }
 
@@ -260,7 +310,13 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         try {
             beginLogin(event.getUniqueId(), event.getName());
         } catch (ExecutionException | TimeoutException | RuntimeException e) {
-            logger.error("Could not load the {} of {}", subject, event.getName(), e);
+            Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
+            if (cause instanceof SQLException || cause instanceof TimeoutException) {
+                // The database is down or late: one line each, an outage refuses many players.
+                logger.warn("Refused {}: could not load their {} ({})", event.getName(), subject, describe(cause));
+            } else {
+                logger.error("Could not load the {} of {}", subject, event.getName(), e);
+            }
             // Letting the player in without their data would mean guessing it.
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, loadFailed.get());
         } catch (InterruptedException e) {
@@ -286,6 +342,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         // fresher value in memory than in the database. Taken and recorded under the lock the quit
         // uses: a quit in between would otherwise not see this pending login, and the new session
         // would start from a copy older than what the quit saved.
+        long readStarted;
         synchronized (sessions) {
             if (!enabled.get()) {
                 return;
@@ -295,6 +352,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                 remember(id, current);
                 return;
             }
+            readStarted = ++sessionEvents;
         }
         // Not online: wait for the database, without holding the lock.
         T loaded = read(id).get(LOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -303,17 +361,27 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             if (!enabled.get()) {
                 return;
             }
-            // A session that joined while we were reading is fresher than what we read.
+            // A session that joined while we were reading is fresher than what we read, and so is
+            // one that joined, played and quit meanwhile: our read was queued before its save.
             T current = online.get(id);
-            remember(id, current != null ? current : loaded);
+            Left<T> left = recentlyLeft.get(id);
+            if (current != null) {
+                remember(id, current);
+            } else if (left != null && left.event() > readStarted) {
+                remember(id, left.value());
+            } else {
+                remember(id, loaded);
+            }
         }
     }
 
     /** Records a pending login. Called under the lock. */
     private void remember(UUID id, T value) {
         long now = clock.millis();
-        // Logins that never became a join leave nothing else to tell us: forget them here.
+        // Logins that never became a join leave nothing else to tell us: forget them here, with
+        // the quits that no read still running can predate.
         loggingIn.values().removeIf(pending -> now - pending.at() > LOGIN_TTL_MILLIS);
+        recentlyLeft.values().removeIf(left -> now - left.at() > LOGIN_TTL_MILLIS);
         loggingIn.put(id, new PendingLogin<>(value, now));
     }
 
@@ -350,15 +418,34 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             }
             // No usable pre-login: the plugin was enabled while the player connected, or the login
             // took longer than anyone should wait. Load without blocking the tick; until then they
-            // simply have no value. Queued under the lock too, so that a disable() cannot run in
-            // between and find nothing to wait for. Known limit: a second login of the same player
-            // while this load is still running reads the database before this join is saved, so
-            // the new session does not count this join. It needs a re-login within the moment the
-            // load takes, right after the plugin was enabled; it loses that one join, nothing else.
+            // simply have no value. Known limit: a second login of the same player while this load
+            // is still running reads the database before this join is saved, so the new session
+            // does not count this join. It needs a re-login within the moment the load takes,
+            // right after the plugin was enabled; it loses that one join, nothing else.
             LateJoin load = new LateJoin();
             pendingJoins.put(id, load);
-            read(id).thenAccept(stored -> {
-                        T joined = applyJoined(id, stored.orElseGet(() -> keepingId(id, lifecycle.create(id, name, now), "create")), name, now);
+            loadLate(id, name, now, load, 0);
+        }
+    }
+
+    /**
+     * Loads the value of a player who joined without a pre-login, and tries again while they are
+     * online if it fails: they have no value until it is loaded.
+     */
+    private void loadLate(UUID id, String name, long joinedAt, LateJoin load, int failures) {
+        // Queued under the lock, so that a disable() cannot run in between and find nothing to
+        // wait for; a retry that comes after it gives up.
+        synchronized (sessions) {
+            if (!enabled.get()) {
+                pendingJoins.remove(id, load);
+                return;
+            }
+            CompletableFuture<?> _ = read(id).thenAccept(stored -> {
+                        T joined = applyJoined(
+                                id,
+                                stored.orElseGet(() -> keepingId(id, lifecycle.create(id, name, joinedAt), "create")),
+                                name,
+                                joinedAt);
                         // Queued under the same lock as the quit's save, so the two reach the
                         // database in the order the player's session went.
                         synchronized (sessions) {
@@ -373,10 +460,26 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                         }
                     })
                     .exceptionally(error -> {
+                        Throwable cause = unwrap(error);
+                        boolean stillWaiting;
                         synchronized (sessions) {
-                            pendingJoins.remove(id, load);
+                            stillWaiting = enabled.get() && pendingJoins.get(id) == load;
+                            if (!stillWaiting) {
+                                pendingJoins.remove(id, load);
+                            }
                         }
-                        logger.error("Could not load the {} of {}", subject, name, error);
+                        if (stillWaiting && worthRetrying(cause)) {
+                            if (failures == 0) {
+                                logger.warn("Could not load the {} of {}, retrying: {}", subject, name, describe(cause));
+                            }
+                            CompletableFuture.delayedExecutor(retryDelay(failures), TimeUnit.MILLISECONDS)
+                                    .execute(() -> loadLate(id, name, joinedAt, load, failures + 1));
+                        } else if (stillWaiting) {
+                            synchronized (sessions) {
+                                pendingJoins.remove(id, load);
+                            }
+                            logger.error("Could not load the {} of {}", subject, name, cause);
+                        }
                         return null;
                     });
         }
@@ -393,6 +496,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             if (value != null) {
                 T saved = applyLeft(id, value, now);
                 write(id, saved);
+                recentlyLeft.put(id, new Left<>(saved, ++sessionEvents, now));
                 // A second login while this session was online took a copy of its value at
                 // pre-login, and the new session will start from it. What this session changed
                 // since then is in what we just saved: start the new session from that instead.
@@ -401,20 +505,26 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         }
     }
 
+    /** How many players had a save given up. For tests. */
+    int lostCount() {
+        return lost.size();
+    }
+
     /** How many players still have database work queued. For tests: it must fall back to zero. */
     int pendingQueues() {
         return queues.size();
     }
 
+    /** Reads a player's stored value, ahead of the other players' saves but after their own. */
     private CompletableFuture<Optional<T>> read(UUID id) {
-        return enqueue(id, () -> connection -> repository.find(connection, id));
+        return enqueue(id, () -> database.submitFirst(connection -> repository.find(connection, id)));
     }
 
     /**
      * Saves a value under the player's own queue: {@code id} is the key, whatever the value says.
-     * When a save of this player is already queued and has not started, the value replaces the one
-     * it will write, and nothing more is queued: that save writes the latest value when it starts,
-     * still after everything queued before it.
+     * When a save of this player is queued and has not started, the value replaces the one it will
+     * write, and nothing more is queued: that save writes the latest value when it starts, still
+     * after everything queued before it.
      */
     private void write(UUID id, T value) {
         // Called under the lock, so no other write of this player runs between the two lines.
@@ -424,22 +534,88 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         }
         PendingSave<T> save = new PendingSave<>(value);
         waitingSaves.put(id, save);
-        this.<@Nullable Void>enqueue(id, () -> {
-                    // Leaving the player's queue: from here on, a change queues a save of its own.
-                    // Closed now rather than once a connection is found, so that the changes made
-                    // while it waits for one are not lost with it if it never gets one.
-                    T latest = save.start();
-                    waitingSaves.remove(id, save);
-                    return connection -> {
-                        repository.save(connection, latest);
-                        return null;
-                    };
-                })
-                .exceptionally(error -> {
-                    waitingSaves.remove(id, save);
-                    logger.error("Could not save the {} of {}", subject, id, error);
+        CompletableFuture<?> _ = enqueue(id, () -> persist(id, save, 0)).exceptionally(error -> {
+            logger.error("Could not save the {} of {}", subject, id, error);
+            return null;
+        });
+    }
+
+    /**
+     * Runs a save, and tries it again while it fails for a reason that may pass. The player's queue
+     * waits for the outcome: what is queued after it must not overtake it.
+     */
+    private CompletableFuture<@Nullable Void> persist(UUID id, PendingSave<T> save, int failures) {
+        return database.<@Nullable Void>submit(connection -> {
+                    // Taken as the save starts, with a thread and a connection: what changed while
+                    // it waited for them is part of it. From here on, a change is a save of its own.
+                    repository.save(connection, save.start());
                     return null;
-                });
+                })
+                .handle((done, error) -> error)
+                .thenCompose(error -> error == null ? saved(id, save) : failed(id, save, failures, unwrap(error)));
+    }
+
+    private CompletableFuture<@Nullable Void> saved(UUID id, PendingSave<T> save) {
+        waitingSaves.remove(id, save);
+        if (failing.compareAndSet(true, false)) {
+            logger.info("Player {}s are saved again", subject);
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+
+    private CompletableFuture<@Nullable Void> failed(UUID id, PendingSave<T> save, int failures, Throwable cause) {
+        if (abandoned || !database.isRunning() || !worthRetrying(cause)) {
+            synchronized (sessions) {
+                // Closed, so that a change made from now on is a save of its own.
+                save.start();
+                waitingSaves.remove(id, save);
+            }
+            if (cause instanceof SQLException || abandoned || !database.isRunning()) {
+                // Reported with the others when the store stops.
+                lost.add(id);
+            } else {
+                // A fault of the repository: the same save would fail again.
+                logger.error("Could not save the {} of {}", subject, id, cause);
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+        synchronized (sessions) {
+            if (waitingSaves.get(id) != save) {
+                // A change made while this save ran is queued behind it, with the whole newer
+                // value: that save replaces this one.
+                return CompletableFuture.completedFuture(null);
+            }
+            // The value this save holds is still the latest: it takes changes again until the
+            // retry starts.
+            save.reopen();
+        }
+        if (failing.compareAndSet(false, true)) {
+            logger.warn(
+                    "Could not save the {} of {}, retrying until the database answers: {}", subject, id, describe(cause));
+        }
+        return CompletableFuture.runAsync(() -> {}, CompletableFuture.delayedExecutor(retryDelay(failures), TimeUnit.MILLISECONDS))
+                .thenCompose(ignored -> persist(id, save, failures + 1));
+    }
+
+    /** Whether trying again may succeed: the database was unreachable, busy or late. */
+    private static boolean worthRetrying(Throwable error) {
+        return error instanceof SQLException sql && SqlErrors.mayPass(sql);
+    }
+
+    /** How long to wait after a number of failures in a row: doubling, up to a limit. */
+    static long retryDelay(int failures) {
+        return Math.min(RETRY_MAX_MILLIS, RETRY_FIRST_MILLIS << Math.min(failures, 16));
+    }
+
+    private static Throwable unwrap(Throwable error) {
+        return error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+    }
+
+    /** An error in one line, for a warning that would otherwise repeat a whole stack trace. */
+    private static String describe(Throwable error) {
+        String message = error.getMessage();
+        String first = message == null ? "" : message.lines().findFirst().orElse("");
+        return first.isEmpty() ? error.getClass().getSimpleName() : first;
     }
 
     /**
@@ -479,10 +655,10 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      * Queues database work for a player behind whatever is already queued for them. Without this,
      * two saves of the same player could run on two storage threads and land in either order.
      *
-     * @param work gives the database work when the operation leaves the player's queue, that is
-     *     once everything queued before it is done
+     * @param work starts the database work when the operation leaves the player's queue, that is
+     *     once everything queued before it is done; the next operation waits for its future
      */
-    private <R extends @Nullable Object> CompletableFuture<R> enqueue(UUID id, Supplier<SqlFunction<R>> work) {
+    private <R extends @Nullable Object> CompletableFuture<R> enqueue(UUID id, Supplier<CompletableFuture<R>> work) {
         CompletableFuture<R> result = new CompletableFuture<>();
         // What the queue holds is not the database work itself but a gate that opens once the
         // callbacks of its result have run: a callback that queues more work (the late join does)
@@ -491,7 +667,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         AtomicReference<CompletableFuture<R>> chained = new AtomicReference<>();
         queues.compute(id, (key, tail) -> {
             CompletableFuture<?> previous = tail == null ? CompletableFuture.completedFuture(null) : tail;
-            chained.set(previous.handle((done, error) -> null).thenCompose(ignored -> database.submit(work.get())));
+            chained.set(previous.handle((done, error) -> null).thenCompose(ignored -> work.get()));
             return gate;
         });
         // Registered outside compute(): a future that is already complete would run this at once,
@@ -544,8 +720,16 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             started = true;
             return value;
         }
+
+        /** After a failure: the value is written again by a retry, with the changes made until then. */
+        synchronized void reopen() {
+            started = false;
+        }
     }
 
     /** A value loaded at pre-login, and when. */
     private record PendingLogin<T>(T value, long at) {}
+
+    /** What a quit saved, which login or quit came last before it ({@code event}), and when. */
+    private record Left<T>(T value, long event, long at) {}
 }
