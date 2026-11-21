@@ -61,6 +61,10 @@ class PlayerStoreTest {
     private final TestClock clock = new TestClock(1_000);
     private final VisitRepository repository = new VisitRepository();
     private final VisitLifecycle lifecycle = new VisitLifecycle();
+    private final RecordingLogger logger = new RecordingLogger();
+
+    /** Retries waiting to run, when a test runs them by hand. */
+    private final List<Runnable> pendingRetries = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -76,8 +80,10 @@ class PlayerStoreTest {
                 repository,
                 lifecycle,
                 () -> Component.text("could not load"),
-                NOPLogger.NOP_LOGGER,
+                logger,
                 clock);
+        // Retries at once: the tests do not wait for real delays.
+        store.retryDelays(millis -> Runnable::run);
         store.enable();
     }
 
@@ -500,7 +506,7 @@ class PlayerStoreTest {
         UUID id = player.getUniqueId();
         flush();
         CountDownLatch failed = new CountDownLatch(1);
-        repository.failSaves(2, failed);
+        repository.failSaves(2, failed, null, true);
 
         store.update(id, visit -> withVisits(visit, 50));
         assertTrue(failed.await(10, TimeUnit.SECONDS));
@@ -517,7 +523,7 @@ class PlayerStoreTest {
         PlayerMock player = server.addPlayer("Alex");
         UUID id = player.getUniqueId();
         flush();
-        repository.failSaves(3, new CountDownLatch(3));
+        repository.failSaves(3, new CountDownLatch(3), null, true);
 
         clock.set(7_000);
         store.quit(id);
@@ -545,7 +551,7 @@ class PlayerStoreTest {
                 Thread.currentThread().interrupt();
             }
         };
-        repository.failSaves(1, new CountDownLatch(1));
+        repository.failSaves(1, new CountDownLatch(1), null, true);
         int before = repository.saves.get();
 
         store.update(id, visit -> withVisits(visit, 50)); // starts, then fails
@@ -635,21 +641,116 @@ class PlayerStoreTest {
         assertEquals(5, store.find(id).orElseThrow().visits());
     }
 
+    /**
+     * A save that can never succeed (here a broken constraint, which SQLite reports like any other
+     * error) is tried a few times, then given up and logged: the player's queue moves on, and
+     * their next login is not refused.
+     */
+    @Test
+    void aSaveThatCanNeverSucceedIsGivenUpAndThePlayerCanStillLogIn() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        repository.failSaves(Integer.MAX_VALUE, new CountDownLatch(0), null, false);
+        int before = repository.attempts.get();
+
+        store.update(id, visit -> withVisits(visit, 50));
+        flush();
+        repository.failSaves(0, new CountDownLatch(0), null, true);
+        CompletableFuture<Void> relogin = CompletableFuture.runAsync(() -> {
+            try {
+                store.quit(id);
+                store.beginLogin(id, "Alex");
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        relogin.get(5, TimeUnit.SECONDS);
+
+        assertEquals(1 + PlayerStore.UNCERTAIN_RETRIES, repository.attempts.get() - before - 1, "not given up after a few tries");
+        assertEquals(1, logger.lines().stream().filter(line -> line.startsWith("ERROR Could not save")).count(), logger.lines().toString());
+        assertEquals(0, store.lostCount(), "a save given up for its own error is not a shutdown loss");
+    }
+
+    /**
+     * A late load that failed and is retried after the player quit and came back must not save a
+     * value read then over what the new session saved.
+     */
+    @Test
+    void aLateLoadRetriedAfterTheQuitDoesNotOverwriteTheNextSession() throws Exception {
+        store.retryDelays(millis -> pendingRetries::add);
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        repository.failFinds.set(1);
+
+        store.join(id, "Alex"); // no pre-login: the load fails, its retry waits
+        flush();
+        assertEquals(1, pendingRetries.size());
+        store.quit(id);
+        store.beginLogin(id, "Alex");
+        store.join(id, "Alex"); // 5
+        store.update(id, visit -> withVisits(visit, 50));
+        flush();
+        pendingRetries.forEach(Runnable::run);
+        flush();
+
+        assertEquals(50, store.find(id).orElseThrow().visits());
+        assertEquals(50, stored(id).orElseThrow().visits());
+    }
+
+    /** A player counted as lost while the database was stopped is not reported once saved again. */
+    @Test
+    void aPlayerSavedAfterALostSaveIsNotReportedAtShutdown() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        database.disable();
+        store.update(id, visit -> withVisits(visit, 50));
+        database.enable();
+        assertEquals(1, store.lostCount());
+
+        store.update(id, visit -> withVisits(visit, 60));
+        flush();
+
+        assertEquals(0, store.lostCount());
+    }
+
+    /**
+     * An outage is logged when the first player's saves fail and when the last one's land: one
+     * player stuck while the others save is one warning, not one per save of someone else.
+     */
+    @Test
+    void anOutageIsLoggedOnceWhileOtherPlayersStillSave() throws Exception {
+        store.retryDelays(millis -> pendingRetries::add);
+        UUID stuck = server.addPlayer("Stuck").getUniqueId();
+        UUID other = server.addPlayer("Other").getUniqueId();
+        flush();
+        repository.failSaves(1, new CountDownLatch(1), stuck, true);
+
+        store.update(stuck, visit -> withVisits(visit, 50)); // fails, its retry waits
+        // Not flush(): the stuck player's queue waits for its retry, which the test runs below.
+        waitUntil(() -> pendingRetries.size() == 1);
+        for (int i = 1; i <= 5; i++) {
+            int visits = 100 + i;
+            store.update(other, visit -> withVisits(visit, visits));
+            waitUntil(() -> stored(other).orElseThrow().visits() == visits);
+        }
+        List<Runnable> retries = List.copyOf(pendingRetries);
+        pendingRetries.clear();
+        retries.forEach(Runnable::run);
+        flush();
+
+        List<String> outage = logger.lines().stream()
+                .filter(line -> line.contains("retrying") || line.contains("saved again"))
+                .toList();
+        assertEquals(2, outage.size(), outage.toString());
+        assertTrue(outage.get(0).startsWith("WARN"), outage.toString());
+        assertTrue(outage.get(1).startsWith("INFO"), outage.toString());
+        assertEquals(50, stored(stuck).orElseThrow().visits());
+    }
+
     /** What could not be saved is reported in one line when the store stops, not one per player. */
     @Test
     void savesGivenUpAreReportedOnceAtShutdown() throws Exception {
-        RecordingLogger logger = new RecordingLogger();
-        store.disable();
-        store = new PlayerStore<>(
-                "visit",
-                MockBukkit.createMockPlugin(),
-                database,
-                repository,
-                lifecycle,
-                () -> Component.text("could not load"),
-                logger,
-                clock);
-        store.enable();
         for (int i = 0; i < 3; i++) {
             UUID id = UUID.randomUUID();
             store.beginLogin(id, "Player" + i);
@@ -953,6 +1054,15 @@ class PlayerStoreTest {
         return database.call(connection -> repository.find(connection, id));
     }
 
+    /** Polls a condition for up to ten seconds. */
+    private static void waitUntil(java.util.concurrent.Callable<Boolean> condition) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!condition.call()) {
+            assertTrue(System.nanoTime() < deadline, "the condition never held");
+            Thread.sleep(5);
+        }
+    }
+
     /** Waits for everything queued so far to reach the database. */
     private void flush() {
         assertTrue(store.awaitWrites(10));
@@ -1010,16 +1120,27 @@ class PlayerStoreTest {
         /** How many rows were written when the last read began. */
         volatile int savesAtLastFind;
 
-        /** How many of the next saves fail as an unreachable database would, and a latch counting them. */
+        /** How many saves were tried, failed ones included. */
+        final java.util.concurrent.atomic.AtomicInteger attempts = new java.util.concurrent.atomic.AtomicInteger();
+
+        /** How many of the next saves fail, and a latch counting them. */
         private final java.util.concurrent.atomic.AtomicInteger failSaves = new java.util.concurrent.atomic.AtomicInteger();
 
         private volatile CountDownLatch saveFailures = new CountDownLatch(0);
 
+        /** The only player whose saves fail, or null for all. */
+        private volatile @org.jspecify.annotations.Nullable UUID failingPlayer;
+
+        /** Whether the failures are those of an unreachable database, or an error that says nothing. */
+        private volatile boolean unreachable = true;
+
         /** How many of the next reads fail as an unreachable database would. */
         final java.util.concurrent.atomic.AtomicInteger failFinds = new java.util.concurrent.atomic.AtomicInteger();
 
-        void failSaves(int count, CountDownLatch failures) {
+        void failSaves(int count, CountDownLatch failures, @org.jspecify.annotations.Nullable UUID player, boolean unreachable) {
             saveFailures = failures;
+            failingPlayer = player;
+            this.unreachable = unreachable;
             failSaves.set(count);
         }
 
@@ -1044,9 +1165,13 @@ class PlayerStoreTest {
         @Override
         public void save(Connection connection, Visit visit) throws SQLException {
             duringSave.run();
-            if (failSaves.getAndUpdate(left -> Math.max(0, left - 1)) > 0) {
+            attempts.incrementAndGet();
+            UUID only = failingPlayer;
+            if ((only == null || only.equals(visit.id())) && failSaves.getAndUpdate(left -> Math.max(0, left - 1)) > 0) {
                 saveFailures.countDown();
-                throw new SQLException("Communications link failure", "08S01");
+                throw unreachable
+                        ? new SQLException("Communications link failure", "08S01")
+                        : new SQLException("NOT NULL constraint failed: test_visits.name");
             }
             saves.incrementAndGet();
             try (PreparedStatement update = connection.prepareStatement(

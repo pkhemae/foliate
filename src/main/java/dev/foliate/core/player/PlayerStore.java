@@ -4,6 +4,7 @@ import dev.foliate.core.storage.Database;
 import dev.foliate.core.storage.SqlErrors;
 import java.sql.SQLException;
 import java.time.Clock;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -15,10 +16,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongFunction;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import net.kyori.adventure.text.Component;
@@ -53,10 +56,13 @@ import org.slf4j.Logger;
  *       A thousand changes in a row are one write, not a thousand, and a login waits for that one
  *       at most. A read queued behind a waiting save may therefore see a change made after the
  *       read was queued: never an older one.
- *   <li><b>Retry what failed.</b> A save that fails for a reason that may pass (the database is
+ *   <li><b>Retry what failed.</b> A save that fails for a reason known to pass (the database is
  *       unreachable, busy or timed out) keeps the player's latest value and is tried again, ever
  *       less often, until it succeeds. The player's later reads and saves wait behind it. An
- *       outage is logged once when it starts and once when it ends, not once per save.
+ *       outage is logged when the first player's saves start failing and when the last one's
+ *       succeed, not once per save. Any other error is tried {@value #UNCERTAIN_RETRIES} more
+ *       times, then logged with its stack trace and given up: a save that can never succeed
+ *       (a broken constraint) must not hold the player's queue, and their logins, forever.
  *   <li><b>Never invent data.</b> When the stored value is not known yet, wait for it: saving a
  *       fresh one would erase the real one.
  *   <li><b>Flush on shutdown.</b> The last saves are queued like the others, then waited for,
@@ -77,6 +83,9 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
 
     /** The longest wait between two tries. */
     static final long RETRY_MAX_MILLIS = 10_000;
+
+    /** How many times an error that may or may not pass is tried again before giving up. */
+    static final int UNCERTAIN_RETRIES = 3;
 
     /** How many players a report of unsaved values names; the others are counted. */
     private static final int REPORTED_IDS = 10;
@@ -130,11 +139,25 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     /** Set when the shutdown stops waiting: the saves still being retried then give up. */
     private volatile boolean abandoned;
 
-    /** Whether saves are failing, so that an outage is logged when it starts and ends only. */
-    private final AtomicBoolean failing = new AtomicBoolean();
+    /**
+     * The players whose save is being retried, so that an outage is logged when it starts and
+     * ends only, whatever the other players' saves do meanwhile. Guarded by itself.
+     */
+    private final Set<UUID> retrying = new HashSet<>();
 
-    /** Players whose latest value could not be saved and was given up, for the shutdown's report. */
+    /**
+     * Players whose latest value could not be saved because the database stopped or the shutdown
+     * stopped waiting, for the shutdown's report. A later save that lands takes them out.
+     */
     private final Set<UUID> lost = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Runs a retry after a delay. Not the plugin's {@code Schedulers}: the server refuses its
+     * async tasks while the plugin is disabled, and the saves of the shutdown must still be
+     * retried then. Replaced in the tests, which do not wait for real delays.
+     */
+    private volatile LongFunction<Executor> retryDelays =
+            millis -> CompletableFuture.delayedExecutor(millis, TimeUnit.MILLISECONDS);
 
     /** The last database operation queued for each player; the next one is chained after it. */
     private final Map<UUID, CompletableFuture<?>> queues = new ConcurrentHashMap<>();
@@ -214,9 +237,9 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         unsaved.addAll(lost);
         if (!unsaved.isEmpty()) {
             logger.warn(
-                    "The {}s of {} players could not be saved: their latest changes are probably lost ({}{})",
+                    "The {}s of {} could not be saved: their latest changes are probably lost ({}{})",
                     subject,
-                    unsaved.size(),
+                    unsaved.size() == 1 ? "1 player" : unsaved.size() + " players",
                     String.join(", ", unsaved.stream().limit(REPORTED_IDS).map(UUID::toString).toList()),
                     unsaved.size() > REPORTED_IDS ? ", ..." : "");
         }
@@ -436,7 +459,9 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         // Queued under the lock, so that a disable() cannot run in between and find nothing to
         // wait for; a retry that comes after it gives up.
         synchronized (sessions) {
-            if (!enabled.get()) {
+            if (!enabled.get() || pendingJoins.get(id) != load) {
+                // Disabled, or a retry for a player who quit since: what a new session of theirs
+                // saves must not be overwritten by a value read now.
                 pendingJoins.remove(id, load);
                 return;
             }
@@ -468,11 +493,11 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                                 pendingJoins.remove(id, load);
                             }
                         }
-                        if (stillWaiting && worthRetrying(cause)) {
+                        if (stillWaiting && worthRetrying(cause, failures)) {
                             if (failures == 0) {
                                 logger.warn("Could not load the {} of {}, retrying: {}", subject, name, describe(cause));
                             }
-                            CompletableFuture.delayedExecutor(retryDelay(failures), TimeUnit.MILLISECONDS)
+                            retryDelays.apply(retryDelay(failures))
                                     .execute(() -> loadLate(id, name, joinedAt, load, failures + 1));
                         } else if (stillWaiting) {
                             synchronized (sessions) {
@@ -557,49 +582,74 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
 
     private CompletableFuture<@Nullable Void> saved(UUID id, PendingSave<T> save) {
         waitingSaves.remove(id, save);
-        if (failing.compareAndSet(true, false)) {
-            logger.info("Player {}s are saved again", subject);
-        }
+        lost.remove(id);
+        retryEnded(id, true);
         return CompletableFuture.completedFuture(null);
     }
 
     private CompletableFuture<@Nullable Void> failed(UUID id, PendingSave<T> save, int failures, Throwable cause) {
-        if (abandoned || !database.isRunning() || !worthRetrying(cause)) {
+        boolean stopping = abandoned || !database.isRunning();
+        if (stopping || !worthRetrying(cause, failures)) {
             synchronized (sessions) {
                 // Closed, so that a change made from now on is a save of its own.
                 save.start();
                 waitingSaves.remove(id, save);
             }
-            if (cause instanceof SQLException || abandoned || !database.isRunning()) {
+            retryEnded(id, false);
+            if (stopping) {
                 // Reported with the others when the store stops.
                 lost.add(id);
             } else {
-                // A fault of the repository: the same save would fail again.
-                logger.error("Could not save the {} of {}", subject, id, cause);
+                // The same save would fail again: a fault of the repository or of the value.
+                logger.error("Could not save the {} of {}: giving up", subject, id, cause);
             }
             return CompletableFuture.completedFuture(null);
         }
         synchronized (sessions) {
             if (waitingSaves.get(id) != save) {
                 // A change made while this save ran is queued behind it, with the whole newer
-                // value: that save replaces this one.
+                // value: that save replaces this one. The player stays counted as retrying until
+                // it lands.
                 return CompletableFuture.completedFuture(null);
             }
             // The value this save holds is still the latest: it takes changes again until the
             // retry starts.
             save.reopen();
         }
-        if (failing.compareAndSet(false, true)) {
-            logger.warn(
-                    "Could not save the {} of {}, retrying until the database answers: {}", subject, id, describe(cause));
-        }
-        return CompletableFuture.runAsync(() -> {}, CompletableFuture.delayedExecutor(retryDelay(failures), TimeUnit.MILLISECONDS))
+        retryStarted(id, cause);
+        return CompletableFuture.runAsync(() -> {}, retryDelays.apply(retryDelay(failures)))
                 .thenCompose(ignored -> persist(id, save, failures + 1));
     }
 
-    /** Whether trying again may succeed: the database was unreachable, busy or late. */
-    private static boolean worthRetrying(Throwable error) {
-        return error instanceof SQLException sql && SqlErrors.mayPass(sql);
+    /** Logs the start of an outage: the first player whose saves are retried. */
+    private void retryStarted(UUID id, Throwable cause) {
+        synchronized (retrying) {
+            if (retrying.add(id) && retrying.size() == 1) {
+                logger.warn("Could not save the {} of {}, retrying: {}", subject, id, describe(cause));
+            }
+        }
+    }
+
+    /** Logs the end of an outage, when the last player whose saves were retried is saved. */
+    private void retryEnded(UUID id, boolean saved) {
+        synchronized (retrying) {
+            if (retrying.remove(id) && retrying.isEmpty() && saved) {
+                logger.info("Player {}s are saved again", subject);
+            }
+        }
+    }
+
+    /**
+     * Whether trying again may succeed: always when the database was unreachable, busy or late,
+     * a few times for an error that does not say, never for anything but a database error.
+     */
+    private static boolean worthRetrying(Throwable error, int failures) {
+        return error instanceof SQLException sql && (SqlErrors.mayPass(sql) || failures < UNCERTAIN_RETRIES);
+    }
+
+    /** Makes the retries run at once, or when a test says. */
+    void retryDelays(LongFunction<Executor> delays) {
+        retryDelays = delays;
     }
 
     /** How long to wait after a number of failures in a row: doubling, up to a limit. */
