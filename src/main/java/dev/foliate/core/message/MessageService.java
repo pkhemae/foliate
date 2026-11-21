@@ -137,7 +137,14 @@ public final class MessageService implements Module {
         sharedResolvers.remove(resolver);
     }
 
-    /** Sends a chat message to each member of the audience, in their own language. */
+    /**
+     * Sends a chat message to each member of the audience, in their own language.
+     *
+     * <p>Each viewer's message is rendered here, on the calling thread, one viewer after the other:
+     * a shared tag such as {@code <papi>} is evaluated on this thread for every viewer, including
+     * players whose region this thread does not own. Send a message that may contain such a tag
+     * to a group of players from each player's own scheduler, not to the whole group at once.
+     */
     public void send(Audience audience, String key, TagResolver... arguments) {
         audience.forEachAudience(viewer -> {
             Component message = render(viewer, key, arguments);
