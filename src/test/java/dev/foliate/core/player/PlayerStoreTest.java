@@ -414,6 +414,48 @@ class PlayerStoreTest {
         assertEquals(40, stored(id).orElseThrow().visits());
     }
 
+    /**
+     * Changes made while a save waits join it: a burst is one write of the latest value, and a
+     * login that follows does not wait behind thousands of them.
+     */
+    @Test
+    void aBurstOfChangesIsOneWriteOfTheLatestValue() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        int before = repository.saves.get();
+        CountDownLatch release = holdStorageThread();
+
+        for (int i = 0; i < 10_000; i++) {
+            store.update(id, visit -> withVisits(visit, visit.visits() + 1));
+        }
+        clock.set(5_000);
+        store.quit(id);
+        release.countDown();
+        flush();
+
+        assertEquals(1, repository.saves.get() - before, "the changes were not written together");
+        Visit stored = stored(id).orElseThrow();
+        assertEquals(10_001, stored.visits());
+        assertEquals(5_000, stored.lastSeen(), "the quit was not part of the write");
+    }
+
+    /** A save that could not run must not keep the changes made after it from being saved. */
+    @Test
+    void aChangeAfterAFailedSaveIsStillSaved() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+        database.disable();
+        store.update(id, visit -> withVisits(visit, 50)); // its save fails: the database is stopped
+        database.enable();
+
+        store.update(id, visit -> withVisits(visit, 60));
+        flush();
+
+        assertEquals(60, stored(id).orElseThrow().visits());
+    }
+
     @Test
     void updateOfAPlayerWhoIsNotOnlineChangesNothing() throws Exception {
         UUID id = UUID.randomUUID();
@@ -696,6 +738,9 @@ class PlayerStoreTest {
 
     private static final class VisitRepository implements PlayerRepository<Visit> {
 
+        /** How many rows were written, to tell a coalesced save from one per change. */
+        final java.util.concurrent.atomic.AtomicInteger saves = new java.util.concurrent.atomic.AtomicInteger();
+
         @Override
         public Optional<Visit> find(Connection connection, UUID id) throws SQLException {
             try (PreparedStatement select = connection.prepareStatement(
@@ -712,6 +757,7 @@ class PlayerStoreTest {
 
         @Override
         public void save(Connection connection, Visit visit) throws SQLException {
+            saves.incrementAndGet();
             try (PreparedStatement update = connection.prepareStatement(
                     "UPDATE test_visits SET name = ?, last_seen = ?, visits = ? WHERE id = ?")) {
                 update.setString(1, visit.name());

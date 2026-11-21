@@ -42,6 +42,10 @@ import org.slf4j.Logger;
  *   <li><b>Write behind, in order.</b> A change replaces the cached value at once and is saved on
  *       a storage thread. Every read and write for one player is queued behind the previous one,
  *       so a late save can never overwrite a newer one, whatever the size of the pool.
+ *   <li><b>Write the latest value only.</b> A save that is queued and has not started yet takes
+ *       the value as it is when it starts: changes made meanwhile join it instead of queuing saves
+ *       of their own. A thousand changes in a row are two writes, not a thousand, and a login
+ *       waits for those two at most.
  *   <li><b>Never invent data.</b> When the stored value is not known yet, wait for it: saving a
  *       fresh one would erase the real one.
  *   <li><b>Flush on shutdown.</b> The last saves are queued like the others, then waited for,
@@ -95,6 +99,12 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
 
     /** The last database operation queued for each player; the next one is chained after it. */
     private final Map<UUID, CompletableFuture<?>> queues = new ConcurrentHashMap<>();
+
+    /**
+     * Each player's last queued save, until it starts: a newer value replaces the one it will write
+     * instead of queuing another save.
+     */
+    private final Map<UUID, PendingSave<T>> waitingSaves = new ConcurrentHashMap<>();
 
     /**
      * @param subject what the values are, in singular, for the logs ("profile")
@@ -386,13 +396,29 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         return enqueue(id, connection -> repository.find(connection, id));
     }
 
-    /** Queues the save of a value under the player's own queue: {@code id} is the key, whatever the value says. */
+    /**
+     * Saves a value under the player's own queue: {@code id} is the key, whatever the value says.
+     * When a save of this player is already queued and has not started, the value replaces the one
+     * it will write, and nothing more is queued: that save writes the latest value when it starts,
+     * still after everything queued before it.
+     */
     private void write(UUID id, T value) {
+        // Called under the lock, so no other write of this player runs between the two lines.
+        PendingSave<T> waiting = waitingSaves.get(id);
+        if (waiting != null && waiting.replace(value)) {
+            return;
+        }
+        PendingSave<T> save = new PendingSave<>(value);
+        waitingSaves.put(id, save);
         enqueue(id, connection -> {
-                    repository.save(connection, value);
+                    // From here on, a change queues a save of its own, behind this one.
+                    T latest = save.start();
+                    waitingSaves.remove(id, save);
+                    repository.save(connection, latest);
                     return null;
                 })
                 .exceptionally(error -> {
+                    waitingSaves.remove(id, save);
                     logger.error("Could not save the {} of {}", subject, id, error);
                     return null;
                 });
@@ -471,6 +497,31 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     /** Whether the store is enabled. For tests that wait for the shutdown to begin. */
     boolean enabled() {
         return enabled.get();
+    }
+
+    /** A queued save, and the value it writes, which can change until it starts. */
+    private static final class PendingSave<T> {
+
+        private T value;
+        private boolean started;
+
+        PendingSave(T value) {
+            this.value = value;
+        }
+
+        /** @return false when the save has started: the value must then be saved by another one */
+        synchronized boolean replace(T newer) {
+            if (started) {
+                return false;
+            }
+            value = newer;
+            return true;
+        }
+
+        synchronized T start() {
+            started = true;
+            return value;
+        }
     }
 
     /** A value loaded at pre-login, and when. */
