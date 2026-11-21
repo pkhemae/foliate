@@ -270,8 +270,8 @@ runPaper {
 }
 
 // How many threads tick the Folia test server's regions. Left to itself (threaded-regions.threads: -1
-// in config/paper-global.yml), Folia gives one thread to every region below ten cores, which covers
-// CI runners and most laptops: nothing would ever tick in parallel. The test server gets this many
+// in config/paper-global.yml), below ten cores Folia ticks every region on a single thread, which
+// covers CI runners and most laptops: nothing would ever tick in parallel. The test server gets this many
 // whatever the machine, and the server test checks that two regions do tick at the same time.
 val testServerRegionThreads = 2
 
