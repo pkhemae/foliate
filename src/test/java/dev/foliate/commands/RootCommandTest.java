@@ -16,7 +16,7 @@ import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleManager;
-import dev.foliate.core.scheduler.FoliaSchedulers;
+import dev.foliate.core.scheduler.ManualSchedulers;
 import dev.foliate.testing.CommandSource;
 import dev.foliate.testing.PluginYml;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
@@ -57,6 +57,7 @@ class RootCommandTest {
     private Plugin plugin;
     private CommandDispatcher<CommandSourceStack> dispatcher;
     private CommandDispatcher<CommandSourceStack> withoutMenus;
+    private final ManualSchedulers schedulers = new ManualSchedulers();
     private final List<String> opened = new ArrayList<>();
     private final Map<UUID, ProfileSummary> profiles = new HashMap<>();
 
@@ -93,7 +94,6 @@ class RootCommandTest {
         });
         assertTrue(modules.enableAll());
 
-        FoliaSchedulers schedulers = new FoliaSchedulers(plugin);
         List<Subcommand> administration = List.of(
                 new InfoCommand(modules, messages, "1.2.3", "Test 26.2"),
                 new ReloadCommand(modules, messages, schedulers, NOPLogger.NOP_LOGGER));
@@ -424,18 +424,10 @@ class RootCommandTest {
         return player;
     }
 
-    /**
-     * Lets the async reload run, then the reply scheduled back on the sender's context.
-     * MockBukkit's {@code waitAsyncTasksFinished} returns at once when the task has not been picked
-     * up by its thread yet, so a single round can end before the reply exists: it takes several,
-     * a few milliseconds apart.
-     */
-    private void runAsyncWork() throws InterruptedException {
-        for (int round = 0; round < 40; round++) {
-            server.getScheduler().performTicks(1);
-            server.getScheduler().waitAsyncTasksFinished();
-            Thread.sleep(10);
-        }
+    /** Runs the reload on its async context, then the reply it schedules back to the sender. */
+    private void runAsyncWork() {
+        schedulers.tick(1);
+        schedulers.tick(1);
     }
 
     private static String plain(Component component) {
