@@ -344,6 +344,21 @@ class MessageServiceTest {
         assertThrows(MessageException.class, fresh::reload);
     }
 
+    /** It used to overflow the stack, which no part of the plugin catches. */
+    @Test
+    void extraLanguageThatContainsItselfIsSkippedAtStartupAndReportedOnReload() throws Exception {
+        Files.writeString(directory.resolve("lang/de.yml"), "greeting: &x {b: *x}\n");
+        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+
+        fresh.enable();
+
+        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render(Locale.GERMAN, "greeting", Placeholder.unparsed("player", "Alex"))));
+        MessageException failure = assertThrows(MessageException.class, fresh::reload);
+        assertEquals("lang/de.yml is not valid YAML (a value contains itself: an alias * inside the & it names,"
+                + " line 1, column 18)", failure.getMessage());
+    }
+
     @Test
     void brokenFileOfTheDefaultLocaleDoesNotStopTheServerFromStarting() throws Exception {
         Files.writeString(directory.resolve("lang/en.yml"), "greeting: [unclosed\n");
