@@ -6,7 +6,6 @@ import java.time.Clock;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -69,11 +68,8 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     /** How many times an error that may or may not pass is tried again before giving up. */
     static final int UNCERTAIN_RETRIES = Retries.UNCERTAIN_RETRIES;
 
-    /**
-     * How long a value loaded at pre-login waits for its join. A connection can end between the
-     * two without a trace (banned, server full, dropped), so an entry older than this is forgotten.
-     */
-    static final long LOGIN_TTL_MILLIS = 5 * 60_000L;
+    /** How long a value loaded at pre-login waits for its join. */
+    static final long LOGIN_TTL_MILLIS = SessionTracker.LOGIN_TTL_MILLIS;
 
     private final String subject;
     private final Plugin plugin;
@@ -87,15 +83,6 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     /** Values of the players in game. */
     private final Map<UUID, T> online = new ConcurrentHashMap<>();
 
-    /** Values loaded at pre-login, waiting for a join that may never come. */
-    private final Map<UUID, PendingLogin<T>> loggingIn = new ConcurrentHashMap<>();
-
-    /**
-     * The load of each player whose value is being loaded after their join, because no pre-login
-     * was seen. A quit takes it out and records its time: the value is then saved as of then.
-     */
-    private final Map<UUID, LateJoin> pendingJoins = new ConcurrentHashMap<>();
-
     /**
      * Makes "the player quit" and "their late value is cached" atomic: whichever comes second must
      * see the other, or a value would be cached for a player who is gone. {@link #update} and the
@@ -106,14 +93,8 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
 
     private final AtomicBoolean enabled = new AtomicBoolean();
 
-    /**
-     * Each player's last session that ended, until a while after: a login whose read began before
-     * that quit read an older value than the quit saved. See {@link #beginLogin}.
-     */
-    private final Map<UUID, Left<T>> recentlyLeft = new ConcurrentHashMap<>();
-
-    /** Counts the logins and quits, to tell which came first. Read and written under the lock. */
-    private long sessionEvents;
+    /** The pending logins, recent quits and late joins. Used under {@link #sessions}. */
+    private final SessionTracker<T> tracker;
 
     /** How long the shutdown waits for the saves before it leaves them to the database. */
     private volatile long flushTimeoutSeconds = FLUSH_TIMEOUT_SECONDS;
@@ -146,10 +127,10 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         this.loadFailed = loadFailed;
         this.logger = logger;
         this.clock = clock;
+        this.tracker = new SessionTracker<>(sessions, clock);
         // A save the database refuses: a login may have started from its value. Its join loads
         // what is stored instead; a session that already joined keeps it.
-        this.saves = new SaveQueue<>(
-                subject, sessions, database, repository, retries, id -> loggingIn.remove(id), logger);
+        this.saves = new SaveQueue<>(subject, sessions, database, repository, retries, tracker::forgetLogin, logger);
     }
 
     /**
@@ -185,9 +166,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             enabled.set(false);
             online.forEach((id, value) -> saves.write(id, applyLeft(id, value, now)));
             online.clear();
-            loggingIn.clear();
-            pendingJoins.clear();
-            recentlyLeft.clear();
+            tracker.clear();
         }
         saves.flush(flushTimeoutSeconds);
     }
@@ -306,7 +285,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             }
             T current = online.get(id);
             if (current != null) {
-                remember(id, current);
+                tracker.loggedIn(id, current);
                 return;
             }
             // A save of this player that has not started holds what the database will contain
@@ -314,10 +293,10 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             // retries while the database is down.
             Optional<T> unsaved = saves.unsaved(id);
             if (unsaved.isPresent()) {
-                remember(id, unsaved.get());
+                tracker.loggedIn(id, unsaved.get());
                 return;
             }
-            readStarted = ++sessionEvents;
+            readStarted = tracker.readStarts();
         }
         // Not online: wait for the database, without holding the lock.
         T loaded = saves.read(id).get(LOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -329,30 +308,13 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             // A session that joined while we were reading is fresher than what we read, and so is
             // one that joined, played and quit meanwhile: our read was queued before its save.
             T current = online.get(id);
-            Left<T> left = recentlyLeft.get(id);
-            if (current != null) {
-                remember(id, current);
-            } else if (left != null && left.event() > readStarted) {
-                remember(id, left.value());
-            } else {
-                remember(id, loaded);
-            }
+            tracker.loggedIn(id, current != null ? current : tracker.leftSince(id, readStarted).orElse(loaded));
         }
-    }
-
-    /** Records a pending login. Called under the lock. */
-    private void remember(UUID id, T value) {
-        long now = clock.millis();
-        // Logins that never became a join leave nothing else to tell us: forget them here, with
-        // the quits that no read still running can predate.
-        loggingIn.values().removeIf(pending -> now - pending.at() > LOGIN_TTL_MILLIS);
-        recentlyLeft.values().removeIf(left -> now - left.at() > LOGIN_TTL_MILLIS);
-        loggingIn.put(id, new PendingLogin<>(value, now));
     }
 
     /** How many logins wait for their join. For tests. */
     int pendingLogins() {
-        return loggingIn.size();
+        return tracker.pendingLogins();
     }
 
     void join(UUID id, String name) {
@@ -364,19 +326,19 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             if (!enabled.get()) {
                 return;
             }
-            PendingLogin<T> pending = loggingIn.remove(id);
-            if (pending != null && now - pending.at() <= LOGIN_TTL_MILLIS) {
+            Optional<T> pending = tracker.takeLogin(id, now);
+            if (pending.isPresent()) {
                 // The server disconnects an old session before the new one joins, and its quit hands
                 // over what it saved. Should a join ever come first, starting from the old
                 // session's value at least loses none of its changes (its quit would then take
                 // this session's value out of the cache: the store tells sessions apart by id only).
                 T current = online.get(id);
-                T joined = applyJoined(id, current != null ? current : pending.value(), name, now);
+                T joined = applyJoined(id, current != null ? current : pending.get(), name, now);
                 online.put(id, joined);
                 saves.write(id, joined);
                 return;
             }
-            if (online.containsKey(id) || pendingJoins.containsKey(id)) {
+            if (online.containsKey(id) || tracker.loadingLate(id)) {
                 // Already loaded, or loading, by the store's start: a player who was joining as it
                 // started is seen there and again by the join event. One join, not two.
                 return;
@@ -387,9 +349,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
             // is still running reads the database before this join is saved, so the new session
             // does not count this join. It needs a re-login within the moment the load takes,
             // right after the plugin was enabled; it loses that one join, nothing else.
-            LateJoin load = new LateJoin();
-            pendingJoins.put(id, load);
-            loadLate(id, name, now, load, 0);
+            loadLate(id, name, now, tracker.startLateJoin(id), 0);
         }
     }
 
@@ -397,14 +357,14 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      * Loads the value of a player who joined without a pre-login, and tries again while they are
      * online if it fails: they have no value until it is loaded.
      */
-    private void loadLate(UUID id, String name, long joinedAt, LateJoin load, int failures) {
+    private void loadLate(UUID id, String name, long joinedAt, SessionTracker.LateJoin load, int failures) {
         // Queued under the lock, so that a disable() cannot run in between and find nothing to
         // wait for; a retry that comes after it gives up.
         synchronized (sessions) {
-            if (!enabled.get() || pendingJoins.get(id) != load) {
+            if (!enabled.get() || !tracker.stillLoading(id, load)) {
                 // Disabled, or a retry for a player who quit since: what a new session of theirs
                 // saves must not be overwritten by a value read now.
-                pendingJoins.remove(id, load);
+                tracker.endLateJoin(id, load);
                 return;
             }
             CompletableFuture<?> _ = saves.read(id).thenAccept(stored -> {
@@ -416,13 +376,13 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                         // Queued under the same lock as the quit's save, so the two reach the
                         // database in the order the player's session went.
                         synchronized (sessions) {
-                            if (pendingJoins.remove(id, load)) {
+                            if (tracker.endLateJoin(id, load)) {
                                 online.put(id, joined);
                                 saves.write(id, joined);
                             } else {
                                 // Gone while the value was loading (the quit recorded when), or
                                 // the store was disabled meanwhile: saved as the others were.
-                                saves.write(id, applyLeft(id, joined, load.leftAt.orElse(clock.millis())));
+                                saves.write(id, applyLeft(id, joined, load.leftAt().orElse(clock.millis())));
                             }
                         }
                     })
@@ -430,9 +390,9 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                         Throwable cause = Retries.unwrap(error);
                         boolean stillWaiting;
                         synchronized (sessions) {
-                            stillWaiting = enabled.get() && pendingJoins.get(id) == load;
+                            stillWaiting = enabled.get() && tracker.stillLoading(id, load);
                             if (!stillWaiting) {
-                                pendingJoins.remove(id, load);
+                                tracker.endLateJoin(id, load);
                             }
                         }
                         if (stillWaiting && Retries.worthRetrying(cause, failures)) {
@@ -446,7 +406,7 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                             retries.after(failures, () -> loadLate(id, name, joinedAt, load, failures + 1));
                         } else if (stillWaiting) {
                             synchronized (sessions) {
-                                pendingJoins.remove(id, load);
+                                tracker.endLateJoin(id, load);
                             }
                             logger.error("Could not load the {} of {}", subject, name, cause);
                         }
@@ -458,19 +418,12 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
     void quit(UUID id) {
         long now = clock.millis();
         synchronized (sessions) {
-            LateJoin loading = pendingJoins.remove(id);
-            if (loading != null) {
-                loading.leftAt = OptionalLong.of(now);
-            }
+            tracker.quitWhileLoading(id, now);
             T value = online.remove(id);
             if (value != null) {
                 T saved = applyLeft(id, value, now);
                 saves.write(id, saved);
-                recentlyLeft.put(id, new Left<>(saved, ++sessionEvents, now));
-                // A second login while this session was online took a copy of its value at
-                // pre-login, and the new session will start from it. What this session changed
-                // since then is in what we just saved: start the new session from that instead.
-                loggingIn.computeIfPresent(id, (key, pending) -> new PendingLogin<>(saved, pending.at()));
+                tracker.left(id, saved, now);
             }
         }
     }
@@ -528,19 +481,8 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
         return value;
     }
 
-    /** One load after a join; {@code leftAt} is written and read under the store's lock. */
-    private static final class LateJoin {
-        OptionalLong leftAt = OptionalLong.empty();
-    }
-
     /** Whether the store is enabled. For tests that wait for the shutdown to begin. */
     boolean enabled() {
         return enabled.get();
     }
-
-    /** A value loaded at pre-login, and when. */
-    private record PendingLogin<T>(T value, long at) {}
-
-    /** What a quit saved, which login or quit came last before it ({@code event}), and when. */
-    private record Left<T>(T value, long event, long at) {}
 }
