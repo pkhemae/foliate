@@ -60,7 +60,7 @@ public class FoliatePlugin extends JavaPlugin {
         // The languages in src/main/resources/lang: to add one, add its file there and its name here.
         MessageService messages = new MessageService(
                 getDataPath(), List.of("en", "fr"), this::getResource, () -> config.get().defaultLocale(), getSLF4JLogger());
-        PlaceholderRegistry placeholders = new PlaceholderRegistry();
+        PlaceholderRegistry placeholders = new PlaceholderRegistry(getSLF4JLogger());
         placeholders.register("version", player -> getPluginMeta().getVersion());
 
         modules.register(config);

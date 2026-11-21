@@ -47,7 +47,7 @@ class ProfileModuleTest {
     private Database database;
     private ProfileModule profiles;
     private final TestClock clock = new TestClock(1_000);
-    private final PlaceholderRegistry placeholders = new PlaceholderRegistry();
+    private final PlaceholderRegistry placeholders = new PlaceholderRegistry(NOPLogger.NOP_LOGGER);
     private final ProfileRepository repository = new ProfileRepository();
 
     @BeforeEach
@@ -230,6 +230,15 @@ class ProfileModuleTest {
 
         assertEquals("1", placeholders.resolve("joins", player));
         assertNull(placeholders.resolve("joins", null));
+    }
+
+    /** The registry refuses a name taken twice: the module gives its own back when it stops. */
+    @Test
+    void joinsPlaceholderIsGivenBackWhenTheModuleStops() throws Exception {
+        profiles.disable();
+
+        assertNull(placeholders.resolve("joins", null));
+        profiles.enable();
     }
 
     @Test
