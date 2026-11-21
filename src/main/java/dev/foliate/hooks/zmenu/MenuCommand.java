@@ -2,9 +2,9 @@ package dev.foliate.hooks.zmenu;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import dev.foliate.contracts.menu.Menus;
 import dev.foliate.core.command.Subcommand;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
+import java.util.function.BiConsumer;
 import org.bukkit.entity.Player;
 
 /**
@@ -18,10 +18,11 @@ final class MenuCommand implements Subcommand {
 
     private static final String MENU = "example";
 
-    private final Menus menus;
+    private final BiConsumer<Player, String> open;
 
-    MenuCommand(Menus menus) {
-        this.menus = menus;
+    /** @param open opens a menu for a player, from any thread: {@link ZMenuHook#open} */
+    MenuCommand(BiConsumer<Player, String> open) {
+        this.open = open;
     }
 
     @Override
@@ -43,9 +44,9 @@ final class MenuCommand implements Subcommand {
     public void build(LiteralArgumentBuilder<CommandSourceStack> node) {
         node.executes(context -> {
             // The executor is the player the command runs as, which differs from the sender under
-            // /execute as. Menus#open hops to that player's region by itself.
+            // /execute as. Opening hops to that player's region by itself.
             if (context.getSource().getExecutor() instanceof Player player) {
-                menus.open(player, MENU);
+                open.accept(player, MENU);
             }
             return Command.SINGLE_SUCCESS;
         });

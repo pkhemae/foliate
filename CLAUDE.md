@@ -28,7 +28,7 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
 - `core` is reusable infrastructure and knows nothing of the plugin's features. A module owns its
   settings class and receives a supplier of it (`() -> config.get().scoreboard()`), so a reload takes
   effect; `PluginConfig` only composes the sections into the single `config.yml`.
-- `contracts` holds what features offer each other (`Menus`): interfaces and value types only,
+- `contracts` holds what features offer each other (none in the template): interfaces and value types only,
   implementations stay in their module or hook. Modules, hooks and commands depend on `core` and
   `contracts`, never on each other; `ArchitectureTest` enforces it.
 - A feature's subcommands live in its package and its module offers them (`SubcommandProvider`);
