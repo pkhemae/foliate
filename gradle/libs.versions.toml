@@ -21,6 +21,7 @@ zmenu = "1.1.2.1"
 # Static checks run by the compiler: Error Prone, with NullAway checking the @NullMarked packages.
 errorprone = "2.53.0"
 nullaway = "0.14.4"
+# Checks the layout of the compiled classes, in ArchitectureTest.
 archunit = "1.5.1"
 
 junit = "6.1.3"

@@ -13,8 +13,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeAll;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -24,9 +28,11 @@ import org.junit.jupiter.api.Test;
  * Only {@code FoliatePlugin} and {@code PluginConfig}, which compose everything, may know it all.
  *
  * <p>Checked with ArchUnit on the compiled classes of the plugin, so every real dependency counts
- * (an import, a qualified name, a constant, a lambda) and a mention in a comment does not. The
- * server test's classes are left out: they test everything, and the plugin cannot depend on them,
- * since they are not on its classpath.
+ * (a type, a method, a lambda) and a mention in a comment does not. One kind of dependency leaves
+ * no trace in a class file: javac copies a {@code static final} constant into the class that uses
+ * it. The imports of the sources are therefore checked against the same layout too. The server
+ * test's classes are left out: they test everything, and the plugin cannot depend on them, since
+ * they are not on its classpath.
  */
 class ArchitectureTest {
 
@@ -35,6 +41,13 @@ class ArchitectureTest {
 
     private static final Path MAIN = Path.of("src/main/java", BASE.split("\\.", -1));
     private static final Path SERVER_TEST = Path.of("src/serverTest/java", BASE.split("\\.", -1));
+
+    /** An import of the plugin, wildcard or static: what follows the base package. */
+    private static final Pattern IMPORT =
+            Pattern.compile("\\s*import\\s+(?:static\\s+)?" + Pattern.quote(BASE) + "\\.([\\w.]*[\\w*])\\s*;.*");
+
+    /** Parents whose children are parts of their own: {@code modules.profile}, {@code hooks.zmenu}. */
+    private static final Set<String> GROUPS = Set.of("modules", "hooks");
 
     private static JavaClasses plugin;
 
@@ -51,6 +64,8 @@ class ArchitectureTest {
                 .consideringOnlyDependenciesInAnyPackage(BASE + "..")
                 // A part with no class, as contracts in the template, is a rule waiting for code.
                 .withOptionalLayers(true)
+                // A new top-level package must find its place here before it can be used.
+                .ensureAllClassesAreContainedInArchitecture()
                 .layer("composition root").definedBy(BASE)
                 .layer("core").definedBy(BASE + ".core..")
                 .layer("contracts").definedBy(BASE + ".contracts..")
@@ -68,7 +83,7 @@ class ArchitectureTest {
 
     @Test
     void aFeatureNeverDependsOnAnother() {
-        for (String group : List.of("modules", "hooks")) {
+        for (String group : GROUPS) {
             slices().matching(BASE + "." + group + ".(*)..")
                     .should().notDependOnEachOther()
                     .allowEmptyShould(true)
@@ -77,11 +92,60 @@ class ArchitectureTest {
         }
     }
 
+    /**
+     * What the bytecode cannot show: a constant of another part, copied into the class by javac,
+     * as in {@code import static ...PlaceholderApiHook.PLUGIN_NAME}. The imports of every source
+     * file of the plugin follow the same layout.
+     */
+    @Test
+    void theImportsFollowTheLayoutToo() throws IOException {
+        List<String> violations = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(MAIN)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                String unit = unitOf(MAIN.relativize(file).getParent());
+                if (unit == null) {
+                    continue; // the composition root may know everything
+                }
+                for (String line : Files.readAllLines(file)) {
+                    Matcher imported = IMPORT.matcher(line);
+                    if (imported.matches() && !mayDependOn(unit, unitOfImport(imported.group(1)))) {
+                        violations.add(MAIN.relativize(file) + ": " + line.strip());
+                    }
+                }
+            }
+        }
+        assertEquals(List.of(), violations, "These imports break the layout, see the Architecture page of the wiki");
+    }
+
     @Test
     void theRulesSeeTheCodeTheyGuard() {
-        // A guard that imports nothing would pass forever.
+        // A guard that imports nothing would pass forever: from a jar instead of the classes
+        // folder, the importer finds nothing.
         assertTrue(plugin.containPackage(BASE + ".core.module"));
-        assertTrue(plugin.size() > 50, plugin.size() + " classes");
+        assertTrue(plugin.size() > 10, plugin.size() + " classes");
+    }
+
+    /** What a part of {@code unit} may depend on: itself, core, and the contracts unless it is core. */
+    private static boolean mayDependOn(String unit, String target) {
+        return target.equals(unit) || target.equals("core") || (target.equals("contracts") && !unit.equals("core"));
+    }
+
+    /** The part a folder of the plugin belongs to ({@code modules.profile}, {@code core}), or null for the root. */
+    private static @Nullable String unitOf(@Nullable Path folder) {
+        if (folder == null) {
+            return null;
+        }
+        String first = folder.getName(0).toString();
+        return GROUPS.contains(first) && folder.getNameCount() > 1 ? first + "." + folder.getName(1) : first;
+    }
+
+    /** The part an imported name belongs to; "root" for a class of the root package. */
+    private static String unitOfImport(String name) {
+        String[] parts = name.split("\\.", -1);
+        if (Character.isUpperCase(parts[0].charAt(0))) {
+            return "root";
+        }
+        return GROUPS.contains(parts[0]) && parts.length > 1 ? parts[0] + "." + parts[1] : parts[0];
     }
 
     /**

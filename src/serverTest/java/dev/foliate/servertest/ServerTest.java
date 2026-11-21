@@ -353,12 +353,13 @@ public final class ServerTest {
         return done;
     }
 
-    // The future that teleport gives is composed at once (thenCompose), not left unobserved.
-    @SuppressWarnings("FutureReturnValueIgnored")
     private CompletableFuture<Void> teleportFromAnotherThread(Entity marker, Location spawn) {
         Location destination = spawn.clone().add(0, 5, 0);
-        return schedulers.async()
-                .supply(() -> schedulers.teleport(marker, destination))
+        // The future that teleport gives is composed on the next line, not left unobserved.
+        @SuppressWarnings("FutureReturnValueIgnored")
+        CompletableFuture<CompletableFuture<Boolean>> started =
+                schedulers.async().supply(() -> schedulers.teleport(marker, destination));
+        return started
                 .thenCompose(future -> future)
                 .thenCompose(moved -> schedulers.entity(marker).run(() -> {
                     check(moved, "teleport was refused");

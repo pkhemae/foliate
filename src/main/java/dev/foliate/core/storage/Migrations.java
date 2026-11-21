@@ -214,8 +214,9 @@ final class Migrations {
                     throw e;
                 }
             }
-        } catch (SQLException | IOException | RuntimeException e) {
-            // The migration's failure is the one to report, even when restoring fails too.
+        } catch (Throwable e) {
+            // The migration's failure is the one to report, even when restoring fails too. Any
+            // failure, an Error included, must not leave the connection outside auto-commit.
             try {
                 connection.setAutoCommit(autoCommit);
             } catch (SQLException restoreFailure) {

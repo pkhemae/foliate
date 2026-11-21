@@ -61,8 +61,6 @@ public final class FoliaSchedulers implements Schedulers {
         return new EntityContext(entity);
     }
 
-    // The future that teleportAsync gives is composed at once (thenCompose), not left unobserved.
-    @SuppressWarnings("FutureReturnValueIgnored")
     @Override
     public CompletableFuture<Boolean> teleport(Entity entity, Location destination) {
         Location target = destination.clone();
@@ -70,7 +68,10 @@ public final class FoliaSchedulers implements Schedulers {
         if (context.isCurrent()) {
             return entity.teleportAsync(target);
         }
-        return context.supply(() -> entity.teleportAsync(target))
+        // The future that teleportAsync gives is composed on the next line, not left unobserved.
+        @SuppressWarnings("FutureReturnValueIgnored")
+        CompletableFuture<CompletableFuture<Boolean>> started = context.supply(() -> entity.teleportAsync(target));
+        return started
                 .thenCompose(future -> future)
                 .exceptionally(error -> {
                     Throwable cause = error instanceof CompletionException && error.getCause() != null
