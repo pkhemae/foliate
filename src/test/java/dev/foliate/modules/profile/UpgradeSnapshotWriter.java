@@ -1,5 +1,6 @@
 package dev.foliate.modules.profile;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import dev.foliate.FoliatePlugin;
@@ -8,6 +9,9 @@ import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.Database;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -64,6 +68,30 @@ class UpgradeSnapshotWriter {
                 }
                 return null;
             });
+
+            // A table left empty here would be empty in the snapshot, and its later migrations
+            // never tried against rows: a module that brings a table stores rows of its own above.
+            List<String> empty = database.call(connection -> {
+                List<String> tables = new ArrayList<>();
+                try (Statement statement = connection.createStatement();
+                        ResultSet rows = statement.executeQuery("SELECT name FROM sqlite_master"
+                                + " WHERE type = 'table' AND name NOT LIKE 'sqlite~_%' ESCAPE '~'")) {
+                    while (rows.next()) {
+                        tables.add(rows.getString(1));
+                    }
+                }
+                List<String> withoutRows = new ArrayList<>();
+                for (String table : tables) {
+                    try (Statement statement = connection.createStatement();
+                            ResultSet rows = statement.executeQuery("SELECT COUNT(*) FROM \"" + table + "\"")) {
+                        if (rows.next() && rows.getInt(1) == 0) {
+                            withoutRows.add(table);
+                        }
+                    }
+                }
+                return withoutRows;
+            });
+            assertEquals(List.of(), empty, "Tables to which UpgradeSnapshotWriter stores no rows");
         } finally {
             database.disable();
         }

@@ -20,15 +20,16 @@ Do it for every release, at the commit that is tagged, before the tag is pushed.
 
 1. Every table of the plugin must get a few rows. `UpgradeSnapshotWriter` (in the tests of the
    profile module) stores them through the plugin's own code: when a module brought a table since
-   the last snapshot, add rows for it there, saved through that module's repository.
+   the last snapshot, add rows for it there, saved through that module's repository. The writer
+   fails when a table is left empty.
 2. Write the database that this version leaves:
 
    ```sh
    FOLIATE_UPGRADE_SNAPSHOT=build/upgrade-snapshot ./gradlew test --tests '*UpgradeSnapshotWriter' --rerun
    ```
 
-   `--rerun` is needed: Gradle would otherwise reuse an earlier run of the tests, made without the
-   variable, and write nothing.
+   The variable is an input of the tests, so Gradle runs them again when it changes. `--rerun`
+   also runs them when the same command ran before, for example after `data.db` was removed.
 3. Dump it into a new folder, with the `sqlite3` command-line tool:
 
    ```sh
