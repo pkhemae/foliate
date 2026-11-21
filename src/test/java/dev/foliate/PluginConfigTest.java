@@ -90,8 +90,89 @@ class PluginConfigTest {
 
         ConfigException failure = assertThrows(ConfigException.class, service::enable);
 
-        assertTrue(failure.getMessage().contains("'port'"), failure.getMessage());
+        assertEquals("config.yml is invalid: storage.mysql.port must be a whole number", failure.getMessage());
         assertFalse(describe(failure).contains("s3cret-pw"), describe(failure));
+    }
+
+    /**
+     * Unquoted, a generated password that starts with {@code [} or <code>{</code> is a list or a
+     * section in YAML, and the library quotes such values differently from a single one.
+     */
+    @Test
+    void aPasswordThatYamlReadsAsAListOrASectionIsNeverShown() throws Exception {
+        for (String password : new String[] {"[s3cret-a, s3cret-b]", "{s3cret-m: s3cret-n}"}) {
+            Files.writeString(directory.resolve("config.yml"), "storage:\n  mysql:\n    password: " + password + "\n");
+            ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
+
+            ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+            assertEquals("config.yml is invalid: storage.mysql.password must be text: put it in quotes", failure.getMessage());
+            assertFalse(describe(failure).contains("s3cret"), describe(failure));
+        }
+    }
+
+    /**
+     * SnakeYAML's own messages repeat tokens of the file: an alias, a tag, or a number it failed
+     * to read. A generated password can start with any of these signs.
+     */
+    @Test
+    void aPasswordThatIsNotValidYamlIsNeverShown() throws Exception {
+        for (String password : new String[] {"*s3cret", "!s3cret", "!!s3cret abc", "!!int s3cret", "\"s3cret", "@s3cret", "s3cret: x"}) {
+            Files.writeString(directory.resolve("config.yml"), "storage:\n  mysql:\n    password: " + password + "\n");
+            ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
+
+            ConfigException failure = assertThrows(ConfigException.class, service::enable, password);
+
+            assertFalse(describe(failure).contains("s3cret"), describe(failure));
+        }
+    }
+
+    /** Each kind of mistake names the setting and what it takes, in the administrator's words. */
+    @Test
+    void aWrongValueSaysWhatTheSettingTakes() throws Exception {
+        Map<String, String> expected = Map.of(
+                "storage:\n  type: FOO\n", "storage.type must be one of SQLITE, MYSQL",
+                "storage:\n  enabled: maybe\n", "storage.enabled must be true or false",
+                "storage:\n  mysql: hello\n", "storage.mysql must be a section of settings",
+                "storage:\n  mysql:\n    pool-size: 99999999999\n", "storage.mysql.pool-size must be a whole number",
+                "scoreboard:\n  lines: hello\n", "scoreboard.lines must be a list (each entry: text)",
+                "scoreboard:\n  lines:\n    - {a: b}\n", "scoreboard.lines must be a list (each entry: text)",
+                "storage:\n  mysql:\n    password: 123456\n", "storage.mysql.password must be text: put it in quotes");
+        for (Map.Entry<String, String> mistake : expected.entrySet()) {
+            Files.writeString(directory.resolve("config.yml"), mistake.getKey());
+            ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
+
+            ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+            assertEquals("config.yml is invalid: " + mistake.getValue(), failure.getMessage(), mistake.getKey());
+        }
+    }
+
+    /** The section is not used then, so what is left in it must not stop the server. */
+    @Test
+    void theMysqlSectionIsOnlyCheckedWhenItIsUsed() throws Exception {
+        for (String unused : new String[] {
+            "storage:\n  type: SQLITE\n  mysql:\n    port: 0\n",
+            "storage:\n  enabled: false\n  type: MYSQL\n  mysql:\n    port: 0\n",
+        }) {
+            Files.writeString(directory.resolve("config.yml"), unused);
+
+            PluginConfig.service(directory, NOPLogger.NOP_LOGGER).enable();
+        }
+    }
+
+    /** A blank name would only fail later, when the server takes the migration lock. */
+    @Test
+    void aBlankMysqlNameIsRefusedWhenMysqlIsUsed() throws Exception {
+        for (String setting : new String[] {"host", "database", "username"}) {
+            Files.writeString(directory.resolve("config.yml"),
+                    "storage:\n  type: MYSQL\n  mysql:\n    " + setting + ": ' '\n");
+            ConfigService<PluginConfig> service = PluginConfig.service(directory, NOPLogger.NOP_LOGGER);
+
+            ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+            assertTrue(failure.getMessage().contains("storage.mysql." + setting), failure.getMessage());
+        }
     }
 
     /** Every message and stack trace line the logs would show for this failure. */

@@ -5,6 +5,7 @@ import de.exlll.configlib.Configuration;
 import de.exlll.configlib.SerializeWith;
 import de.exlll.configlib.Serializer;
 import dev.foliate.core.config.ConfigException;
+import dev.foliate.core.config.InvalidSettingException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -48,7 +49,10 @@ public final class StorageSettings {
      * @throws ConfigException with a message an administrator can act on
      */
     public void validate() throws ConfigException {
-        mysql.validate();
+        // The section is ignored otherwise, so a leftover value there must not stop the server.
+        if (enabled && type == Type.MYSQL) {
+            mysql.validate();
+        }
     }
 
     /**
@@ -72,7 +76,7 @@ public final class StorageSettings {
                 if (value instanceof String || value instanceof Boolean || value instanceof Number) {
                     properties.put(String.valueOf(key), String.valueOf(value));
                 } else {
-                    throw new IllegalArgumentException("storage.mysql.properties." + key
+                    throw new InvalidSettingException("storage.mysql.properties." + key
                             + " must be a single value, such as REQUIRED, true or 5000");
                 }
             });
@@ -133,6 +137,15 @@ public final class StorageSettings {
         }
 
         void validate() throws ConfigException {
+            if (host.isBlank()) {
+                throw new ConfigException("storage.mysql.host must name the database server");
+            }
+            if (database.isBlank()) {
+                throw new ConfigException("storage.mysql.database must name the database to use");
+            }
+            if (username.isBlank()) {
+                throw new ConfigException("storage.mysql.username must name the account to connect with");
+            }
             if (port < 1 || port > 65535) {
                 throw new ConfigException("storage.mysql.port must be between 1 and 65535");
             }

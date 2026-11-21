@@ -8,6 +8,10 @@ public final class YamlException extends Exception {
     @Serial
     private static final long serialVersionUID = 1L;
 
+    public YamlException(String message) {
+        super(message);
+    }
+
     public YamlException(String message, Throwable cause) {
         super(message, cause);
     }

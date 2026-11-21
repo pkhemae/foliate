@@ -192,7 +192,7 @@ class ScoreboardModuleTest {
     @Test
     void moduleDoesNotStartOnAServerTheBoardLibraryDoesNotSupport() {
         ScoreboardModule unsupported = newModule(() -> {
-            throw new ScoreboardUnavailableException("unsupported", null);
+            throw new ScoreboardUnavailableException("unsupported");
         });
 
         assertThrows(ScoreboardUnavailableException.class, unsupported::enable);
