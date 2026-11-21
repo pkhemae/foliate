@@ -1,6 +1,7 @@
 package dev.foliate.core.yaml;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.snakeyaml.engine.v2.api.Dump;
 import org.snakeyaml.engine.v2.api.DumpSettings;
@@ -46,7 +47,9 @@ public final class Yaml {
             return new LinkedHashMap<>();
         }
         if (!(root instanceof Map<?, ?> map)) {
-            throw new YamlException("expected a list of settings, found a single value");
+            // Read after the file's name: "config.yml is not made of settings such as 'name: value'".
+            throw new YamlException("not made of settings such as 'name: value' (it is "
+                    + (root instanceof List<?> ? "a list" : "a single value") + ")");
         }
         return stringKeys(map);
     }
@@ -98,7 +101,7 @@ public final class Yaml {
             case ScannerException scanner -> "a quote, a bracket or the indentation is wrong";
             case ParserException parser -> "the indentation or a list is wrong";
             case ReaderException reader -> "it contains a character that is not allowed";
-            default -> "a value cannot be read: put it in quotes";
+            default -> "a value cannot be read; if it is text, put it in quotes";
         };
         if (failure instanceof MarkedYamlEngineException marked) {
             problem += marked.getProblemMark()

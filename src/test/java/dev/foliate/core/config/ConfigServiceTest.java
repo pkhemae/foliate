@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import de.exlll.configlib.Comment;
 import de.exlll.configlib.Configuration;
+import de.exlll.configlib.SerializeWith;
+import de.exlll.configlib.Serializer;
 import dev.foliate.testing.RecordingLogger;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -280,6 +282,76 @@ class ConfigServiceTest {
         assertEquals(
                 List.of("WARN config.yml: 'leftover' is not a setting of this plugin and was removed from the file"),
                 logger.lines());
+    }
+
+    /** Saved by an editor in Windows-1252, an accent is not UTF-8: say so, not "Input length = 1". */
+    @Test
+    void aFileThatIsNotUtf8IsReportedAsSuch() throws IOException {
+        Files.write(file, "debug: false\n# Bienvenue à tous\n".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+
+        ConfigException failure = assertThrows(ConfigException.class, service::enable);
+
+        assertEquals("config.yml is not saved as UTF-8: save it again as UTF-8 in a text editor", failure.getMessage());
+    }
+
+    /** The message is read after the file's name. */
+    @Test
+    void aDocumentThatIsNotSettingsSaysWhatItIs() throws IOException {
+        Files.writeString(file, "- debug\n- other\n");
+        assertEquals("config.yml is not made of settings such as 'name: value' (it is a list)",
+                assertThrows(ConfigException.class, service::enable).getMessage());
+
+        Files.writeString(file, "just text\n");
+        assertEquals("config.yml is not made of settings such as 'name: value' (it is a single value)",
+                assertThrows(ConfigException.class, service::enable).getMessage());
+    }
+
+    /** A setting whose serializer reads a decimal into a whole number decides for itself. */
+    @Test
+    void aWholeNumberReadByASerializerOfItsOwnMayBeWrittenAsADecimal() throws Exception {
+        ConfigService<TimedSettings> timed =
+                new ConfigService<>(directory, NOPLogger.NOP_LOGGER, TimedSettings.class, TimedSettings::new, NO_MIGRATIONS, HEADER);
+        timed.enable(); // writes cooldown: 1.5
+
+        timed.reload();
+
+        assertEquals(1_500L, timed.get().cooldownMillis);
+        assertTrue(Files.readString(file).contains("cooldown-millis: 1.5"), Files.readString(file));
+    }
+
+    /** Milliseconds written as seconds, which a decimal says best. */
+    public static final class Seconds implements Serializer<Long, Double> {
+
+        public Seconds() {}
+
+        @Override
+        public Double serialize(Long millis) {
+            return millis / 1000.0;
+        }
+
+        @Override
+        public Long deserialize(Double seconds) {
+            return Math.round(seconds * 1000);
+        }
+    }
+
+    @Configuration
+    static final class TimedSettings implements ConfigRoot {
+
+        private int configVersion = 1;
+
+        @SerializeWith(serializer = Seconds.class)
+        private Long cooldownMillis = 1_500L;
+
+        private TimedSettings() {}
+
+        @Override
+        public int configVersion() {
+            return configVersion;
+        }
+
+        @Override
+        public void validate() {}
     }
 
     @Test

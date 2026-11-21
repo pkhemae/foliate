@@ -150,6 +150,81 @@ class MessageServiceTest {
         assertEquals("[P] Hello Alex", plain(Locale.ENGLISH, "greeting", "Alex"));
     }
 
+    /** An action bar is rendered in the viewer's language; an empty message shows nothing. */
+    @Test
+    void actionBarIsRenderedForTheViewer() {
+        PlayerMock player = MockBukkit.mock().addPlayer("Alex");
+        try {
+            messages.sendActionBar(player, "farewell.short");
+            messages.sendActionBar(player, "silent");
+
+            assertEquals("Bye", PlainTextComponentSerializer.plainText().serialize(player.nextActionBar()));
+            assertEquals(null, player.nextActionBar(), "an empty message was shown");
+        } finally {
+            MockBukkit.unmock();
+        }
+    }
+
+    /** As for a player: en_US, fr-CA and fr_FR fall back to their language. */
+    @Test
+    void defaultLocaleWithACountryUsesItsLanguage() throws Exception {
+        for (String locale : new String[] {"fr_FR", "fr-CA", "FR_fr"}) {
+            useDefaultLocale(locale);
+
+            assertEquals("[P] Bonjour Alex", plain(Locale.JAPANESE, "greeting", "Alex"), locale);
+        }
+    }
+
+    /** A folder the server may not write to (mounted read-only) holds what it holds: it starts. */
+    @Test
+    void aLangFolderThatCannotBeWrittenStillStarts() throws Exception {
+        Files.delete(directory.resolve("lang/.built-in"));
+        java.io.File folder = directory.resolve("lang").toFile();
+        assertTrue(folder.setWritable(false));
+        try {
+            MessageService fresh = new MessageService(
+                    directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), NOPLogger.NOP_LOGGER);
+
+            fresh.enable();
+
+            assertEquals("[P] Bonjour Alex", PlainTextComponentSerializer.plainText()
+                    .serialize(fresh.render(Locale.FRENCH, "greeting", Placeholder.unparsed("player", "Alex"))));
+        } finally {
+            folder.setWritable(true);
+        }
+    }
+
+    /** At startup a default locale with no text is one setting written wrong: English stands in. */
+    @Test
+    void defaultLocaleWithoutAFileFallsBackToEnglishAtStartup() throws Exception {
+        Files.writeString(directory.resolve("config.yml"), "default-locale: zz\n");
+        config.reload();
+        RecordingLogger logger = new RecordingLogger();
+        MessageService fresh = new MessageService(directory, MessageServiceTest::bundled, () -> config.get().defaultLocale(), logger);
+
+        fresh.enable();
+
+        assertEquals("[P] Hello Alex", PlainTextComponentSerializer.plainText()
+                .serialize(fresh.render(Locale.JAPANESE, "greeting", Placeholder.unparsed("player", "Alex"))));
+        assertTrue(logger.lines().stream().anyMatch(line -> line.startsWith("ERROR default-locale 'zz'")), logger.lines().toString());
+    }
+
+    /** An update that brings a language copies its file, once: a file the administrator deleted stays deleted. */
+    @Test
+    void aBuiltInLanguageIsCopiedOnceEvenToAnExistingFolder() throws Exception {
+        Files.delete(directory.resolve("lang/fr.yml"));
+        messages.reload();
+        assertFalse(Files.exists(directory.resolve("lang/fr.yml")), "a deleted language came back");
+
+        // A folder made by a version that copied only English: French is new to it.
+        Files.writeString(directory.resolve("lang/.built-in"), "en\n");
+        messages.reload();
+
+        assertTrue(Files.exists(directory.resolve("lang/fr.yml")), "the new language was not copied");
+        assertEquals(List.of("en", "fr"), Files.readAllLines(directory.resolve("lang/.built-in")).stream()
+                .filter(line -> !line.startsWith("#")).toList());
+    }
+
     @Test
     void defaultLocaleIsUsedBeforeEnglish() throws Exception {
         useDefaultLocale("fr");

@@ -11,7 +11,7 @@ command:
     - "<gray>Modules: <white><modules>"
   reload:
     started: "<prefix><gray>Reloading..."
-    success: "<prefix><green>Configuration and messages reloaded."
+    success: "<prefix><green>Everything was reloaded."
     failure: "<prefix><red>Could not reload <white><module></white>: <error>"
     unexpected: "<prefix><red>Could not reload <white><module></white> because of an unexpected error. See the console."
     error: "<prefix><red>The reload failed unexpectedly. See the console."

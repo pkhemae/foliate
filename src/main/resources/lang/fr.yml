@@ -11,7 +11,7 @@ command:
     - "<gray>Modules : <white><modules>"
   reload:
     started: "<prefix><gray>Rechargement..."
-    success: "<prefix><green>Configuration et messages rechargés."
+    success: "<prefix><green>Tout a été rechargé."
     failure: "<prefix><red>Impossible de recharger <white><module></white> : <error>"
     unexpected: "<prefix><red>Impossible de recharger <white><module></white> à cause d'une erreur inattendue. Consultez la console."
     error: "<prefix><red>Le rechargement a échoué de manière inattendue. Consultez la console."
