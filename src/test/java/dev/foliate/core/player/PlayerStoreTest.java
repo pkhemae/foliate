@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.Database;
+import dev.foliate.testing.RecordingLogger;
 import java.net.InetAddress;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -28,8 +29,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.UnaryOperator;
 import net.kyori.adventure.text.Component;
-import dev.foliate.testing.RecordingLogger;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -357,6 +358,49 @@ class PlayerStoreTest {
         assertEquals(11, changed.visits());
         assertEquals(changed, store.find(id).orElseThrow());
         assertEquals(changed, stored(id).orElseThrow());
+    }
+
+    /** For a value that changes too often to be saved each time: the cache changes, the database waits. */
+    @Test
+    void updateCachedChangesTheValueWithoutSavingItUntilTheNextSave() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        flush();
+
+        Visit changed = store.updateCached(id, visit -> withVisits(visit, visit.visits() + 10)).orElseThrow();
+        flush();
+
+        assertEquals(11, changed.visits());
+        assertEquals(changed, store.find(id).orElseThrow());
+        assertEquals(1, stored(id).orElseThrow().visits(), "saved although only the cache was to change");
+
+        store.update(id, UnaryOperator.identity());
+        flush();
+        assertEquals(11, stored(id).orElseThrow().visits());
+    }
+
+    @Test
+    void aValueChangedInTheCacheOnlyIsSavedWhenThePlayerLeaves() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        store.updateCached(id, visit -> withVisits(visit, 42));
+
+        store.quit(id);
+        flush();
+
+        assertEquals(42, stored(id).orElseThrow().visits());
+        assertTrue(store.updateCached(id, visit -> withVisits(visit, 99)).isEmpty(), "changed a player who left");
+    }
+
+    @Test
+    void aValueChangedInTheCacheOnlyIsSavedWhenTheStoreStops() throws Exception {
+        PlayerMock player = server.addPlayer("Alex");
+        UUID id = player.getUniqueId();
+        store.updateCached(id, visit -> withVisits(visit, 42));
+
+        store.disable();
+
+        assertEquals(42, stored(id).orElseThrow().visits());
     }
 
     @Test
