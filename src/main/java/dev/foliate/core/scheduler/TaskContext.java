@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
+import org.bukkit.plugin.IllegalPluginAccessException;
 
 /**
  * A place where work can run: the global region, the region owning a location, the region owning
@@ -57,6 +58,28 @@ public interface TaskContext extends Executor {
      * {@link #execute}. Exceptions are logged either way.
      */
     void executeOrRun(Runnable task);
+
+    /**
+     * Like {@link #executeOrRun}, for work that has no point once there is nobody to do it for:
+     * answering a player after a read from the database, say. When the entity is gone, or the
+     * plugin is disabled and the server refuses new tasks, the task is dropped and false returned,
+     * where {@code executeOrRun} would throw. Any other failure still throws: it is a bug.
+     *
+     * <p>False means the task was refused at once and will never run. True promises less: the task
+     * ran, or was accepted and may still be skipped, if the entity goes or the plugin is disabled
+     * before it runs (Folia accepts region and entity tasks from a disabled plugin and skips them).
+     * Do not rely on true to know that the work was done.
+     *
+     * @return false when the task was refused at once; true when it ran or was accepted
+     */
+    default boolean executeOrDrop(Runnable task) {
+        try {
+            executeOrRun(task);
+            return true;
+        } catch (EntityRetiredException | IllegalPluginAccessException nobody) {
+            return false;
+        }
+    }
 
     /**
      * Runs the task in this context and reports the outcome through the future. Exceptions are not

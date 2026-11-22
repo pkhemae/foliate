@@ -47,7 +47,8 @@ import org.slf4j.Logger;
  *       none of them may block: {@link #find} reads an immutable value from a concurrent map.
  *   <li><b>Write behind, in order.</b> A change replaces the cached value at once, and its save
  *       is queued behind the player's previous reads and saves ({@link SaveQueue},
- *       {@link PlayerQueues}).
+ *       {@link PlayerQueues}). A change made with {@link #updateCached} queues no save: the next
+ *       one, the quit or the shutdown writes it, since every save takes the cached value.
  *   <li><b>Write the latest value only.</b> Changes made while a save waits for a storage thread
  *       join it instead of queuing saves of their own ({@link SaveQueue}).
  *   <li><b>Retry what failed.</b> A save that fails for a reason known to pass is tried again
@@ -201,6 +202,25 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
      * @throws IllegalArgumentException when the change returns the value of another player
      */
     public Optional<T> update(UUID id, UnaryOperator<T> change) {
+        return change(id, change, true);
+    }
+
+    /**
+     * Changes the value of an online player like {@link #update}, but only in the cache: it
+     * reaches the database with the player's next {@code update}, their quit, or the shutdown.
+     * For a value that changes too often to be saved each time, such as a countdown that ticks
+     * every second; a crash loses what was not saved yet, so save it now and then with
+     * {@code update(id, UnaryOperator.identity())}. Safe from any thread, never blocks.
+     *
+     * @param change gives the new value from the current one, under the same lock as {@link #update}
+     * @return the new value, or empty when the player is not online (nothing is changed)
+     * @throws IllegalArgumentException when the change returns the value of another player
+     */
+    public Optional<T> updateCached(UUID id, UnaryOperator<T> change) {
+        return change(id, change, false);
+    }
+
+    private Optional<T> change(UUID id, UnaryOperator<T> change, boolean save) {
         synchronized (sessions) {
             T current = online.get(id);
             if (current == null) {
@@ -211,7 +231,9 @@ public final class PlayerStore<T extends PlayerData> implements Listener {
                 throw new IllegalArgumentException("a change must keep the id of the " + subject + " it changes");
             }
             online.put(id, changed);
-            saves.write(id, changed);
+            if (save) {
+                saves.write(id, changed);
+            }
             return Optional.of(changed);
         }
     }

@@ -207,6 +207,14 @@ class FoliaSchedulersTest {
         assertEquals(1, runs.get());
     }
 
+    /** Run inline, the task's own failure is logged as by executeOrRun: the task ran, it was not dropped. */
+    @Test
+    void executeOrDropReportsATaskRunInlineAsRunEvenWhenItFails() {
+        assertTrue(schedulers.region(location()).executeOrDrop(() -> {
+            throw new EntityRetiredException();
+        }));
+    }
+
     private Entity removedEntity() {
         Location location = location();
         Entity entity = location.getWorld().spawn(location, Zombie.class);
