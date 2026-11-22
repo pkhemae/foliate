@@ -12,8 +12,8 @@ All notable changes to this project are listed here. The format follows
 - Module lifecycle: enable, reload, disable, with failures isolated.
 - Typed `config.yml` with comments, safe reload and migrations.
 - MiniMessage messages in one `messages.yml`, in English, which the administrator edits to translate them.
-- `/foliate` command with `info`, `profile`, `reload` and `menu`, one class per subcommand.
-- `PlayerTarget`, for a subcommand about yourself or another player (`/foliate profile [player]`): the target, the `others` permission checked when the command runs, suggestions limited to the players the sender can see, and the refusals.
+- `/foliate` command with `info`, `profile`, `reload` and `menu`, one class per subcommand; a module may also give what the command does typed alone (`SubcommandProvider#bareCommand`).
+- `PlayerTarget`, for a subcommand about yourself or another player (`/foliate profile [player]`): the target, the `others` permission checked when the command runs, suggestions limited to the players the sender can see, and the refusals. `OnlinePlayers`, the argument that suggests and finds the players online the sender can see.
 - Optional PlaceholderAPI and zMenu integrations.
 - Per-player scoreboard.
 - SQL storage (SQLite, MySQL, MariaDB) with schema migrations, and per-player profiles: read ahead of other players' saves at login, saved behind in order, retried while the database is unreachable, and flushed on shutdown.

@@ -1,6 +1,8 @@
 package dev.foliate.core.command;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.mojang.brigadier.CommandDispatcher;
@@ -10,10 +12,12 @@ import dev.foliate.testing.CommandSource;
 import dev.foliate.testing.TestCommands;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -90,6 +94,123 @@ class RootCommandTest {
         assertThrows(IllegalArgumentException.class, () -> new RootCommand("foliate", List.of()));
         assertThrows(IllegalArgumentException.class, () -> new RootCommand("foliate", List.of(first, second)));
         assertThrows(IllegalStateException.class, new RootCommand("foliate", List.of(idle))::build);
+    }
+
+    @Test
+    void theBareCommandRunsWhenTheCommandIsTypedAlone() throws Exception {
+        AtomicInteger runs = new AtomicInteger();
+        Subcommand fly = stub("ignored", "test.fly", node -> node.executes(context -> runs.incrementAndGet()));
+        CommandDispatcher<CommandSourceStack> commands = dispatcher(fly, stub("first", "test.first"));
+        PlayerMock player = server.addPlayer();
+        player.addAttachment(plugin, "test.fly", true);
+        player.addAttachment(plugin, "test.first", true);
+
+        assertEquals(1, commands.execute("foliate", new CommandSource(player)));
+        assertEquals(1, runs.get());
+        assertEquals(1, commands.execute("foliate first", new CommandSource(player)));
+        // Its name is not a subcommand.
+        assertThrows(CommandSyntaxException.class, () -> commands.execute("foliate ignored", new CommandSource(player)));
+    }
+
+    /** The root lets in whoever may use a subcommand: typed alone, the command checks the bare command's permission itself. */
+    @Test
+    void theBareCommandChecksItsOwnPermission() throws Exception {
+        AtomicInteger runs = new AtomicInteger();
+        Subcommand fly = stub("fly", "test.fly", node -> node.executes(context -> runs.incrementAndGet()));
+        CommandDispatcher<CommandSourceStack> commands = dispatcher(fly, stub("first", "test.first"));
+        PlayerMock subcommandOnly = server.addPlayer();
+        subcommandOnly.addAttachment(plugin, "test.first", true);
+        PlayerMock nothing = server.addPlayer();
+
+        // The game's own failure, not a result of 0: execute store success and command blocks see it fail.
+        assertThrows(CommandSyntaxException.class, () -> commands.execute("foliate", new CommandSource(subcommandOnly)));
+        assertEquals(1, commands.execute("foliate first", new CommandSource(subcommandOnly)));
+        assertThrows(CommandSyntaxException.class, () -> commands.execute("foliate", new CommandSource(nothing)));
+        assertEquals(0, runs.get());
+    }
+
+    /** As for a subcommand: what the bare command requires in its build, and its availability, hold too. */
+    @Test
+    void aPlayerAllowedOnlyTheBareCommandRunsItAndNoSubcommand() throws Exception {
+        CommandDispatcher<CommandSourceStack> commands = dispatcher(stub("fly", "test.fly"), stub("first", "test.first"));
+        PlayerMock player = server.addPlayer();
+        player.addAttachment(plugin, "test.fly", true);
+
+        assertEquals(1, commands.execute("foliate", new CommandSource(player)));
+        assertThrows(CommandSyntaxException.class, () -> commands.execute("foliate first", new CommandSource(player)));
+    }
+
+    /** Let in by a subcommand's permission, the console is still refused a bare command for players only. */
+    @Test
+    void theBareCommandsAvailabilityIsCheckedWhenItRuns() {
+        Subcommand playersOnly = stub("fly", "test.fly", node -> node.executes(context -> 1),
+                source -> source.getSender() instanceof Player);
+        CommandDispatcher<CommandSourceStack> commands = dispatcher(playersOnly, stub("first", "test.first"));
+
+        assertThrows(
+                CommandSyntaxException.class,
+                () -> commands.execute("foliate", new CommandSource(server.getConsoleSender())));
+    }
+
+    @Test
+    void theBareCommandKeepsItsOwnRequirementAndAvailability() {
+        Subcommand required = stub("fly", "test.fly", node -> node.requires(source -> false).executes(context -> 1));
+        Subcommand playersOnly = stub("fly", "test.fly", node -> node.executes(context -> 1),
+                source -> source.getSender() instanceof Player);
+        PlayerMock player = server.addPlayer();
+        player.addAttachment(plugin, "test.fly", true);
+
+        assertThrows(CommandSyntaxException.class, () -> dispatcher(required).execute("foliate", new CommandSource(player)));
+        assertThrows(
+                CommandSyntaxException.class,
+                () -> dispatcher(playersOnly).execute("foliate", new CommandSource(server.getConsoleSender())));
+    }
+
+    @Test
+    void mistakesInTheBareCommandAreCaughtAtStartup() {
+        Subcommand idle = stub("fly", "test.fly", node -> {});
+        Subcommand withArgument = stub("fly", "test.fly", node -> node.executes(context -> 1)
+                .then(LiteralArgumentBuilder.<CommandSourceStack>literal("on").executes(context -> 1)));
+        Subcommand redirected = stub("fly", "test.fly", node -> node.executes(context -> 1)
+                .redirect(LiteralArgumentBuilder.<CommandSourceStack>literal("elsewhere").build()));
+        Subcommand fine = stub("fly", "test.fly");
+
+        assertThrows(IllegalArgumentException.class, () -> new RootCommand("foliate", null, List.of()));
+        assertThrows(IllegalStateException.class, new RootCommand("foliate", idle, List.of())::build);
+        assertThrows(IllegalStateException.class, new RootCommand("foliate", withArgument, List.of())::build);
+        assertThrows(IllegalStateException.class, new RootCommand("foliate", redirected, List.of())::build);
+        // A command that only runs alone needs no subcommand.
+        new RootCommand("foliate", fine, List.of()).build();
+    }
+
+    @Test
+    void atMostOneModuleGivesTheBareCommand() {
+        Subcommand fly = stub("fly", "test.fly");
+        Subcommand walk = stub("walk", "test.walk");
+
+        assertNull(SubcommandProvider.bareCommandOf(List.of(provider(null), provider(null))));
+        assertSame(fly, SubcommandProvider.bareCommandOf(List.of(provider(null), provider(fly))));
+        assertThrows(IllegalStateException.class, () -> SubcommandProvider.bareCommandOf(List.of(provider(fly), provider(walk))));
+    }
+
+    private static CommandDispatcher<CommandSourceStack> dispatcher(Subcommand bare, Subcommand... subcommands) {
+        CommandDispatcher<CommandSourceStack> dispatcher = new CommandDispatcher<>();
+        dispatcher.getRoot().addChild(new RootCommand("foliate", bare, List.of(subcommands)).build());
+        return dispatcher;
+    }
+
+    private static SubcommandProvider provider(@Nullable Subcommand bare) {
+        return new SubcommandProvider() {
+            @Override
+            public List<Subcommand> subcommands() {
+                return List.of();
+            }
+
+            @Override
+            public @Nullable Subcommand bareCommand() {
+                return bare;
+            }
+        };
     }
 
     private static Subcommand stub(String name, String permission) {

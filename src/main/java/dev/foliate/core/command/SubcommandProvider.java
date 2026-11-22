@@ -1,6 +1,8 @@
 package dev.foliate.core.command;
 
+import java.util.Collection;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A module that adds subcommands to the plugin's command. {@code FoliatePlugin} asks the modules
@@ -11,4 +13,40 @@ public interface SubcommandProvider {
 
     /** Called once, after every module is enabled, to build the command. */
     List<Subcommand> subcommands();
+
+    /**
+     * What the plugin's command does when typed alone, such as {@code /fly}, or null when this
+     * module gives nothing of the kind. Called once, with {@link #subcommands()}. At most one
+     * enabled module may give one: the plugin refuses to start otherwise, rather than pick one
+     * (see {@link #bareCommandOf}).
+     * Named after the feature, {@code FlyCommand}, and checked like any subcommand: its
+     * permission and {@link Subcommand#isAvailableTo}.
+     */
+    default @Nullable Subcommand bareCommand() {
+        return null;
+    }
+
+    /**
+     * The bare command the providers give, or null when none does.
+     *
+     * @throws IllegalStateException when two give one: which would win is up to the order of the
+     *     modules, so neither is picked
+     */
+    static @Nullable Subcommand bareCommandOf(Collection<? extends SubcommandProvider> providers) {
+        Subcommand found = null;
+        SubcommandProvider giver = null;
+        for (SubcommandProvider provider : providers) {
+            Subcommand bare = provider.bareCommand();
+            if (bare == null) {
+                continue;
+            }
+            if (giver != null) {
+                throw new IllegalStateException("Two modules give what the command does alone: "
+                        + giver.getClass().getSimpleName() + " and " + provider.getClass().getSimpleName());
+            }
+            found = bare;
+            giver = provider;
+        }
+        return found;
+    }
 }

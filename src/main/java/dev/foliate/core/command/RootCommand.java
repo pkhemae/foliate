@@ -1,21 +1,36 @@
 package dev.foliate.core.command;
 
+import com.mojang.brigadier.Command;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Predicate;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The plugin's command, made of its {@link Subcommand}s. Adding a subcommand is writing its class
  * and handing it over, from {@code FoliatePlugin} or from a module's
  * {@link SubcommandProvider#subcommands()}: nothing in this class changes.
+ *
+ * <p>The command can also do something when typed alone, such as {@code /fly}: that is a
+ * subcommand too, given apart ({@link SubcommandProvider#bareCommand()}), with its own permission
+ * and checks. Its name is not typed and not used. Without one, the command typed alone is
+ * incomplete, as for any command of the game. With one, the players who may only use subcommands
+ * still get that error when they type it alone, but their client no longer marks it incomplete
+ * while they type: Brigadier cannot make a node runnable for some sources only.
+ *
+ * <p>Mistakes in the subcommands' {@code build} are thrown by {@link #build()}: call it once while
+ * the plugin starts, so that they stop it there.
  */
 public final class RootCommand {
 
     private final String name;
+    private final @Nullable Subcommand bare;
     private final List<Subcommand> subcommands;
 
     /**
@@ -23,7 +38,19 @@ public final class RootCommand {
      *     second would silently take over the first one's handler
      */
     public RootCommand(String name, List<Subcommand> subcommands) {
-        if (subcommands.isEmpty()) {
+        this(name, null, subcommands);
+    }
+
+    /**
+     * @param bare what the command does when typed alone, or null when it needs a subcommand. Its
+     *     {@code build} is given a node of its own, on which it calls {@code executes} and adds no
+     *     argument, redirect or fork: an argument after the command alone, a player's name say,
+     *     would compete with the subcommands' names
+     * @throws IllegalArgumentException when there is neither a subcommand nor a bare command, or
+     *     two subcommands share a name: the second would silently take over the first one's handler
+     */
+    public RootCommand(String name, @Nullable Subcommand bare, List<Subcommand> subcommands) {
+        if (subcommands.isEmpty() && bare == null) {
             throw new IllegalArgumentException("/" + name + " needs at least one subcommand");
         }
         Set<String> names = new HashSet<>();
@@ -33,13 +60,38 @@ public final class RootCommand {
             }
         }
         this.name = name;
+        this.bare = bare;
         this.subcommands = List.copyOf(subcommands);
     }
 
     public LiteralCommandNode<CommandSourceStack> build() {
-        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal(name)
-                // The command itself is shown to whoever may use at least one subcommand.
-                .requires(source -> subcommands.stream().anyMatch(subcommand -> allows(subcommand, source)));
+        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal(name);
+        Predicate<CommandSourceStack> mayRunAlone = source -> false;
+        if (bare != null) {
+            Subcommand alone = bare;
+            LiteralArgumentBuilder<CommandSourceStack> node = Commands.literal(name);
+            alone.build(node);
+            Command<CommandSourceStack> action = node.getCommand();
+            if (action == null || !node.getArguments().isEmpty() || node.getRedirect() != null) {
+                throw new IllegalStateException("What /" + name + " does alone must call executes() in its build(),"
+                        + " and add no argument nor redirect: make a subcommand of what takes one");
+            }
+            mayRunAlone = node.getRequirement().and(source -> allows(alone, source));
+            Predicate<CommandSourceStack> allowed = mayRunAlone;
+            // The root's requirement lets in whoever may use any subcommand: typed alone, the
+            // command still runs only for those allowed to run it alone, and fails for the others
+            // with the game's own error, as it would without a bare command.
+            root.executes(context -> {
+                if (!allowed.test(context.getSource())) {
+                    throw CommandSyntaxException.BUILT_IN_EXCEPTIONS.dispatcherUnknownCommand().create();
+                }
+                return action.run(context);
+            });
+        }
+        Predicate<CommandSourceStack> mayRunAloneOrUse = mayRunAlone;
+        // The command itself is shown to whoever may run it alone or use at least one subcommand.
+        root.requires(source -> mayRunAloneOrUse.test(source)
+                || subcommands.stream().anyMatch(subcommand -> allows(subcommand, source)));
         for (Subcommand subcommand : subcommands) {
             LiteralArgumentBuilder<CommandSourceStack> node = Commands.literal(subcommand.name());
             subcommand.build(node);

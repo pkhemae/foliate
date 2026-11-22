@@ -89,10 +89,15 @@ public class FoliatePlugin extends JavaPlugin {
         List<Subcommand> subcommands = new ArrayList<>();
         subcommands.add(new InfoCommand(modules, messages, getPluginMeta().getVersion(), Platform.describe()));
         subcommands.add(new ReloadCommand(this, modules, messages, schedulers, getSLF4JLogger()));
-        for (SubcommandProvider feature : modules.enabledOf(SubcommandProvider.class)) {
+        List<SubcommandProvider> features = modules.enabledOf(SubcommandProvider.class);
+        for (SubcommandProvider feature : features) {
             subcommands.addAll(feature.subcommands());
         }
-        RootCommand command = new RootCommand("foliate", subcommands);
+        // What /foliate does typed alone, if a feature gives it: nothing in the template does.
+        RootCommand command = new RootCommand("foliate", SubcommandProvider.bareCommandOf(features), subcommands);
+        // Built once now: a mistake in a subcommand's build() stops the start here, not in the
+        // handler below, which the server runs later and whose failure would leave no command.
+        command.build();
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> event.registrar()
                 .register(command.build(), "Shows information about Foliate and reloads it."));
 

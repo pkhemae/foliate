@@ -13,7 +13,10 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
  */
 public interface Subcommand {
 
-    /** The word typed after the root command. */
+    /**
+     * The word typed after the root command. A bare command, what the command does typed alone,
+     * is typed without it: its name only appears in errors.
+     */
     String name();
 
     /**
