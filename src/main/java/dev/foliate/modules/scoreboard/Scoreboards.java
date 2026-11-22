@@ -169,7 +169,7 @@ public final class Scoreboards {
             previous.remove();
         }
         if (!running) {
-            // disable() ran meanwhile and may have missed this board: whoever takes it out removes it.
+            // stop() ran meanwhile and may have missed this board: whoever takes it out removes it.
             if (entries.remove(id, entry)) {
                 entry.remove();
             }

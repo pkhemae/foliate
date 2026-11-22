@@ -30,7 +30,7 @@ command:
   menu:
     player-required: "<prefix><red>Only a player can open a menu: <white>/execute as \\<player> run foliate menu</white>"
 
-menu:
+zmenu:
   unknown: "<prefix><red>The menu <white><menu></white> does not exist."
   unavailable: "<prefix><red>Menus are not available right now."
 

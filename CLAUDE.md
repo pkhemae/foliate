@@ -66,7 +66,7 @@ modules/fly/
 │                       subcommands, lists its MIGRATIONS. Wiring only, no logic
 ├── FlySettings.java    its section of config.yml, when it has one
 ├── FlySessions.java    the domain: what the feature holds and does (state, rules, records)
-├── command/            FlyCommand (typed alone), SpeedCommand, TimeCommand: one subcommand each
+├── command/            FlyCommand (the command typed alone), SpeedCommand: one subcommand each
 ├── listener/           FlyListener: turns an event into a call on the domain, nothing more
 └── storage/            FlyRepository, and what only the SQL needs
 ```
@@ -77,7 +77,9 @@ modules/fly/
 - Names: the package is the feature's name, one lowercase word (`fly`, `profile`), which `name()`
   also returns. The entry point is `<Feature>Module`, or `<Plugin>Hook` for a hook; then
   `<Feature>Settings`, `<Feature>Repository`, `<Reason>Exception`. A subcommand is `<Word>Command`
-  after the word typed (`/fly speed` → `SpeedCommand`), and the one typed alone `<Feature>Command`.
+  after the word typed after the plugin's command (`/foliate speed` → `SpeedCommand`), and what the
+  command does typed alone is `<Feature>Command`. Those words, and with them the `command.<word>.`
+  messages and the `<plugin>.command.<word>` nodes, are shared by every feature: pick them so.
   A listener is `<Topic>Listener`. A domain class is a noun for what it holds (`FlySessions`,
   `FlyLedger`), never a `Manager`, `Utils` or `Helper`.
 - A helper that knows nothing of the feature, such as finding a player by name or running work on

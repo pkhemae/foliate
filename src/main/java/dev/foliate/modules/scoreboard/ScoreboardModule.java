@@ -58,8 +58,10 @@ public final class ScoreboardModule implements Module {
     @Override
     public void enable() throws ScoreboardUnavailableException {
         supportCheck.run();
-        scoreboards.start();
+        // Listening first: a player who joins before the boards start is skipped by the listener,
+        // then found online by start(); one who joins after is shown by the listener.
         plugin.getServer().getPluginManager().registerEvents(listener, plugin);
+        scoreboards.start();
     }
 
     @Override

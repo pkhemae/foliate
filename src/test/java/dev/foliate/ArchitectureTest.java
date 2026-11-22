@@ -10,9 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
 import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.module.Module;
-import com.tngtech.archunit.core.importer.ClassFileImporter;
 import dev.foliate.servertest.ServerTestPlugin;
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -28,8 +28,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.bukkit.event.Listener;
-import org.junit.jupiter.api.BeforeAll;
 import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -148,31 +148,36 @@ class ArchitectureTest {
         }
     }
 
-    /** A feature's packages are its own and one per role, so that every feature reads the same way. */
+    /**
+     * A feature's packages are its own and one per role, with nothing below a role, so that every
+     * feature reads the same way.
+     */
     @Test
     void aFeatureHasNoPackageButItsRoles() {
         Set<String> unknown = new TreeSet<>();
         for (JavaClass type : plugin) {
             String[] parts = type.getPackageName().split("\\.", -1);
             int depth = BASE.split("\\.", -1).length;
-            if (parts.length > depth + 2 && GROUPS.contains(parts[depth]) && !ROLES.contains(parts[depth + 2])) {
+            boolean belowTheFeature = parts.length > depth + 2 && GROUPS.contains(parts[depth]);
+            if (belowTheFeature && (!ROLES.contains(parts[depth + 2]) || parts.length > depth + 3)) {
                 unknown.add(type.getPackageName());
             }
         }
-        assertEquals(Set.of(), unknown, "A feature's subpackages are " + ROLES + ": the rest stays in its own package");
+        assertEquals(Set.of(), unknown, "A feature's subpackages are " + ROLES + ", with nothing below them: the rest stays in its own package");
     }
 
     /**
-     * Commands and listeners are what the server calls: nothing in the feature depends on them but
-     * its entry point, which creates them, and others of the same role.
+     * Commands and listeners are what the server calls: nothing depends on them but the feature's
+     * own package, where the entry point creates them, and others of the same role. The imports
+     * are held to the same rule, see {@link #theImportsFollowTheLayoutToo}.
      */
     @Test
     void commandsAndListenersAreReachedFromTheFeaturesPackageOnly() {
         for (String group : GROUPS) {
             for (String role : List.of("command", "listener")) {
-                classes().that().resideInAPackage(BASE + "." + group + ".*." + role + "..")
+                classes().that().resideInAPackage(BASE + "." + group + ".*." + role)
                         .should().onlyHaveDependentClassesThat()
-                        .resideInAnyPackage(BASE + "." + group + ".*", BASE + "." + group + ".*." + role + "..")
+                        .resideInAnyPackage(BASE + "." + group + ".*", BASE + "." + group + ".*." + role)
                         .allowEmptyShould(true)
                         .because("a feature's " + role + "s only turn what the server calls into calls on the feature")
                         .check(plugin);
@@ -226,14 +231,18 @@ class ArchitectureTest {
             assertEquals(1, found.size(), feature + " needs exactly one Module, its entry point: " + found);
             String entry = found.getFirst();
             assertEquals(BASE + "." + feature, entry.substring(0, entry.lastIndexOf('.')), entry + " belongs in the feature's own package");
-            assertTrue(entry.endsWith(ENTRY_SUFFIX.get(group)), entry + " is named after its feature, ending with " + ENTRY_SUFFIX.get(group));
+            // ProfileModule for modules.profile, ZMenuHook for hooks.zmenu.
+            String expected = feature.substring(group.length() + 1) + ENTRY_SUFFIX.get(group);
+            assertTrue(
+                    entry.substring(entry.lastIndexOf('.') + 1).equalsIgnoreCase(expected),
+                    entry + " is named after its feature: " + expected + ", whatever the case");
         });
     }
 
     /**
      * What the bytecode cannot show: a constant of another part, copied into the class by javac,
      * as in {@code import static ...PlaceholderApiHook.PLUGIN_NAME}. The imports of every source
-     * file of the plugin follow the same layout.
+     * file of the plugin follow the same layout, the roles inside a feature included.
      */
     @Test
     void theImportsFollowTheLayoutToo() throws IOException {
@@ -250,7 +259,8 @@ class ArchitectureTest {
                     String target = unitOfImport(imported.group(1));
                     boolean outsideTheLayout = unit != null && !mayDependOn(unit, target);
                     boolean insideAnotherFeature = !target.equals(unit) && isBelowAFeature(imported.group(1));
-                    if (outsideTheLayout || insideAnotherFeature) {
+                    boolean intoAnotherRole = target.equals(unit) && reachesAnotherRole(MAIN.relativize(file), imported.group(1));
+                    if (outsideTheLayout || insideAnotherFeature || intoAnotherRole) {
                         violations.add(MAIN.relativize(file) + ": " + line.strip());
                     }
                 }
@@ -297,6 +307,19 @@ class ArchitectureTest {
     private static boolean isBelowAFeature(String name) {
         String[] parts = name.split("\\.", -1);
         return GROUPS.contains(parts[0]) && parts.length > 3 && Character.isLowerCase(parts[2].charAt(0));
+    }
+
+    /**
+     * Whether a file in a role of its feature, {@code storage} say, imports from the commands or the
+     * listeners of the same feature: only the feature's own package and the same role may.
+     */
+    private static boolean reachesAnotherRole(Path file, String name) {
+        String[] parts = name.split("\\.", -1);
+        if (file.getNameCount() < 4 || parts.length < 4) {
+            return false; // the file is in the feature's own package, or the import is not in a role
+        }
+        String role = file.getName(2).toString();
+        return List.of("command", "listener").contains(parts[2]) && !parts[2].equals(role);
     }
 
     /** The part an imported name belongs to; "root" for a class of the root package. */
