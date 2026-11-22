@@ -23,6 +23,7 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jspecify.annotations.Nullable;
 
@@ -94,7 +95,11 @@ public class FoliatePlugin extends JavaPlugin {
             subcommands.addAll(feature.subcommands());
         }
         // What /foliate does typed alone, if a feature gives it: nothing in the template does.
-        RootCommand command = new RootCommand("foliate", SubcommandProvider.bareCommandOf(features), subcommands);
+        // A subcommand typed without its arguments answers with its usage, one line per way to go on.
+        RootCommand.Usage usage = (sender, lines) -> lines.forEach(
+                line -> messages.send(sender, "command.usage", Placeholder.unparsed("usage", line)));
+        RootCommand command = new RootCommand(
+                "foliate", SubcommandProvider.bareCommandOf(features), subcommands, usage);
         // Built once now: a mistake in a subcommand's build() stops the start here, not in the
         // handler below, which the server runs later and whose failure would leave no command.
         command.build();
