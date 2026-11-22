@@ -17,6 +17,7 @@ import org.jspecify.annotations.Nullable;
  * Commands.argument("player", StringArgumentType.word())
  *         .suggests(OnlinePlayers.suggestions(server))
  *         .executes(context -> {
+ *             CommandSender sender = context.getSource().getSender();
  *             Player target = OnlinePlayers.find(server, sender, StringArgumentType.getString(context, "player"));
  *             ...
  *         })

@@ -95,6 +95,9 @@ public class FoliatePlugin extends JavaPlugin {
         }
         // What /foliate does typed alone, if a feature gives it: nothing in the template does.
         RootCommand command = new RootCommand("foliate", SubcommandProvider.bareCommandOf(features), subcommands);
+        // Built once now: a mistake in a subcommand's build() stops the start here, not in the
+        // handler below, which the server runs later and whose failure would leave no command.
+        command.build();
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> event.registrar()
                 .register(command.build(), "Shows information about Foliate and reloads it."));
 

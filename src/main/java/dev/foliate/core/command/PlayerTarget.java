@@ -3,6 +3,7 @@ package dev.foliate.core.command;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
 import dev.foliate.core.message.MessageService;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
@@ -80,6 +81,7 @@ public final class PlayerTarget {
     private final MessageService messages;
     private final String othersPermission;
     private final String section;
+    private final SuggestionProvider<CommandSourceStack> onlinePlayers;
 
     /**
      * @param othersPermission the node that allows targeting another player: the subcommand's
@@ -94,6 +96,7 @@ public final class PlayerTarget {
         this.messages = messages;
         this.othersPermission = othersPermission;
         this.section = section;
+        this.onlinePlayers = OnlinePlayers.suggestions(server);
     }
 
     /** The keys of the refusals, which {@code messages.yml} must hold under that section. */
@@ -129,7 +132,7 @@ public final class PlayerTarget {
                     if (!sender.hasPermission(othersPermission)) {
                         return suggestions.buildFuture();
                     }
-                    return OnlinePlayers.suggestions(server).getSuggestions(context, suggestions);
+                    return onlinePlayers.getSuggestions(context, suggestions);
                 })
                 .executes(context -> {
                     CommandSender sender = context.getSource().getSender();

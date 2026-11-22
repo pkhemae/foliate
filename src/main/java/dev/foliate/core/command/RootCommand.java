@@ -2,6 +2,7 @@ package dev.foliate.core.command;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
@@ -9,7 +10,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
-import net.kyori.adventure.text.Component;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -20,7 +20,12 @@ import org.jspecify.annotations.Nullable;
  * <p>The command can also do something when typed alone, such as {@code /fly}: that is a
  * subcommand too, given apart ({@link SubcommandProvider#bareCommand()}), with its own permission
  * and checks. Its name is not typed and not used. Without one, the command typed alone is
- * incomplete, as for any command of the game.
+ * incomplete, as for any command of the game. With one, the players who may only use subcommands
+ * still get that error when they type it alone, but their client no longer marks it incomplete
+ * while they type: Brigadier cannot make a node runnable for some sources only.
+ *
+ * <p>Mistakes in the subcommands' {@code build} are thrown by {@link #build()}: call it once while
+ * the plugin starts, so that they stop it there.
  */
 public final class RootCommand {
 
@@ -39,7 +44,8 @@ public final class RootCommand {
     /**
      * @param bare what the command does when typed alone, or null when it needs a subcommand. Its
      *     {@code build} is given a node of its own, on which it calls {@code executes} and adds no
-     *     argument: an argument after the command alone would compete with the subcommands' names
+     *     argument, redirect or fork: an argument after the command alone, a player's name say,
+     *     would compete with the subcommands' names
      * @throws IllegalArgumentException when there is neither a subcommand nor a bare command, or
      *     two subcommands share a name: the second would silently take over the first one's handler
      */
@@ -66,19 +72,18 @@ public final class RootCommand {
             LiteralArgumentBuilder<CommandSourceStack> node = Commands.literal(name);
             alone.build(node);
             Command<CommandSourceStack> action = node.getCommand();
-            if (action == null || !node.getArguments().isEmpty()) {
+            if (action == null || !node.getArguments().isEmpty() || node.getRedirect() != null) {
                 throw new IllegalStateException("What /" + name + " does alone must call executes() in its build(),"
-                        + " and add no argument: make a subcommand of what takes one");
+                        + " and add no argument nor redirect: make a subcommand of what takes one");
             }
             mayRunAlone = node.getRequirement().and(source -> allows(alone, source));
             Predicate<CommandSourceStack> allowed = mayRunAlone;
             // The root's requirement lets in whoever may use any subcommand: typed alone, the
-            // command still runs only for those allowed to run it alone, and is incomplete for the
-            // others, as it would be without a bare command.
+            // command still runs only for those allowed to run it alone, and fails for the others
+            // with the game's own error, as it would without a bare command.
             root.executes(context -> {
                 if (!allowed.test(context.getSource())) {
-                    context.getSource().getSender().sendMessage(Component.translatable("command.unknown.command"));
-                    return 0;
+                    throw CommandSyntaxException.BUILT_IN_EXCEPTIONS.dispatcherUnknownCommand().create();
                 }
                 return action.run(context);
             });

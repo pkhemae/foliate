@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
-import net.kyori.adventure.text.Component;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.jspecify.annotations.Nullable;
@@ -123,14 +122,36 @@ class RootCommandTest {
         subcommandOnly.addAttachment(plugin, "test.first", true);
         PlayerMock nothing = server.addPlayer();
 
-        assertEquals(0, commands.execute("foliate", new CommandSource(subcommandOnly)));
-        assertEquals(Component.translatable("command.unknown.command"), subcommandOnly.nextComponentMessage());
+        // The game's own failure, not a result of 0: execute store success and command blocks see it fail.
+        assertThrows(CommandSyntaxException.class, () -> commands.execute("foliate", new CommandSource(subcommandOnly)));
         assertEquals(1, commands.execute("foliate first", new CommandSource(subcommandOnly)));
         assertThrows(CommandSyntaxException.class, () -> commands.execute("foliate", new CommandSource(nothing)));
         assertEquals(0, runs.get());
     }
 
     /** As for a subcommand: what the bare command requires in its build, and its availability, hold too. */
+    @Test
+    void aPlayerAllowedOnlyTheBareCommandRunsItAndNoSubcommand() throws Exception {
+        CommandDispatcher<CommandSourceStack> commands = dispatcher(stub("fly", "test.fly"), stub("first", "test.first"));
+        PlayerMock player = server.addPlayer();
+        player.addAttachment(plugin, "test.fly", true);
+
+        assertEquals(1, commands.execute("foliate", new CommandSource(player)));
+        assertThrows(CommandSyntaxException.class, () -> commands.execute("foliate first", new CommandSource(player)));
+    }
+
+    /** Let in by a subcommand's permission, the console is still refused a bare command for players only. */
+    @Test
+    void theBareCommandsAvailabilityIsCheckedWhenItRuns() {
+        Subcommand playersOnly = stub("fly", "test.fly", node -> node.executes(context -> 1),
+                source -> source.getSender() instanceof Player);
+        CommandDispatcher<CommandSourceStack> commands = dispatcher(playersOnly, stub("first", "test.first"));
+
+        assertThrows(
+                CommandSyntaxException.class,
+                () -> commands.execute("foliate", new CommandSource(server.getConsoleSender())));
+    }
+
     @Test
     void theBareCommandKeepsItsOwnRequirementAndAvailability() {
         Subcommand required = stub("fly", "test.fly", node -> node.requires(source -> false).executes(context -> 1));
@@ -150,11 +171,14 @@ class RootCommandTest {
         Subcommand idle = stub("fly", "test.fly", node -> {});
         Subcommand withArgument = stub("fly", "test.fly", node -> node.executes(context -> 1)
                 .then(LiteralArgumentBuilder.<CommandSourceStack>literal("on").executes(context -> 1)));
+        Subcommand redirected = stub("fly", "test.fly", node -> node.executes(context -> 1)
+                .redirect(LiteralArgumentBuilder.<CommandSourceStack>literal("elsewhere").build()));
         Subcommand fine = stub("fly", "test.fly");
 
         assertThrows(IllegalArgumentException.class, () -> new RootCommand("foliate", null, List.of()));
         assertThrows(IllegalStateException.class, new RootCommand("foliate", idle, List.of())::build);
         assertThrows(IllegalStateException.class, new RootCommand("foliate", withArgument, List.of())::build);
+        assertThrows(IllegalStateException.class, new RootCommand("foliate", redirected, List.of())::build);
         // A command that only runs alone needs no subcommand.
         new RootCommand("foliate", fine, List.of()).build();
     }

@@ -34,13 +34,18 @@ public interface SubcommandProvider {
      */
     static @Nullable Subcommand bareCommandOf(Collection<? extends SubcommandProvider> providers) {
         Subcommand found = null;
+        SubcommandProvider giver = null;
         for (SubcommandProvider provider : providers) {
             Subcommand bare = provider.bareCommand();
-            if (bare != null && found != null) {
-                throw new IllegalStateException("Two modules give what the command does alone: "
-                        + found.getClass().getSimpleName() + " and " + bare.getClass().getSimpleName());
+            if (bare == null) {
+                continue;
             }
-            found = bare != null ? bare : found;
+            if (giver != null) {
+                throw new IllegalStateException("Two modules give what the command does alone: "
+                        + giver.getClass().getSimpleName() + " and " + provider.getClass().getSimpleName());
+            }
+            found = bare;
+            giver = provider;
         }
         return found;
     }
