@@ -57,8 +57,8 @@ import org.bukkit.entity.Player;
  */
 public final class PlayerTarget {
 
-    /** The name of the argument, as the usage shows it: {@code /foliate <thing> [<player>]}. */
-    private static final String ARGUMENT = "player";
+    /** The name of the argument unless told otherwise, as the client shows it: {@code /foliate <thing> [<player>]}. */
+    private static final String DEFAULT_ARGUMENT = "player";
 
     private static final List<String> MESSAGES = List.of("name-required", "unknown", "others-denied");
 
@@ -81,6 +81,7 @@ public final class PlayerTarget {
     private final MessageService messages;
     private final String othersPermission;
     private final String section;
+    private final String argument;
     private final SuggestionProvider<CommandSourceStack> onlinePlayers;
 
     /**
@@ -92,10 +93,21 @@ public final class PlayerTarget {
      *     else, a section swapped with the permission included
      */
     public PlayerTarget(Server server, MessageService messages, String othersPermission, String section) {
+        this(server, messages, othersPermission, section, DEFAULT_ARGUMENT);
+    }
+
+    /**
+     * @param argument the name of the player argument, which the client shows while typing and a
+     *     usage shows: {@code joueur} for a plugin in French, {@code /foliate profile [<joueur>]}
+     * @see #PlayerTarget(Server, MessageService, String, String)
+     */
+    public PlayerTarget(
+            Server server, MessageService messages, String othersPermission, String section, String argument) {
         this.server = server;
         this.messages = messages;
         this.othersPermission = othersPermission;
         this.section = section;
+        this.argument = argument;
         this.onlinePlayers = OnlinePlayers.suggestions(server);
     }
 
@@ -122,7 +134,7 @@ public final class PlayerTarget {
             }
             return Command.SINGLE_SUCCESS;
         });
-        node.then(Commands.argument(ARGUMENT, StringArgumentType.word())
+        node.then(Commands.argument(argument, StringArgumentType.word())
                 // The sender is the one who typed the command, whatever /execute as did: a
                 // requirement on it holds when the command runs.
                 .requires(source -> source.getSender().hasPermission(othersPermission))
@@ -136,7 +148,7 @@ public final class PlayerTarget {
                 })
                 .executes(context -> {
                     CommandSender sender = context.getSource().getSender();
-                    String typed = StringArgumentType.getString(context, ARGUMENT);
+                    String typed = StringArgumentType.getString(context, argument);
                     Player target = OnlinePlayers.find(server, sender, typed);
                     if (target == null) {
                         messages.send(sender, section + ".unknown", Placeholder.unparsed("player", typed));

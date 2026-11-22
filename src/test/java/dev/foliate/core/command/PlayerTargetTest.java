@@ -92,6 +92,30 @@ class PlayerTargetTest {
         MockBukkit.unmock();
     }
 
+    /** A plugin in another language names the argument in it: the client shows it, and the name still finds the player. */
+    @Test
+    void theArgumentCanBeNamedInAnotherLanguage() throws Exception {
+        MessageService messages = new MessageService(
+                directory.resolve("other"),
+                name -> new ByteArrayInputStream(MESSAGES.getBytes(StandardCharsets.UTF_8)),
+                NOPLogger.NOP_LOGGER);
+        messages.enable();
+        PlayerTarget target = new PlayerTarget(server, messages, PERMISSION_OTHERS, "test", "joueur");
+        LiteralArgumentBuilder<CommandSourceStack> node = LiteralArgumentBuilder.literal("thing");
+        target.addTo(node, (sender, player) -> runs.add(sender.getName() + " -> " + player.getName()));
+        CommandDispatcher<CommandSourceStack> french = new CommandDispatcher<>();
+        french.register(node);
+        PlayerMock alex = player("Alex");
+        alex.addAttachment(plugin, PERMISSION_OTHERS, true);
+        player("Sam");
+
+        french.execute("thing Sam", new CommandSource(alex));
+
+        assertEquals(List.of("Alex -> Sam"), runs);
+        assertEquals(List.of("joueur"), french.getRoot().getChild("thing").getChildren().stream()
+                .map(child -> child.getName()).toList());
+    }
+
     @Test
     void playerIsTheirOwnTarget() throws Exception {
         PlayerMock alex = player("Alex");

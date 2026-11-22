@@ -1,8 +1,13 @@
 package dev.foliate.core.command;
 
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.StringReader;
+import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.tree.CommandNode;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
@@ -10,6 +15,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
+import org.bukkit.command.CommandSender;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -24,14 +30,39 @@ import org.jspecify.annotations.Nullable;
  * still get that error when they type it alone, but their client no longer marks it incomplete
  * while they type: Brigadier cannot make a node runnable for some sources only.
  *
+ * <p>Given a {@link Usage}, a subcommand typed without all its arguments, such as
+ * {@code /foliate pay} or {@code /foliate pay Steve}, answers with what may follow instead of the game's
+ * "unknown or incomplete command". The usage is read from the subcommand's own tree, so it never
+ * goes stale, and shows only what the sender may use. It is written from the command's own name,
+ * however it was typed ({@code /foliate:foliate pay}, or an alias). A node reached through a
+ * redirect inside a subcommand shows none: the redirect still points at the tree as it was built.
+ *
  * <p>Mistakes in the subcommands' {@code build} are thrown by {@link #build()}: call it once while
  * the plugin starts, so that they stop it there.
  */
 public final class RootCommand {
 
+    /** Shows a sender the usage of a subcommand they typed without all its arguments. */
+    @FunctionalInterface
+    public interface Usage {
+
+        /**
+         * Shows the lines, on the sender's own thread: the command runs there.
+         *
+         * @param lines one per way to complete the command, each written in full from the root, as
+         *     Brigadier writes usages: {@code /foliate pay <player> <amount>}, {@code [optional]},
+         *     {@code (a|b)} for a choice
+         */
+        void show(CommandSender sender, List<String> lines);
+    }
+
+    /** Only for its usages, which need no root: {@link CommandDispatcher#getSmartUsage} reads the node given. */
+    private static final CommandDispatcher<CommandSourceStack> USAGES = new CommandDispatcher<>();
+
     private final String name;
     private final @Nullable Subcommand bare;
     private final List<Subcommand> subcommands;
+    private final @Nullable Usage usage;
 
     /**
      * @throws IllegalArgumentException when there is no subcommand, or two share a name: the
@@ -50,6 +81,15 @@ public final class RootCommand {
      *     two subcommands share a name: the second would silently take over the first one's handler
      */
     public RootCommand(String name, @Nullable Subcommand bare, List<Subcommand> subcommands) {
+        this(name, bare, subcommands, null);
+    }
+
+    /**
+     * @param usage what shows the usage of a subcommand typed without all its arguments, or null to
+     *     leave that to the game's "unknown or incomplete command"
+     * @see #RootCommand(String, Subcommand, List)
+     */
+    public RootCommand(String name, @Nullable Subcommand bare, List<Subcommand> subcommands, @Nullable Usage usage) {
         if (subcommands.isEmpty() && bare == null) {
             throw new IllegalArgumentException("/" + name + " needs at least one subcommand");
         }
@@ -62,6 +102,7 @@ public final class RootCommand {
         this.name = name;
         this.bare = bare;
         this.subcommands = List.copyOf(subcommands);
+        this.usage = usage;
     }
 
     public LiteralCommandNode<CommandSourceStack> build() {
@@ -103,9 +144,51 @@ public final class RootCommand {
             // replaces the previous condition, so a subcommand could otherwise drop its own
             // permission check without noticing.
             node.requires(node.getRequirement().and(source -> allows(subcommand, source)));
-            root.then(node);
+            LiteralCommandNode<CommandSourceStack> built = node.build();
+            root.then(usage == null ? built : withUsage(built, "/" + name + " " + subcommand.name(), usage));
         }
         return root.build();
+    }
+
+    /**
+     * A copy of the node and of what lies under it, where a node that does not run by itself but
+     * leads further shows the usage of what may follow. Requirements, suggestions and redirects are
+     * kept: {@link CommandNode#createBuilder} copies them.
+     *
+     * @param typed the command up to this node, as its usage reads: {@code /foliate pay <player>}
+     */
+    private static CommandNode<CommandSourceStack> withUsage(
+            CommandNode<CommandSourceStack> node, String typed, Usage usage) {
+        ArgumentBuilder<CommandSourceStack, ?> copy = node.createBuilder();
+        if (copy.getCommand() == null && copy.getRedirect() == null && !node.getChildren().isEmpty()) {
+            copy.executes(context -> showUsage(context, node, typed, usage));
+        }
+        for (CommandNode<CommandSourceStack> child : node.getChildren()) {
+            copy.then(withUsage(child, typed + " " + child.getUsageText(), usage));
+        }
+        return copy.build();
+    }
+
+    /**
+     * Shows what may follow the node. Read from the original node: whether a part is optional
+     * depends on whether its node runs by itself, which the copies that show a usage all do.
+     */
+    private static int showUsage(
+            CommandContext<CommandSourceStack> context, CommandNode<CommandSourceStack> node, String typed, Usage usage)
+            throws CommandSyntaxException {
+        List<String> lines = USAGES.getSmartUsage(node, context.getSource()).values().stream()
+                .map(rest -> typed + " " + rest)
+                .sorted()
+                .toList();
+        if (lines.isEmpty()) {
+            // Nothing that may follow is allowed to this sender: the command is as incomplete as
+            // before, and the game shows where it stops, as it would.
+            StringReader reader = new StringReader(context.getInput());
+            reader.setCursor(context.getRange().getEnd());
+            throw CommandSyntaxException.BUILT_IN_EXCEPTIONS.dispatcherUnknownCommand().createWithContext(reader);
+        }
+        usage.show(context.getSource().getSender(), lines);
+        return 0;
     }
 
     private static boolean allows(Subcommand subcommand, CommandSourceStack source) {
