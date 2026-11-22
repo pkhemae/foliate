@@ -8,7 +8,7 @@ prefix: "<dark_gray>[<aqua>Foliate</aqua>]</dark_gray> "
 
 command:
   # A subcommand typed without all its arguments: <usage> is what to type, such as
-  # "/foliate pay <player> <amount>". One line per way to complete it.
+  # "/foliate <subcommand> <player> <amount>". One line per way to complete it.
   usage: "<prefix><red>Usage: <white><usage>"
   info:
     - "<prefix><white>Foliate <aqua><version></aqua>"

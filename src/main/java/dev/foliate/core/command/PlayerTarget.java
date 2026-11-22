@@ -98,10 +98,11 @@ public final class PlayerTarget {
 
     /**
      * @param argument the name of the player argument, which the client shows while typing and a
-     *     usage shows: {@code joueur} for a plugin in French, {@code /fly time [<joueur>]}
+     *     usage shows: {@code joueur} for a plugin in French, {@code /foliate profile [<joueur>]}
      * @see #PlayerTarget(Server, MessageService, String, String)
      */
-    public PlayerTarget(Server server, MessageService messages, String othersPermission, String section, String argument) {
+    public PlayerTarget(
+            Server server, MessageService messages, String othersPermission, String section, String argument) {
         this.server = server;
         this.messages = messages;
         this.othersPermission = othersPermission;

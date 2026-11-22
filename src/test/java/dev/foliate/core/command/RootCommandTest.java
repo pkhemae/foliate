@@ -197,7 +197,7 @@ class RootCommandTest {
         assertThrows(IllegalStateException.class, () -> SubcommandProvider.bareCommandOf(List.of(provider(fly), provider(walk))));
     }
 
-    /** {@code /foliate add <player> <minutes>}, with suggestions, as an adjusting subcommand builds it. */
+    /** {@code /foliate add <player> <minutes>}, with suggestions, as a subcommand with two arguments builds it. */
     private static Subcommand add() {
         return stub("add", "test.add", node -> node.then(Commands.argument("player", StringArgumentType.word())
                 .suggests((context, suggestions) -> suggestions.suggest("Steve").buildFuture())
