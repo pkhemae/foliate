@@ -3,6 +3,8 @@ package dev.foliate.modules.profile;
 import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.command.SubcommandProvider;
 import dev.foliate.core.message.MessageService;
+import dev.foliate.modules.profile.command.ProfileCommand;
+import dev.foliate.modules.profile.storage.ProfileRepository;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
@@ -69,7 +71,7 @@ public final class ProfileModule implements Module, SubcommandProvider {
 
     @Override
     public String name() {
-        return "profiles";
+        return "profile";
     }
 
     @Override

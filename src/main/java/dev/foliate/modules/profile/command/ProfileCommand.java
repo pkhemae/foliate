@@ -1,9 +1,11 @@
-package dev.foliate.modules.profile;
+package dev.foliate.modules.profile.command;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.foliate.core.command.PlayerTarget;
 import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.message.MessageService;
+import dev.foliate.modules.profile.PlayerProfile;
+import dev.foliate.modules.profile.ProfileModule;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -27,15 +29,16 @@ import org.bukkit.entity.Player;
  *       This class only says what to show;
  *   <li>it reads the profile from the cache: a command runs on the region of whoever typed it,
  *       so it must never wait for the database;
- *   <li>it lives with the feature it shows, in the module's package, and the module offers it
- *       ({@link ProfileModule#subcommands()}): it exists exactly when profiles are loaded.
+ *   <li>it lives with the feature it shows, in the module's {@code command} package, and the
+ *       module offers it ({@link ProfileModule#subcommands()}): it exists exactly when profiles
+ *       are loaded.
  * </ul>
  *
  * <p>{@link Subcommand} says another player must be reached through the schedulers. Here only
  * their name and unique id are read, which are safe from any thread, and the profile comes from
  * the cache: nothing of the player's body, location or world is touched.
  */
-final class ProfileCommand implements Subcommand {
+public final class ProfileCommand implements Subcommand {
 
     /** To see one's own profile. Declared in the plugin.yml with the other nodes. */
     static final String PERMISSION = "foliate.command.profile";
@@ -51,7 +54,7 @@ final class ProfileCommand implements Subcommand {
     private final PlayerTarget target;
 
     /** @param profiles the cached profile of an online player, as {@link ProfileModule#find} gives it */
-    ProfileCommand(Function<UUID, Optional<PlayerProfile>> profiles, MessageService messages, Server server) {
+    public ProfileCommand(Function<UUID, Optional<PlayerProfile>> profiles, MessageService messages, Server server) {
         this.profiles = profiles;
         this.messages = messages;
         this.target = new PlayerTarget(server, messages, PERMISSION_OTHERS, "command.profile");

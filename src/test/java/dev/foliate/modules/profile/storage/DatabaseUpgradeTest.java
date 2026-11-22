@@ -1,4 +1,4 @@
-package dev.foliate.modules.profile;
+package dev.foliate.modules.profile.storage;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -9,6 +9,7 @@ import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.Database;
 import dev.foliate.core.storage.SqlDump;
 import dev.foliate.core.storage.StorageSettings;
+import dev.foliate.modules.profile.PlayerProfile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URISyntaxException;

@@ -13,6 +13,7 @@ import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleSkippedException;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
 import dev.foliate.core.storage.Database;
+import dev.foliate.modules.profile.storage.ProfileRepository;
 import dev.foliate.testing.CommandSource;
 import dev.foliate.testing.PluginYml;
 import dev.foliate.testing.TestCommands;

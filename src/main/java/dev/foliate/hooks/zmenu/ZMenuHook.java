@@ -2,6 +2,7 @@ package dev.foliate.hooks.zmenu;
 
 import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.command.SubcommandProvider;
+import dev.foliate.hooks.zmenu.command.MenuCommand;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.scheduler.EntityRetiredException;

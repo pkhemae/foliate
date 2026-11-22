@@ -1,9 +1,10 @@
-package dev.foliate.hooks.zmenu;
+package dev.foliate.hooks.zmenu.command;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.message.MessageService;
+import dev.foliate.hooks.zmenu.ZMenuHook;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.util.function.BiConsumer;
 import org.bukkit.entity.Player;
@@ -16,7 +17,7 @@ import org.bukkit.entity.Player;
  * with {@code /execute as <player> run foliate menu}. Whether the command runs as a player is only
  * known when it runs, so that is checked then, not by {@link Subcommand#isAvailableTo}.
  */
-final class MenuCommand implements Subcommand {
+public final class MenuCommand implements Subcommand {
 
     /** Declared in the plugin.yml with the other nodes. */
     static final String PERMISSION = "foliate.command.menu";
@@ -27,7 +28,7 @@ final class MenuCommand implements Subcommand {
     private final MessageService messages;
 
     /** @param open opens a menu for a player, from any thread: {@link ZMenuHook#open} */
-    MenuCommand(BiConsumer<Player, String> open, MessageService messages) {
+    public MenuCommand(BiConsumer<Player, String> open, MessageService messages) {
         this.open = open;
         this.messages = messages;
     }
