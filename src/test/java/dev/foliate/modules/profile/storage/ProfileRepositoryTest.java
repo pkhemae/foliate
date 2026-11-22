@@ -1,4 +1,4 @@
-package dev.foliate.modules.profile;
+package dev.foliate.modules.profile.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.Database;
+import dev.foliate.modules.profile.PlayerProfile;
+import dev.foliate.modules.profile.ProfileModule;
 import java.nio.file.Path;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;

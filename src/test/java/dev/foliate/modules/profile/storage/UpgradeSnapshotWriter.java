@@ -1,4 +1,4 @@
-package dev.foliate.modules.profile;
+package dev.foliate.modules.profile.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -7,6 +7,7 @@ import dev.foliate.FoliatePlugin;
 import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.Database;
+import dev.foliate.modules.profile.PlayerProfile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.ResultSet;

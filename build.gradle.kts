@@ -62,7 +62,7 @@ val clientTyped: String = providers.gradleProperty("clientTyped").getOrElse("")
 // The modules the server test must find enabled. Without this, a hook that silently failed to load
 // (its plugin could not download its libraries, say) would still give a green run.
 val expectedModules: String =
-    (listOf("config", "messages", "storage", "profiles", "scoreboard") +
+    (listOf("config", "messages", "storage", "profile", "scoreboard") +
         if (withHooks) listOf("placeholderapi", "zmenu") else emptyList()).joinToString(",")
 
 java {

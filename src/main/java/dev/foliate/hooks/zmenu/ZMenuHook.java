@@ -6,6 +6,7 @@ import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
+import dev.foliate.hooks.zmenu.command.MenuCommand;
 import fr.maxlego08.menu.api.Inventory;
 import fr.maxlego08.menu.api.InventoryManager;
 import fr.maxlego08.menu.api.MenuPlugin;
@@ -180,7 +181,7 @@ public final class ZMenuHook implements Module, SubcommandProvider {
             schedulers.entity(player).executeOrRun(() -> {
                 InventoryManager manager = this.manager;
                 if (manager == null) {
-                    messages.send(player, "menu.unavailable");
+                    messages.send(player, "zmenu.unavailable");
                     return;
                 }
                 // As zMenu has it now, which a /zm reload may have replaced since it was loaded.
@@ -191,13 +192,13 @@ public final class ZMenuHook implements Module, SubcommandProvider {
                     // zMenu keeps the menus in a plain list, which a reload on the global region
                     // may be changing right now: the player can simply try again.
                     plugin.getSLF4JLogger().debug("Looking up the menu '{}' in zMenu failed", menu, e);
-                    messages.send(player, "menu.unavailable");
+                    messages.send(player, "zmenu.unavailable");
                     return;
                 }
                 if (inventory.isPresent()) {
                     manager.openInventory(player, inventory.get());
                 } else {
-                    messages.send(player, "menu.unknown", Placeholder.unparsed("menu", menu));
+                    messages.send(player, "zmenu.unknown", Placeholder.unparsed("menu", menu));
                 }
             });
         } catch (EntityRetiredException gone) {

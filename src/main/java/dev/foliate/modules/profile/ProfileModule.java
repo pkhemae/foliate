@@ -9,6 +9,8 @@ import dev.foliate.core.placeholder.PlaceholderRegistry;
 import dev.foliate.core.player.PlayerLifecycle;
 import dev.foliate.core.player.PlayerStore;
 import dev.foliate.core.storage.Database;
+import dev.foliate.modules.profile.command.ProfileCommand;
+import dev.foliate.modules.profile.storage.ProfileRepository;
 import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
@@ -69,7 +71,7 @@ public final class ProfileModule implements Module, SubcommandProvider {
 
     @Override
     public String name() {
-        return "profiles";
+        return "profile";
     }
 
     @Override

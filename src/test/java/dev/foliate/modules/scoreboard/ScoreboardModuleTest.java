@@ -20,7 +20,6 @@ import net.kyori.adventure.text.minimessage.tag.Tag;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.entity.Player;
-import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.Plugin;
@@ -356,10 +355,10 @@ class ScoreboardModuleTest {
     @Test
     void noBoardIsKeptForAPlayerWhoseSchedulerIsRetired() {
         PlayerMock leaving = server.addPlayer("Leaving");
-        scoreboard.onQuit(new PlayerQuitEvent(leaving, Component.empty(), PlayerQuitEvent.QuitReason.DISCONNECTED));
+        scoreboard.scoreboards().hide(leaving);
         schedulers.retire(leaving);
 
-        scoreboard.onJoin(new PlayerJoinEvent(leaving, Component.empty()));
+        scoreboard.scoreboards().show(leaving);
 
         assertFalse(scoreboard.hasBoard(leaving.getUniqueId()));
         assertTrue(boards.stream().allMatch(board -> board.deleted));
@@ -390,7 +389,7 @@ class ScoreboardModuleTest {
 
         scoreboard.disable();
         schedulers.tick(1);
-        scoreboard.onJoin(new PlayerJoinEvent(player, Component.empty()));
+        scoreboard.scoreboards().show(player);
 
         assertFalse(scoreboard.hasBoard(player.getUniqueId()));
         assertTrue(boards.stream().allMatch(board -> board.deleted), boards.toString());

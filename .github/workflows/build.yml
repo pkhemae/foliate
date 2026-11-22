@@ -190,8 +190,9 @@ jobs:
       - name: The tests were not skipped
         run: |
           for test in ProfileStorageOnMysqlTest DatabaseUpgradeTest; do
-            report=build/test-results/test/TEST-dev.foliate.modules.profile.$test.xml
-            if ! grep -qE 'tests="[1-9][0-9]*" skipped="0" failures="0" errors="0"' "$report"; then
+            # Found by its class name: the package does not matter here.
+            report=$(find build/test-results/test -name "TEST-*.$test.xml")
+            if [ -z "$report" ] || ! grep -qE 'tests="[1-9][0-9]*" skipped="0" failures="0" errors="0"' "$report"; then
               echo "$test did not run on the database server, or was skipped"
               exit 1
             fi

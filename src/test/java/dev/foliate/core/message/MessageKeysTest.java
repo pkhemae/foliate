@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Test;
  * would show as the key itself, and only to whoever happens to trigger it.
  *
  * <p>Read from the sources: the calls of {@link MessageService} whose key is a string literal,
- * such as {@code messages.send(player, "menu.unknown", ...)}, and the sections given to a
+ * such as {@code messages.send(player, "zmenu.unknown", ...)}, and the sections given to a
  * {@link PlayerTarget}, which reads its refusals under them. A key held in a variable cannot be
  * checked here; a section must therefore be written inline, and anything else fails.
  */

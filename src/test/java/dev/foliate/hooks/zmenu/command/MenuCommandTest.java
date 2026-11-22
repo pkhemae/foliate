@@ -1,4 +1,4 @@
-package dev.foliate.hooks.zmenu;
+package dev.foliate.hooks.zmenu.command;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

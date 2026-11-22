@@ -1,7 +1,8 @@
-package dev.foliate.modules.profile;
+package dev.foliate.modules.profile.storage;
 
 import dev.foliate.core.player.PlayerRepository;
 import dev.foliate.core.storage.SqlErrors;
+import dev.foliate.modules.profile.PlayerProfile;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -16,7 +17,7 @@ import java.util.UUID;
  * database, a player who switches servers can be loaded by the next one before the previous one
  * saved their quit: the Storage page of the wiki describes this limit and how to lift it.
  */
-final class ProfileRepository implements PlayerRepository<PlayerProfile> {
+public final class ProfileRepository implements PlayerRepository<PlayerProfile> {
 
     @Override
     public Optional<PlayerProfile> find(Connection connection, UUID id) throws SQLException {
