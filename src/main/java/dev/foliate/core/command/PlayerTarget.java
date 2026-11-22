@@ -7,7 +7,6 @@ import dev.foliate.core.message.MessageService;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import java.util.List;
-import java.util.Locale;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
@@ -31,7 +30,7 @@ import org.bukkit.entity.Player;
  *       change. A player who is offline, or whom the sender cannot see (one who vanished), is
  *       reported as not online;
  *   <li>the players online are suggested while typing, only to a sender with {@code others}, and
- *       only those the sender can see.
+ *       only those the sender can see (see {@link OnlinePlayers}).
  * </ul>
  *
  * <p>The refusals are messages of the subcommand's own, in one section of {@code messages.yml}:
@@ -130,19 +129,13 @@ public final class PlayerTarget {
                     if (!sender.hasPermission(othersPermission)) {
                         return suggestions.buildFuture();
                     }
-                    String typed = suggestions.getRemainingLowerCase();
-                    for (Player online : server.getOnlinePlayers()) {
-                        if (canSee(sender, online) && online.getName().toLowerCase(Locale.ROOT).startsWith(typed)) {
-                            suggestions.suggest(online.getName());
-                        }
-                    }
-                    return suggestions.buildFuture();
+                    return OnlinePlayers.suggestions(server).getSuggestions(context, suggestions);
                 })
                 .executes(context -> {
                     CommandSender sender = context.getSource().getSender();
                     String typed = StringArgumentType.getString(context, ARGUMENT);
-                    Player target = server.getPlayerExact(typed);
-                    if (target == null || !canSee(sender, target)) {
+                    Player target = OnlinePlayers.find(server, sender, typed);
+                    if (target == null) {
                         messages.send(sender, section + ".unknown", Placeholder.unparsed("player", typed));
                     } else {
                         action.run(sender, target);
@@ -153,10 +146,5 @@ public final class PlayerTarget {
 
     private static boolean isSelf(CommandSender sender, Player player) {
         return sender instanceof Player self && self.getUniqueId().equals(player.getUniqueId());
-    }
-
-    /** A player the sender cannot see, such as one who vanished, is treated as not online. */
-    private static boolean canSee(CommandSender sender, Player player) {
-        return !(sender instanceof Player viewer) || viewer.canSee(player);
     }
 }
