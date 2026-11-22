@@ -1,7 +1,6 @@
 package dev.foliate.modules.scoreboard;
 
 import dev.foliate.core.message.MessageService;
-import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.core.scheduler.TaskHandle;
 import java.time.Duration;
@@ -108,12 +107,9 @@ public final class Scoreboards {
     /** Applies the current settings to everyone online, each on their own scheduler. */
     private void applyToAll() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            try {
-                schedulers.entity(player).executeOrRun(() -> apply(player));
-            } catch (EntityRetiredException leaving) {
-                // Still listed as online but already on the way out: the quit event removes the
-                // board. Carry on with the other players.
-            }
+            // Dropped for a player still listed as online but already on the way out: the quit
+            // event removes the board. Carry on with the other players.
+            schedulers.entity(player).executeOrDrop(() -> apply(player));
         }
     }
 

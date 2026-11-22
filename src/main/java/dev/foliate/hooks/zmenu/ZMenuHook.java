@@ -4,7 +4,6 @@ import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.command.SubcommandProvider;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
-import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.hooks.zmenu.command.MenuCommand;
 import fr.maxlego08.menu.api.Inventory;
@@ -177,33 +176,30 @@ public final class ZMenuHook implements Module, SubcommandProvider {
      * @param menu the file name of the menu under {@code inventories/}, without the extension
      */
     public void open(Player player, String menu) {
-        try {
-            schedulers.entity(player).executeOrRun(() -> {
-                InventoryManager manager = this.manager;
-                if (manager == null) {
-                    messages.send(player, "zmenu.unavailable");
-                    return;
-                }
-                // As zMenu has it now, which a /zm reload may have replaced since it was loaded.
-                Optional<Inventory> inventory;
-                try {
-                    inventory = MENUS.contains(menu) ? manager.getInventory(plugin, menu) : Optional.empty();
-                } catch (RuntimeException e) {
-                    // zMenu keeps the menus in a plain list, which a reload on the global region
-                    // may be changing right now: the player can simply try again.
-                    plugin.getSLF4JLogger().debug("Looking up the menu '{}' in zMenu failed", menu, e);
-                    messages.send(player, "zmenu.unavailable");
-                    return;
-                }
-                if (inventory.isPresent()) {
-                    manager.openInventory(player, inventory.get());
-                } else {
-                    messages.send(player, "zmenu.unknown", Placeholder.unparsed("menu", menu));
-                }
-            });
-        } catch (EntityRetiredException gone) {
-            // The player left: nothing to open.
-        }
+        // Dropped when the player has left: nothing to open.
+        schedulers.entity(player).executeOrDrop(() -> {
+            InventoryManager manager = this.manager;
+            if (manager == null) {
+                messages.send(player, "zmenu.unavailable");
+                return;
+            }
+            // As zMenu has it now, which a /zm reload may have replaced since it was loaded.
+            Optional<Inventory> inventory;
+            try {
+                inventory = MENUS.contains(menu) ? manager.getInventory(plugin, menu) : Optional.empty();
+            } catch (RuntimeException e) {
+                // zMenu keeps the menus in a plain list, which a reload on the global region
+                // may be changing right now: the player can simply try again.
+                plugin.getSLF4JLogger().debug("Looking up the menu '{}' in zMenu failed", menu, e);
+                messages.send(player, "zmenu.unavailable");
+                return;
+            }
+            if (inventory.isPresent()) {
+                manager.openInventory(player, inventory.get());
+            } else {
+                messages.send(player, "zmenu.unknown", Placeholder.unparsed("menu", menu));
+            }
+        });
     }
 
     /**

@@ -177,6 +177,23 @@ class PlayerStoreTest {
         assertEquals(106, stored(id).orElseThrow().visits());
     }
 
+    /** The same with a change made in the cache only: the old session's quit saves it, and hands it over. */
+    @Test
+    void cachedChangeMadeBetweenASecondLoginAndTheKickIsKept() throws Exception {
+        UUID id = put(new Visit(UUID.randomUUID(), "Alex", 10, 20, 4));
+        store.beginLogin(id, "Alex");
+        store.join(id, "Alex"); // 5
+
+        store.beginLogin(id, "Alex"); // copies 5
+        store.updateCached(id, visit -> withVisits(visit, visit.visits() + 100)); // 105, cache only
+        store.quit(id); // saves 105
+        store.join(id, "Alex");
+        flush();
+
+        assertEquals(106, store.find(id).orElseThrow().visits());
+        assertEquals(106, stored(id).orElseThrow().visits());
+    }
+
     /**
      * The server disconnects the old session before the new one joins. Were the new one to join
      * first, it would still start from the old session's value, not from the older copy taken at

@@ -65,10 +65,12 @@ public interface TaskContext extends Executor {
      * plugin is disabled and the server refuses new tasks, the task is dropped and false returned,
      * where {@code executeOrRun} would throw. Any other failure still throws: it is a bug.
      *
-     * <p>True means the task ran or was accepted. An accepted task can still be dropped, if the
-     * entity goes before it runs, as with {@link #execute}: it never runs for an entity that is gone.
+     * <p>False means the task was refused at once and will never run. True promises less: the task
+     * ran, or was accepted and may still be skipped, if the entity goes or the plugin is disabled
+     * before it runs (Folia accepts region and entity tasks from a disabled plugin and skips them).
+     * Do not rely on true to know that the work was done.
      *
-     * @return whether the task ran or was accepted
+     * @return false when the task was refused at once; true when it ran or was accepted
      */
     default boolean executeOrDrop(Runnable task) {
         try {

@@ -5,13 +5,11 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleManager;
-import dev.foliate.core.scheduler.EntityRetiredException;
 import dev.foliate.core.scheduler.Schedulers;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.util.concurrent.CompletableFuture;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.CommandSender;
-import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.Plugin;
 import org.slf4j.Logger;
 
@@ -97,15 +95,8 @@ public final class ReloadCommand implements Subcommand {
         if (!plugin.isEnabled()) {
             return;
         }
-        try {
-            schedulers.sender(sender).executeOrRun(reply);
-        } catch (EntityRetiredException gone) {
-            // The sender left before the reload finished: nobody to tell.
-        } catch (IllegalPluginAccessException disabled) {
-            // Disabled between the check above and now: the same case.
-            if (plugin.isEnabled()) {
-                throw disabled;
-            }
-        }
+        // Dropped when the sender left before the reload finished, or the plugin was disabled
+        // between the check above and now: nobody to tell.
+        schedulers.sender(sender).executeOrDrop(reply);
     }
 }

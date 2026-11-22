@@ -47,7 +47,8 @@ import org.slf4j.Logger;
  *       none of them may block: {@link #find} reads an immutable value from a concurrent map.
  *   <li><b>Write behind, in order.</b> A change replaces the cached value at once, and its save
  *       is queued behind the player's previous reads and saves ({@link SaveQueue},
- *       {@link PlayerQueues}).
+ *       {@link PlayerQueues}). A change made with {@link #updateCached} queues no save: the next
+ *       one, the quit or the shutdown writes it, since every save takes the cached value.
  *   <li><b>Write the latest value only.</b> Changes made while a save waits for a storage thread
  *       join it instead of queuing saves of their own ({@link SaveQueue}).
  *   <li><b>Retry what failed.</b> A save that fails for a reason known to pass is tried again
