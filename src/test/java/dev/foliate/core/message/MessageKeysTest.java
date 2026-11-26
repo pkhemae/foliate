@@ -29,7 +29,8 @@ import org.junit.jupiter.api.Test;
  * would show as the key itself, and only to whoever happens to trigger it.
  *
  * <p>Read from the sources: the calls of {@link MessageService} whose key is a string literal,
- * such as {@code messages.send(player, "zmenu.unknown", ...)}, and the sections given to a
+ * such as {@code messages.send(player, "zmenu.unknown", ...)}, the keys a {@link RefusedException}
+ * is made with, and the sections given to a
  * {@link PlayerTarget}, which reads its refusals under them. A key held in a variable cannot be
  * checked here; a section must therefore be written inline, and anything else fails.
  */
@@ -52,6 +53,9 @@ class MessageKeysTest {
      * the audience methods of the same name, which take no text.
      */
     private static final Pattern CALL = Pattern.compile("\\.\\s*(\\w+)\\s*\\(");
+
+    /** A {@link RefusedException}, whose first argument is the key of the message that says why. */
+    private static final Pattern REFUSAL = Pattern.compile("new\\s+RefusedException\\s*\\(");
 
     /** A {@link PlayerTarget}, whose fourth argument is the section of its messages. */
     private static final Pattern PLAYER_TARGET = Pattern.compile("new\\s+PlayerTarget\\s*\\(");
@@ -122,6 +126,14 @@ class MessageKeysTest {
         try (Stream<Path> files = Files.walk(SOURCES)) {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
                 String source = read(file);
+                Matcher refusal = REFUSAL.matcher(source);
+                while (refusal.find()) {
+                    List<String> arguments = arguments(source, refusal.end());
+                    Matcher literal = arguments.isEmpty() ? null : LITERAL.matcher(arguments.getFirst());
+                    if (literal != null && literal.matches()) {
+                        used.putIfAbsent(literal.group(1), SOURCES.relativize(file).toString());
+                    }
+                }
                 Matcher call = CALL.matcher(source);
                 while (call.find()) {
                     List<Integer> positions = KEY_ARGUMENTS.get(call.group(1));
