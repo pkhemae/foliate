@@ -58,8 +58,7 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
 ## Laying out a feature
 
 A feature is a module (`modules/<feature>`) or a hook (`hooks/<plugin>`). Every feature is laid out
-the same way, and grows the same way: by the parts of its domain, as well-kept plugins such as
-zMenu are, never by kinds of code.
+the same way, and grows the same way: by the parts of its domain, never by kinds of code.
 
 ```
 modules/elytra/
@@ -67,7 +66,7 @@ modules/elytra/
 │                            offers its subcommands, lists its MIGRATIONS. Wiring only, no logic
 ├── ElytraSettings.java      its section of config.yml, when it has one
 ├── ElytraPlaceholders.java  its placeholders, when it has some
-├── ElytraGame.java          what the whole feature shares: its main state, values, exceptions
+├── ElytraGame.java …        the classes the whole feature shares: its main state, its values
 ├── command/                 roles: one subcommand per class (StartCommand, JoinCommand)
 ├── listener/                       one listener per topic (RaceListener, EditorListener)
 ├── storage/                        the repositories, and what only the SQL needs
@@ -89,7 +88,8 @@ modules/elytra/
 - **One level.** Nothing goes below a role or a concept. A concept past 15 classes is two concepts;
   a feature that needs a deeper tree is two features, talking through `contracts`.
 - **Concepts are layered.** When `race` uses `course`, `course` does not use `race`, directly or
-  through a third. The feature's own package and its roles may use any concept, and be used by them.
+  through another concept. The feature's own package and its roles may use any concept; a concept
+  may use the feature's own package and `storage`, never its commands or listeners.
 - **Names:**
   - The package is the feature's name, one lowercase word (`fly`, `profile`), which `name()`
     also returns.
@@ -108,7 +108,7 @@ modules/elytra/
   from one feature to another.
 - **Visibility.** What lies below a feature's package is public so that its own package can reach
   it, but only the feature uses it. From outside, only the feature's own package is known, and
-  nothing but that package depends on its commands and listeners.
+  nothing but that package and classes of the same role depend on its commands and listeners.
 - **Resources follow the feature's name:**
   - `migrations/<feature>/NNN_<what>.sql`;
   - in `messages.yml`, its messages under `<feature>.` and those of its subcommands under
@@ -118,10 +118,10 @@ modules/elytra/
     `<plugin>.<feature>.<what>` for the rest.
 - **Tests** mirror the package of the class they test. A feature's check on a real server is
   `<Feature>Check`, in the same package of the `serverTest` source set.
-- **`ArchitectureTest` checks all of this:**
-  - the roles, and where commands and listeners live and how they are named;
+- **`ArchitectureTest` checks:**
+  - where commands and listeners live and how they are named;
   - the names of concepts, the single level and the sizes;
-  - the circles between concepts;
+  - the circles between concepts, in the bytecode and in the imports;
   - the entry points, and who depends on what.
 
 ## Writing a feature
@@ -133,13 +133,14 @@ modules/elytra/
 - **Refusals.** The domain refuses what cannot be done with `core.message.RefusedException` (a
   message key, written inline, and its arguments). The command that asked catches it and tells
   the sender. Keep the rule and its reason together, and never let a command check a rule that the
-  domain also checks.
+  domain also checks. It is a checked exception: a task given to a scheduler catches it inside.
 - **Settings.** There is one class per section of `config.yml`, with nested classes for its
   sub-sections. It is checked when loaded (`InvalidSettingException`) and read through the
   supplier at each use, so that a reload takes effect. Something that must not change while it
   runs (a game's rules) is read once when it starts, into a value of its own.
 - **Files the feature owns** sit under `<feature>/` in the data folder and are read and written off
-  the tick threads. Data several servers may share goes in the database.
+  the tick threads. A hook keeps what its plugin reads where that plugin looks: zMenu's menus in
+  `inventories/`. Data several servers may share goes in the database.
 - **A family of similar features** (the events of an event plugin) shares its skeleton through
   `core` when that skeleton knows nothing of any one of them. Each feature stays complete on its
   own.

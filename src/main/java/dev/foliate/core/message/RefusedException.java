@@ -17,7 +17,8 @@ import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
  * }</pre>
  *
  * <p>Write the key inline, as a string literal: {@code MessageKeysTest} then checks that it is in
- * {@code messages.yml}. No stack trace is filled in: it is an answer, not a failure.
+ * {@code messages.yml}, which fails on anything else. No stack trace is filled in: it is an
+ * answer, not a failure. Being checked, it is caught inside a task given to a scheduler.
  */
 public final class RefusedException extends Exception {
 
@@ -38,8 +39,12 @@ public final class RefusedException extends Exception {
         return messageKey;
     }
 
-    /** What the message is given, such as {@code Placeholder.unparsed("player", name)}. */
+    /**
+     * What the message is given, such as {@code Placeholder.unparsed("player", name)}. None after
+     * a deserialization, which they do not survive.
+     */
     public TagResolver[] arguments() {
-        return arguments.clone();
+        TagResolver[] given = arguments;
+        return given == null ? new TagResolver[0] : given.clone();
     }
 }

@@ -2,6 +2,7 @@ package dev.foliate.core.message;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -23,6 +24,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.opentest4j.AssertionFailedError;
 
 /**
  * Every message the code sends by a literal key is written in messages.yml. A key that is not
@@ -126,13 +128,8 @@ class MessageKeysTest {
         try (Stream<Path> files = Files.walk(SOURCES)) {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
                 String source = read(file);
-                Matcher refusal = REFUSAL.matcher(source);
-                while (refusal.find()) {
-                    List<String> arguments = arguments(source, refusal.end());
-                    Matcher literal = arguments.isEmpty() ? null : LITERAL.matcher(arguments.getFirst());
-                    if (literal != null && literal.matches()) {
-                        used.putIfAbsent(literal.group(1), SOURCES.relativize(file).toString());
-                    }
+                for (String key : refusalKeys(source, SOURCES.relativize(file).toString())) {
+                    used.putIfAbsent(key, SOURCES.relativize(file).toString());
                 }
                 Matcher call = CALL.matcher(source);
                 while (call.find()) {
@@ -153,6 +150,36 @@ class MessageKeysTest {
             }
         }
         return used;
+    }
+
+    /**
+     * The keys {@code new RefusedException(...)} is made with in a source. A key held in a variable
+     * would escape the check, so it fails: the key is written inline.
+     */
+    static List<String> refusalKeys(String source, String file) {
+        List<String> keys = new ArrayList<>();
+        Matcher refusal = REFUSAL.matcher(source);
+        while (refusal.find()) {
+            String key = arguments(source, refusal.end()).getFirst();
+            Matcher literal = LITERAL.matcher(key);
+            if (!literal.matches()) {
+                fail(file + ": new RefusedException(...) is given '" + key
+                        + "'. Write the key of its message inline, as a string literal, so that it can be checked.");
+            }
+            keys.add(literal.group(1));
+        }
+        return keys;
+    }
+
+    @Test
+    void refusalsAreReadWithTheirKeyAndAKeyInAVariableFails() {
+        String source = """
+                throw new RefusedException("race.full", Placeholder.unparsed("n", "3"));
+                throw new  RefusedException ( "race.closed" );
+                """;
+
+        assertEquals(List.of("race.full", "race.closed"), refusalKeys(source, "Race.java"));
+        assertThrows(AssertionFailedError.class, () -> refusalKeys("throw new RefusedException(FULL);", "Race.java"));
     }
 
     /**
