@@ -100,7 +100,8 @@ the edit mode first, sits above them, in the feature's own package: in `course`,
   - The package is the feature's name, one lowercase word (`fly`, `profile`), which `name()`
     also returns.
   - The entry point is `<Feature>Module`, or `<Plugin>Hook` for a hook. Then come
-    `<Feature>Settings`, `<Feature>Placeholders`, `<Feature>Repository` and `<Reason>Exception`.
+    `<Feature>Settings`, `<Feature>Placeholders`, `<Feature>Repository` (`<What>Repository` for
+    a feature with several: `RecordsRepository`) and `<Reason>Exception`.
   - A subcommand is `<Word>Command`, after the word typed after the plugin's command
     (`/foliate speed` → `SpeedCommand`). What the command does typed alone is `<Feature>Command`.
     Those words, and with them the `command.<word>.` messages and the `<plugin>.command.<word>`
@@ -132,17 +133,20 @@ the edit mode first, sits above them, in the feature's own package: in `course`,
 
 ## Writing a feature
 
-- **One job per class**, which the first sentence of its Javadoc says. Split a class along its jobs
-  when it passes about 400 lines, or when that sentence needs two "and"s.
+- **One job per class**, which the first sentence of its Javadoc says. A class past about 400
+  lines, or whose first sentence needs two "and"s, does several: split it along its jobs, at the
+  latest when it is next changed.
 - **Values are records, immutable.** A change makes a new value. State that several threads read is
-  an immutable value swapped atomically, or a concurrent collection, never a mutable field.
+  an immutable value swapped atomically, or a concurrent collection. A plain mutable field is
+  never shared; a `volatile` field that stands on its own, written by one thread, is the most it
+  may be.
 - **Refusals.** The domain refuses what cannot be done with `core.message.RefusedException` (a
   message key, written inline, and its arguments). The command that asked catches it and tells
   the sender. Keep the rule and its reason together, and never let a command check a rule that the
   domain also checks. It is a checked exception: a task given to a scheduler catches it inside.
 - **Settings.** There is one class per section of `config.yml`, with nested classes for its
-  sub-sections. It is checked when loaded (`InvalidSettingException`) and read through the
-  supplier at each use, so that a reload takes effect. Something that must not change while it
+  sub-sections. It checks itself in `validate()`, which throws `ConfigException` with a message
+  an administrator can act on, and is read through the supplier at each use, so that a reload takes effect. Something that must not change while it
   runs (a game's rules) is read once when it starts, into a value of its own.
 - **Files the feature owns** sit under `<feature>/` in the data folder and are read and written off
   the tick threads. A hook keeps what its plugin reads where that plugin looks: zMenu's menus in
