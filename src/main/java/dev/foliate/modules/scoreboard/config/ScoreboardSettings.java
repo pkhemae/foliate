@@ -1,4 +1,4 @@
-package dev.foliate.modules.scoreboard;
+package dev.foliate.modules.scoreboard.config;
 
 import de.exlll.configlib.Comment;
 import de.exlll.configlib.Configuration;

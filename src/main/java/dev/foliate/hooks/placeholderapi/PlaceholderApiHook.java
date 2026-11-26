@@ -3,6 +3,8 @@ package dev.foliate.hooks.placeholderapi;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
+import dev.foliate.hooks.placeholderapi.expansion.FoliateExpansion;
+import dev.foliate.hooks.placeholderapi.expansion.PlaceholderApiException;
 import io.papermc.paper.plugin.configuration.PluginMeta;
 import me.clip.placeholderapi.PlaceholderAPI;
 import net.kyori.adventure.text.Component;

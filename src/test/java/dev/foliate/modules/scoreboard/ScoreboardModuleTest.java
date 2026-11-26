@@ -10,6 +10,8 @@ import dev.foliate.core.config.ConfigException;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.scheduler.ManualSchedulers;
+import dev.foliate.modules.scoreboard.board.ScoreboardDisplay;
+import dev.foliate.modules.scoreboard.board.ScoreboardUnavailableException;
 import dev.foliate.testing.RecordingLogger;
 import java.nio.file.Files;
 import java.nio.file.Path;

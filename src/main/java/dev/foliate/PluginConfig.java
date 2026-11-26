@@ -6,7 +6,7 @@ import dev.foliate.core.config.ConfigException;
 import dev.foliate.core.config.ConfigRoot;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.StorageSettings;
-import dev.foliate.modules.scoreboard.ScoreboardSettings;
+import dev.foliate.modules.scoreboard.config.ScoreboardSettings;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;

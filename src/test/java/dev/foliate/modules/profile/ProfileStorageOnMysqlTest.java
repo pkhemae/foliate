@@ -8,6 +8,7 @@ import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
 import dev.foliate.core.storage.Database;
+import dev.foliate.modules.profile.player.PlayerProfile;
 import dev.foliate.modules.profile.storage.ProfileRepository;
 import dev.foliate.modules.profile.storage.TestMysql;
 import java.lang.reflect.InvocationTargetException;

@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.Database;
-import dev.foliate.modules.profile.PlayerProfile;
+import dev.foliate.modules.profile.player.PlayerProfile;
 import dev.foliate.modules.profile.ProfileModule;
 import java.nio.file.Path;
 import java.util.UUID;

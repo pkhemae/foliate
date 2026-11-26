@@ -4,8 +4,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.foliate.core.command.PlayerTarget;
 import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.message.MessageService;
-import dev.foliate.modules.profile.PlayerProfile;
-import dev.foliate.modules.profile.ProfileModule;
+import dev.foliate.modules.profile.player.PlayerProfile;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -30,7 +29,7 @@ import org.bukkit.entity.Player;
  *   <li>it reads the profile from the cache: a command runs on the region of whoever typed it,
  *       so it must never wait for the database;
  *   <li>it lives with the feature it shows, in the module's {@code command} package, and the
- *       module offers it ({@link ProfileModule#subcommands()}): it exists exactly when profiles
+ *       module offers it from {@code subcommands()}: it exists exactly when profiles
  *       are loaded.
  * </ul>
  *
@@ -53,7 +52,7 @@ public final class ProfileCommand implements Subcommand {
     private final MessageService messages;
     private final PlayerTarget target;
 
-    /** @param profiles the cached profile of an online player, as {@link ProfileModule#find} gives it */
+    /** @param profiles the cached profile of an online player, as the module's {@code find} gives it */
     public ProfileCommand(Function<UUID, Optional<PlayerProfile>> profiles, MessageService messages, Server server) {
         this.profiles = profiles;
         this.messages = messages;

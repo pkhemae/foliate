@@ -1,4 +1,4 @@
-package dev.foliate.hooks.placeholderapi;
+package dev.foliate.hooks.placeholderapi.expansion;
 
 import java.io.Serial;
 
@@ -8,7 +8,7 @@ public final class PlaceholderApiException extends Exception {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    PlaceholderApiException(String message) {
+    public PlaceholderApiException(String message) {
         super(message);
     }
 }

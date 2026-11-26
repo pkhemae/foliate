@@ -9,7 +9,7 @@ import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.Database;
 import dev.foliate.core.storage.SqlDump;
 import dev.foliate.core.storage.StorageSettings;
-import dev.foliate.modules.profile.PlayerProfile;
+import dev.foliate.modules.profile.player.PlayerProfile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URISyntaxException;

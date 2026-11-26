@@ -6,10 +6,12 @@ import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
-import dev.foliate.core.player.PlayerLifecycle;
 import dev.foliate.core.player.PlayerStore;
 import dev.foliate.core.storage.Database;
 import dev.foliate.modules.profile.command.ProfileCommand;
+import dev.foliate.modules.profile.placeholder.ProfilePlaceholders;
+import dev.foliate.modules.profile.player.PlayerProfile;
+import dev.foliate.modules.profile.player.ProfileLifecycle;
 import dev.foliate.modules.profile.storage.ProfileRepository;
 import java.time.Clock;
 import java.util.List;
@@ -24,10 +26,10 @@ import org.slf4j.Logger;
 /**
  * Keeps a {@link PlayerProfile} for every online player: what the plugin remembers about them
  * between sessions. It is the first use of {@link PlayerStore}, which does the loading, the cache,
- * the ordered saves and the flush on shutdown; what is left here is what belongs to the profile
- * (its fields, its SQL, its placeholder; its check on a real server is ProfileCheck, in the serverTest
- * source set). To keep another kind of data per player,
- * give a store its own repository and lifecycle, as this module does.
+ * the ordered saves and the flush on shutdown. The profile's own parts are wired here: its value
+ * and lifecycle in {@code player}, its SQL in {@code storage}, its placeholder and its command; its
+ * check on a real server is ProfileCheck, in the serverTest source set. To keep another kind of
+ * data per player, give a store its own repository and lifecycle, as this module does.
  */
 public final class ProfileModule implements Module, SubcommandProvider {
 
@@ -80,9 +82,7 @@ public final class ProfileModule implements Module, SubcommandProvider {
             throw new ModuleSkippedException("it needs the database, which is not running");
         }
         store.enable();
-        joinsPlaceholder = placeholders.register("joins", player -> player == null
-                ? null
-                : find(player.getUniqueId()).map(profile -> String.valueOf(profile.joins())).orElse(null));
+        joinsPlaceholder = new ProfilePlaceholders(this::find).register(placeholders);
     }
 
     @Override
@@ -125,24 +125,5 @@ public final class ProfileModule implements Module, SubcommandProvider {
     @Override
     public List<Subcommand> subcommands() {
         return List.of(new ProfileCommand(this::find, messages, server));
-    }
-
-    /** What happens to a profile when its player joins and leaves. */
-    private static final class ProfileLifecycle implements PlayerLifecycle<PlayerProfile> {
-
-        @Override
-        public PlayerProfile create(UUID id, String name, long now) {
-            return PlayerProfile.create(id, name, now);
-        }
-
-        @Override
-        public PlayerProfile joined(PlayerProfile stored, String name, long now) {
-            return stored.joined(name, now);
-        }
-
-        @Override
-        public PlayerProfile left(PlayerProfile session, long now) {
-            return session.seen(now);
-        }
     }
 }

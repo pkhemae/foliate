@@ -7,7 +7,7 @@ import dev.foliate.FoliatePlugin;
 import dev.foliate.PluginConfig;
 import dev.foliate.core.config.ConfigService;
 import dev.foliate.core.storage.Database;
-import dev.foliate.modules.profile.PlayerProfile;
+import dev.foliate.modules.profile.player.PlayerProfile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.ResultSet;

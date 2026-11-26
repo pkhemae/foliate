@@ -1,6 +1,6 @@
 package dev.foliate.modules.scoreboard.listener;
 
-import dev.foliate.modules.scoreboard.Scoreboards;
+import dev.foliate.modules.scoreboard.board.Scoreboards;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;

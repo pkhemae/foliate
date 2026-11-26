@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
@@ -66,21 +67,27 @@ class ArchitectureTest {
      * whichever part of the feature it serves. A new role is added here on purpose, and to the
      * layout described in CLAUDE.md, not by creating a folder.
      */
-    private static final Set<String> ROLES = Set.of("command", "listener", "storage");
+    private static final Set<String> ROLES = Set.of("command", "config", "listener", "placeholder", "storage");
+
+    /** The roles the server calls into: only the feature's entry point creates and uses them. */
+    private static final List<String> CALLED_ROLES = List.of("command", "listener", "placeholder");
+
+    /**
+     * What a class of a role is named after, so that it is found by its name: {@code config} holds
+     * {@code <Feature>Settings}, {@code placeholder} holds {@code <Feature>Placeholders}.
+     */
+    private static final Map<String, String> ROLE_SUFFIX = Map.of("config", "Settings", "placeholder", "Placeholders");
 
     /**
      * Names that say what kind of code a package holds, not which part of the domain: a feature's
      * other packages are its concepts, named after what they are about ({@code course}, {@code race}).
      */
     private static final Set<String> NOT_CONCEPTS = Set.of(
-            "api", "base", "commands", "common", "config", "configuration", "constants", "core", "dao", "data",
+            "api", "base", "commands", "common", "configs", "configuration", "constants", "core", "dao", "data",
             "database", "db", "domain", "dto", "enums", "exceptions", "handler", "handlers", "helper", "helpers",
             "impl", "interfaces", "internal", "listeners", "logic", "manager", "managers", "misc", "model",
-            "models", "other", "persistence", "records", "repositories", "repository", "service", "services",
-            "shared", "sql", "types", "util", "utilities", "utility", "utils");
-
-    /** The most classes a feature's own package holds: past it, a part of the feature becomes a concept. */
-    private static final int FEATURE_PACKAGE_LIMIT = 10;
+            "models", "other", "persistence", "placeholders", "records", "repositories", "repository", "service",
+            "services", "settings", "shared", "sql", "types", "util", "utilities", "utility", "utils");
 
     /** The most classes a concept holds: past it, the concept is two. */
     private static final int CONCEPT_LIMIT = 15;
@@ -154,15 +161,16 @@ class ArchitectureTest {
     }
 
     /**
-     * Outside a feature, only its own package is known: its entry point and its settings, for the
-     * composition root. What lies below (commands, listeners, SQL) is the feature's business, even
-     * when public so that its own package can reach it.
+     * Outside a feature, only its entry point and its settings are known, for the composition root
+     * and {@code PluginConfig}. What else lies below (commands, listeners, SQL, the domain) is the
+     * feature's business, even when public so that its entry point can reach it.
      */
     @Test
-    void outsideAFeatureOnlyItsOwnPackageIsUsed() {
+    void outsideAFeatureOnlyItsEntryPointAndSettingsAreUsed() {
         for (String group : GROUPS) {
             noClasses().that().resideOutsideOfPackage(BASE + "." + group + "..")
-                    .should().dependOnClassesThat().resideInAPackage(BASE + "." + group + ".*.*..")
+                    .should().dependOnClassesThat(JavaClass.Predicates.resideInAPackage(BASE + "." + group + ".*.*..")
+                            .and(DescribedPredicate.not(JavaClass.Predicates.resideInAPackage(BASE + "." + group + ".*.config"))))
                     .allowEmptyShould(true)
                     .because("a feature is reached through its own package, see the layout in CLAUDE.md")
                     .check(plugin);
@@ -189,28 +197,48 @@ class ArchitectureTest {
                 wrong.add(name + ": a concept is one lowercase word for a part of the domain, not " + new TreeSet<>(NOT_CONCEPTS));
             }
         }
-        assertEquals(Set.of(), wrong, "See \"Laying out a feature\" in CLAUDE.md");
+        assertEquals(Set.of(), wrong, "See \"A feature\" in CLAUDE.md");
     }
 
     /**
-     * A package that keeps growing is a heap: the feature's own past {@value #FEATURE_PACKAGE_LIMIT}
-     * classes needs a concept, and a concept past {@value #CONCEPT_LIMIT} is two. Roles hold one
-     * class per subcommand, listener or repository, and are not limited.
+     * A feature's own package holds its entry point and nothing else: the rest is in a role or a
+     * concept, so that the package is where a reader starts, not a heap. A concept past
+     * {@value #CONCEPT_LIMIT} classes is two; roles hold one class per subcommand, listener or
+     * repository, and are not limited.
      */
     @Test
     void aFeatureKeepsEachOfItsPackagesSmall() {
         Set<String> crowded = new TreeSet<>();
         featurePackages().forEach((name, classes) -> {
             String[] parts = name.split("\\.", -1);
-            if (parts.length > 2 && ROLES.contains(parts[2])) {
-                return;
-            }
-            int limit = parts.length == 2 ? FEATURE_PACKAGE_LIMIT : CONCEPT_LIMIT;
-            if (classes.size() > limit) {
-                crowded.add(name + " holds " + classes.size() + " classes, " + limit + " at most");
+            if (parts.length == 2) {
+                String entry = parts[1] + ENTRY_SUFFIX.get(parts[0]);
+                List<String> others = classes.stream().filter(simple -> !simple.equalsIgnoreCase(entry)).toList();
+                if (!others.isEmpty()) {
+                    crowded.add(name + " holds " + others + ": only its entry point stays there, the rest goes to a role or a concept");
+                }
+            } else if (!ROLES.contains(parts[2]) && classes.size() > CONCEPT_LIMIT) {
+                crowded.add(name + " holds " + classes.size() + " classes, " + CONCEPT_LIMIT + " at most");
             }
         });
-        assertEquals(Set.of(), crowded, "Group a part of the feature into a concept, see CLAUDE.md");
+        assertEquals(Set.of(), crowded, "See \"A feature\" in CLAUDE.md");
+    }
+
+    /**
+     * Nothing below a feature depends on its entry point: the entry point builds the rest and hands
+     * it what it needs, so a role or a concept that reached back to it would make a circle the
+     * layering of concepts cannot see. The imports are held to the same rule, see
+     * {@link #theImportsFollowTheLayoutToo}.
+     */
+    @Test
+    void nothingBelowAFeatureUsesItsEntryPoint() {
+        for (String group : GROUPS) {
+            noClasses().that().resideInAPackage(BASE + "." + group + ".*.*..")
+                    .should().dependOnClassesThat().resideInAPackage(BASE + "." + group + ".*")
+                    .allowEmptyShould(true)
+                    .because("the entry point hands its parts what they need, through their constructors")
+                    .check(plugin);
+        }
     }
 
     /**
@@ -367,7 +395,7 @@ class ArchitectureTest {
     @Test
     void commandsAndListenersAreReachedFromTheFeaturesPackageOnly() {
         for (String group : GROUPS) {
-            for (String role : List.of("command", "listener")) {
+            for (String role : CALLED_ROLES) {
                 classes().that().resideInAPackage(BASE + "." + group + ".*." + role)
                         .should().onlyHaveDependentClassesThat()
                         .resideInAnyPackage(BASE + "." + group + ".*", BASE + "." + group + ".*." + role)
@@ -397,6 +425,21 @@ class ArchitectureTest {
                     .allowEmptyShould(true)
                     .because("a feature's listeners live in its listener package, apart from the logic they call")
                     .check(plugin);
+            for (String role : List.of("config", "placeholder")) {
+                String suffix = ROLE_SUFFIX.get(role);
+                classes().that().resideInAPackage(BASE + "." + group + ".*." + role).and().areTopLevelClasses()
+                        .and().doNotHaveSimpleName("package-info")
+                        .should().haveSimpleNameEndingWith(suffix)
+                        .allowEmptyShould(true)
+                        .because("the " + role + " package of a feature holds its " + suffix)
+                        .check(plugin);
+                classes().that().resideInAPackage(BASE + "." + group + "..").and().areTopLevelClasses()
+                        .and().haveSimpleNameEndingWith(suffix)
+                        .should().resideInAPackage(BASE + "." + group + ".*." + role)
+                        .allowEmptyShould(true)
+                        .because("a feature's " + suffix + " is found in its " + role + " package")
+                        .check(plugin);
+            }
         }
     }
 
@@ -453,7 +496,9 @@ class ArchitectureTest {
                     boolean outsideTheLayout = unit != null && !mayDependOn(unit, target);
                     boolean insideAnotherFeature = !target.equals(unit) && isBelowAFeature(imported.group(1));
                     boolean intoAnotherRole = target.equals(unit) && reachesAnotherRole(MAIN.relativize(file), imported.group(1));
-                    if (outsideTheLayout || insideAnotherFeature || intoAnotherRole) {
+                    boolean backToTheEntryPoint = target.equals(unit) && MAIN.relativize(file).getNameCount() > 3
+                            && isAFeaturesOwnPackage(imported.group(1));
+                    if (outsideTheLayout || insideAnotherFeature || intoAnotherRole || backToTheEntryPoint) {
                         violations.add(MAIN.relativize(file) + ": " + line.strip());
                     }
                 }
@@ -496,10 +541,14 @@ class ArchitectureTest {
         return GROUPS.contains(first) && folder.getNameCount() > 1 ? first + "." + folder.getName(1) : first;
     }
 
-    /** Whether an imported name lies in a package below a feature's own: {@code modules.profile.command.ProfileCommand}. */
+    /**
+     * Whether an imported name lies in a package below a feature's own, its settings aside:
+     * {@code modules.profile.command.ProfileCommand}.
+     */
     private static boolean isBelowAFeature(String name) {
         String[] parts = name.split("\\.", -1);
-        return GROUPS.contains(parts[0]) && parts.length > 3 && Character.isLowerCase(parts[2].charAt(0));
+        return GROUPS.contains(parts[0]) && parts.length > 3 && Character.isLowerCase(parts[2].charAt(0))
+                && !parts[2].equals("config");
     }
 
     /**
@@ -512,7 +561,13 @@ class ArchitectureTest {
             return false; // the file is in the feature's own package, or the import is not in a role
         }
         String role = file.getName(2).toString();
-        return List.of("command", "listener").contains(parts[2]) && !parts[2].equals(role);
+        return CALLED_ROLES.contains(parts[2]) && !parts[2].equals(role);
+    }
+
+    /** Whether an imported name is a class of a feature's own package: {@code modules.profile.ProfileModule}. */
+    private static boolean isAFeaturesOwnPackage(String name) {
+        String[] parts = name.split("\\.", -1);
+        return GROUPS.contains(parts[0]) && parts.length > 2 && Character.isUpperCase(parts[2].charAt(0));
     }
 
     /** The part an imported name belongs to; "root" for a class of the root package. */

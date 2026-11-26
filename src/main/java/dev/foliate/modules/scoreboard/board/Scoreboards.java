@@ -1,8 +1,9 @@
-package dev.foliate.modules.scoreboard;
+package dev.foliate.modules.scoreboard.board;
 
 import dev.foliate.core.message.MessageService;
 import dev.foliate.core.scheduler.Schedulers;
 import dev.foliate.core.scheduler.TaskHandle;
+import dev.foliate.modules.scoreboard.config.ScoreboardSettings;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -53,7 +54,7 @@ public final class Scoreboards {
     /** Between start and stop: no board may be created outside. */
     private volatile boolean running;
 
-    Scoreboards(
+    public Scoreboards(
             Plugin plugin,
             Schedulers schedulers,
             Supplier<ScoreboardSettings> settings,
@@ -69,19 +70,19 @@ public final class Scoreboards {
     }
 
     /** Lets boards be shown, and shows them to everyone online. */
-    void start() {
+    public void start() {
         running = true;
         applyToAll();
     }
 
     /** Applies settings that may have changed to everyone online. */
-    void reload() {
+    public void reload() {
         failureLogged.set(false);
         applyToAll();
     }
 
     /** Removes every board, and lets no new one be shown. */
-    void stop() {
+    public void stop() {
         running = false;
         // Nothing scheduled on the players' threads runs any more. Removing a board only sends
         // packets, which is safe from here. One at a time: a show still under way on a player's
@@ -95,12 +96,12 @@ public final class Scoreboards {
     }
 
     /** Whether the configuration asks for boards at all. */
-    boolean showsBoards() {
+    public boolean showsBoards() {
         return settings.get().enabled();
     }
 
     /** Whether a player has a board right now. */
-    boolean hasBoard(UUID id) {
+    public boolean hasBoard(UUID id) {
         return entries.containsKey(id);
     }
 
