@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import dev.foliate.core.message.MessageService;
-import dev.foliate.modules.profile.PlayerProfile;
+import dev.foliate.modules.profile.player.PlayerProfile;
 import dev.foliate.testing.CommandSource;
 import dev.foliate.testing.PluginYml;
 import dev.foliate.testing.TestCommands;

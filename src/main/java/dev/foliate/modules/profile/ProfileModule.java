@@ -6,10 +6,12 @@ import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.Module;
 import dev.foliate.core.module.ModuleSkippedException;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
-import dev.foliate.core.player.PlayerLifecycle;
 import dev.foliate.core.player.PlayerStore;
 import dev.foliate.core.storage.Database;
 import dev.foliate.modules.profile.command.ProfileCommand;
+import dev.foliate.modules.profile.placeholder.ProfilePlaceholders;
+import dev.foliate.modules.profile.player.PlayerProfile;
+import dev.foliate.modules.profile.player.ProfileLifecycle;
 import dev.foliate.modules.profile.storage.ProfileRepository;
 import java.time.Clock;
 import java.util.List;
@@ -80,9 +82,7 @@ public final class ProfileModule implements Module, SubcommandProvider {
             throw new ModuleSkippedException("it needs the database, which is not running");
         }
         store.enable();
-        joinsPlaceholder = placeholders.register("joins", player -> player == null
-                ? null
-                : find(player.getUniqueId()).map(profile -> String.valueOf(profile.joins())).orElse(null));
+        joinsPlaceholder = new ProfilePlaceholders(this::find).register(placeholders);
     }
 
     @Override
@@ -125,24 +125,5 @@ public final class ProfileModule implements Module, SubcommandProvider {
     @Override
     public List<Subcommand> subcommands() {
         return List.of(new ProfileCommand(this::find, messages, server));
-    }
-
-    /** What happens to a profile when its player joins and leaves. */
-    private static final class ProfileLifecycle implements PlayerLifecycle<PlayerProfile> {
-
-        @Override
-        public PlayerProfile create(UUID id, String name, long now) {
-            return PlayerProfile.create(id, name, now);
-        }
-
-        @Override
-        public PlayerProfile joined(PlayerProfile stored, String name, long now) {
-            return stored.joined(name, now);
-        }
-
-        @Override
-        public PlayerProfile left(PlayerProfile session, long now) {
-            return session.seen(now);
-        }
     }
 }

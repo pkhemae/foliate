@@ -1,4 +1,4 @@
-package dev.foliate.modules.scoreboard;
+package dev.foliate.modules.scoreboard.board;
 
 import java.io.Serial;
 
@@ -8,7 +8,7 @@ public final class ScoreboardUnavailableException extends Exception {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    ScoreboardUnavailableException(String message) {
+    public ScoreboardUnavailableException(String message) {
         super(message);
     }
 

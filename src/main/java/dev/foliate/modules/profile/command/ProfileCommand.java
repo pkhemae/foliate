@@ -4,7 +4,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.foliate.core.command.PlayerTarget;
 import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.message.MessageService;
-import dev.foliate.modules.profile.PlayerProfile;
+import dev.foliate.modules.profile.player.PlayerProfile;
 import dev.foliate.modules.profile.ProfileModule;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.time.Instant;

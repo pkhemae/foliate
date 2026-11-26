@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.foliate.FoliatePlugin;
 import dev.foliate.core.placeholder.PlaceholderRegistry;
+import dev.foliate.hooks.placeholderapi.expansion.FoliateExpansion;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;

@@ -2,7 +2,7 @@ package dev.foliate.modules.profile.storage;
 
 import dev.foliate.core.player.PlayerRepository;
 import dev.foliate.core.storage.SqlErrors;
-import dev.foliate.modules.profile.PlayerProfile;
+import dev.foliate.modules.profile.player.PlayerProfile;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;

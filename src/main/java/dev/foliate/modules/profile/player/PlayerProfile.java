@@ -1,4 +1,4 @@
-package dev.foliate.modules.profile;
+package dev.foliate.modules.profile.player;
 
 import dev.foliate.core.player.PlayerData;
 import java.util.UUID;

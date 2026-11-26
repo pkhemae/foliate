@@ -10,6 +10,7 @@ import dev.foliate.core.message.MessageService;
 import dev.foliate.core.module.ModuleManager;
 import dev.foliate.core.scheduler.FoliaSchedulers;
 import dev.foliate.core.scheduler.ManualSchedulers;
+import dev.foliate.hooks.zmenu.menu.MenuException;
 import fr.maxlego08.menu.api.Inventory;
 import fr.maxlego08.menu.api.InventoryManager;
 import fr.maxlego08.menu.api.exceptions.InventoryException;

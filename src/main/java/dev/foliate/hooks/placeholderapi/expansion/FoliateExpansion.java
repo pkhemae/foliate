@@ -1,4 +1,4 @@
-package dev.foliate.hooks.placeholderapi;
+package dev.foliate.hooks.placeholderapi.expansion;
 
 import dev.foliate.core.placeholder.PlaceholderRegistry;
 import io.papermc.paper.plugin.configuration.PluginMeta;
@@ -7,12 +7,12 @@ import org.bukkit.OfflinePlayer;
 import org.jspecify.annotations.Nullable;
 
 /** Exposes the {@link PlaceholderRegistry} to PlaceholderAPI as {@code %foliate_<name>%}. */
-final class FoliateExpansion extends PlaceholderExpansion {
+public final class FoliateExpansion extends PlaceholderExpansion {
 
     private final PluginMeta meta;
     private final PlaceholderRegistry registry;
 
-    FoliateExpansion(PluginMeta meta, PlaceholderRegistry registry) {
+    public FoliateExpansion(PluginMeta meta, PlaceholderRegistry registry) {
         this.meta = meta;
         this.registry = registry;
     }
