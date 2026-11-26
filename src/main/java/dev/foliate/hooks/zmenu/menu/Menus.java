@@ -163,7 +163,7 @@ public final class Menus {
      * Replaces the menus with freshly loaded ones, or leaves everything as it was when one of the
      * files is invalid. Must run on a tick thread.
      */
-    public void swapMenus(InventoryManager manager) {
+    void swapMenus(InventoryManager manager) {
         // The menus as zMenu has them now: a /zm reload may have replaced the ones loaded here.
         List<Inventory> previous = List.copyOf(manager.getInventories(plugin));
         try {

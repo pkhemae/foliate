@@ -76,8 +76,7 @@ class ArchitectureTest {
      * What a class of a role is named after, so that it is found by its name: {@code config} holds
      * {@code <Feature>Settings}, {@code placeholder} holds {@code <Feature>Placeholders}.
      */
-    private static final Map<String, String> ROLE_SUFFIX = Map.of(
-            "command", "Command", "config", "Settings", "listener", "Listener", "placeholder", "Placeholders");
+    private static final Map<String, String> ROLE_SUFFIX = Map.of("config", "Settings", "placeholder", "Placeholders");
 
     /**
      * Names that say what kind of code a package holds, not which part of the domain: a feature's
@@ -213,7 +212,8 @@ class ArchitectureTest {
         featurePackages().forEach((name, classes) -> {
             String[] parts = name.split("\\.", -1);
             if (parts.length == 2) {
-                List<String> others = classes.stream().filter(simple -> !simple.endsWith(ENTRY_SUFFIX.get(parts[0]))).toList();
+                String entry = parts[1] + ENTRY_SUFFIX.get(parts[0]);
+                List<String> others = classes.stream().filter(simple -> !simple.equalsIgnoreCase(entry)).toList();
                 if (!others.isEmpty()) {
                     crowded.add(name + " holds " + others + ": only its entry point stays there, the rest goes to a role or a concept");
                 }
@@ -222,6 +222,23 @@ class ArchitectureTest {
             }
         });
         assertEquals(Set.of(), crowded, "See \"A feature\" in CLAUDE.md");
+    }
+
+    /**
+     * Nothing below a feature depends on its entry point: the entry point builds the rest and hands
+     * it what it needs, so a role or a concept that reached back to it would make a circle the
+     * layering of concepts cannot see. The imports are held to the same rule, see
+     * {@link #theImportsFollowTheLayoutToo}.
+     */
+    @Test
+    void nothingBelowAFeatureUsesItsEntryPoint() {
+        for (String group : GROUPS) {
+            noClasses().that().resideInAPackage(BASE + "." + group + ".*.*..")
+                    .should().dependOnClassesThat().resideInAPackage(BASE + "." + group + ".*")
+                    .allowEmptyShould(true)
+                    .because("the entry point hands its parts what they need, through their constructors")
+                    .check(plugin);
+        }
     }
 
     /**
@@ -479,7 +496,9 @@ class ArchitectureTest {
                     boolean outsideTheLayout = unit != null && !mayDependOn(unit, target);
                     boolean insideAnotherFeature = !target.equals(unit) && isBelowAFeature(imported.group(1));
                     boolean intoAnotherRole = target.equals(unit) && reachesAnotherRole(MAIN.relativize(file), imported.group(1));
-                    if (outsideTheLayout || insideAnotherFeature || intoAnotherRole) {
+                    boolean backToTheEntryPoint = target.equals(unit) && MAIN.relativize(file).getNameCount() > 3
+                            && isAFeaturesOwnPackage(imported.group(1));
+                    if (outsideTheLayout || insideAnotherFeature || intoAnotherRole || backToTheEntryPoint) {
                         violations.add(MAIN.relativize(file) + ": " + line.strip());
                     }
                 }
@@ -543,6 +562,12 @@ class ArchitectureTest {
         }
         String role = file.getName(2).toString();
         return CALLED_ROLES.contains(parts[2]) && !parts[2].equals(role);
+    }
+
+    /** Whether an imported name is a class of a feature's own package: {@code modules.profile.ProfileModule}. */
+    private static boolean isAFeaturesOwnPackage(String name) {
+        String[] parts = name.split("\\.", -1);
+        return GROUPS.contains(parts[0]) && parts.length > 2 && Character.isUpperCase(parts[2].charAt(0));
     }
 
     /** The part an imported name belongs to; "root" for a class of the root package. */

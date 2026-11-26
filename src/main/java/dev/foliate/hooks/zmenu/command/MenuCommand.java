@@ -4,7 +4,7 @@ import com.mojang.brigadier.Command;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.foliate.core.command.Subcommand;
 import dev.foliate.core.message.MessageService;
-import dev.foliate.hooks.zmenu.ZMenuHook;
+import dev.foliate.hooks.zmenu.menu.Menus;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.util.function.BiConsumer;
 import org.bukkit.entity.Player;
@@ -27,7 +27,7 @@ public final class MenuCommand implements Subcommand {
     private final BiConsumer<Player, String> open;
     private final MessageService messages;
 
-    /** @param open opens a menu for a player, from any thread: {@link ZMenuHook#open} */
+    /** @param open opens a menu for a player, from any thread: {@link Menus#open} */
     public MenuCommand(BiConsumer<Player, String> open, MessageService messages) {
         this.open = open;
         this.messages = messages;

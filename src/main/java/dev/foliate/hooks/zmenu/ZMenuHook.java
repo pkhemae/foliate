@@ -13,7 +13,6 @@ import fr.maxlego08.menu.api.MenuPlugin;
 import java.time.Duration;
 import java.util.List;
 import java.util.function.Supplier;
-import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
 /**
@@ -80,15 +79,5 @@ public final class ZMenuHook implements Module, SubcommandProvider {
     @Override
     public void disable() {
         menus.unload();
-    }
-
-    /** Opens a menu, as {@code /foliate menu} does. For the tests, which live in this package. */
-    void open(Player player, String menu) {
-        menus.open(player, menu);
-    }
-
-    /** Swaps the menus as a reload does on the global region. For the tests, which live in this package. */
-    void swapMenus(InventoryManager manager) {
-        menus.swapMenus(manager);
     }
 }

@@ -42,15 +42,16 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
   `YamlConfiguration` (YAML 1.1 changes the type of values such as `no`).
 - Code that schedules depends on `Schedulers`, and is tested with `ManualSchedulers` when it uses
   timers or cancellation: MockBukkit cannot cancel tasks.
-- Every package has a `package-info.java` annotated with `@NullMarked`. NullAway and Error Prone
+- Every package that holds classes has a `package-info.java` annotated with `@NullMarked`. NullAway and Error Prone
   run with `-Werror`: any of their warnings fails the build.
 
 ## A feature
 
 ```
 modules/<feature>/          (or hooks/<plugin>/)
-├── <Feature>Module.java    the entry point, alone here: builds the feature, follows
-│                           enable/reload/disable, offers its subcommands. Wiring, no logic
+├── <Feature>Module.java    the entry point (<Plugin>Hook for a hook), alone here with its nested
+│                           types: builds the feature, follows enable/reload/disable, offers its
+│                           subcommands through SubcommandProvider. Wiring, no logic
 ├── command/                <Word>Command, one class per subcommand
 ├── listener/               <Topic>Listener: turns an event into a call on the domain, nothing more
 ├── placeholder/            <Feature>Placeholders
@@ -59,9 +60,10 @@ modules/<feature>/          (or hooks/<plugin>/)
 └── <concept>/              the domain, one package per part of it
 ```
 
-- **Roles** are these five, fixed. Only the entry point uses commands, listeners and placeholders;
-  a concept may use `config` and `storage`. Outside the feature, only its entry point and its
-  settings are known.
+- **Roles** are these five, fixed. Only the entry point (and the same role) uses commands,
+  listeners and placeholders; a concept may use `config` and `storage`. Nothing below the entry
+  point uses it: it hands its parts what they need. Outside the feature, only the entry point and
+  its settings are known; `PluginConfig` composes the settings into `config.yml`.
 - **Concepts** hold the domain: a value next to the code that works on it. Each is one lowercase
   noun of the domain (an arena, a round, a shop), never a kind of code (`util`, `manager`, `model`,
   `service`...), with 15 classes at most. They are layered, never in a circle: a class that ties
@@ -81,7 +83,8 @@ modules/<feature>/          (or hooks/<plugin>/)
   - `migrations/<feature>/NNN_<what>.sql`;
   - in `messages.yml`, its messages under `<feature>.` and those of its subcommands under
     `command.<word>.`;
-  - its section `<feature>:` in `config.yml`, and its files under `<feature>/` in the data folder;
+  - its section `<feature>:` in `config.yml`, and its files under `<feature>/` in the data folder
+    (a hook keeps what its plugin reads where that plugin looks: zMenu's menus in `inventories/`);
   - its permission nodes: `<plugin>.command.<word>` (`.others` for another player) and
     `<plugin>.<feature>.<what>`.
 
@@ -89,7 +92,8 @@ modules/<feature>/          (or hooks/<plugin>/)
   `build.gradle.kts`. Subcommand words, with their messages and nodes, are shared by every
   feature: pick them so.
 - **Tests** mirror the package of the class they test. A feature's check on a real server is
-  `<Feature>Check`.
+  `<Feature>Check`, in the feature's own package of the `serverTest` source set, so that it reaches
+  the entry point's package-private accessors.
 - `ArchitectureTest` checks this layout. The wiki's Architecture page explains it with the
   template's own features.
 
@@ -101,8 +105,9 @@ modules/<feature>/          (or hooks/<plugin>/)
 - **Refusals.** The domain refuses with `RefusedException`, its message key written inline, and the
   command that asked tells the sender. No command checks a rule that the domain checks. Being
   checked, it is caught inside a task given to a scheduler.
-- **Settings** check themselves in `validate()`, throwing `ConfigException` for an administrator,
-  and are read through their supplier at each use, so that a reload takes effect. What must not
-  change while it runs is copied once, when it starts.
+- **Settings** are one class per section, with nested classes for its sub-sections. They check
+  themselves in `validate()`, throwing `ConfigException` for an administrator, and are read
+  through their supplier at each use, so that a reload takes effect. What must not change while
+  it runs is copied once, when it starts.
 - **Files** are read and written off the tick threads. What several servers share goes in the
   database.
