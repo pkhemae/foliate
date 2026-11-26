@@ -15,7 +15,8 @@ import org.mockbukkit.mockbukkit.MockBukkit;
 
 /**
  * Covers what can run without a PlaceholderAPI server: the conversion of values. The expansion is
- * covered by {@code FoliateExpansionTest}. The tag itself needs PlaceholderAPI running and is checked on a real server.
+ * covered by {@code FoliateExpansionTest}. The tag itself needs PlaceholderAPI running and is
+ * checked on a real server.
  */
 class PlaceholderApiHookTest {
 
