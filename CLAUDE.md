@@ -66,14 +66,20 @@ modules/elytra/
 │                            offers its subcommands, lists its MIGRATIONS. Wiring only, no logic
 ├── ElytraSettings.java      its section of config.yml, when it has one
 ├── ElytraPlaceholders.java  its placeholders, when it has some
-├── ElytraGame.java …        the classes the whole feature shares: its main state, its values
+├── Workshop.java …          the classes the whole feature shares, or that tie its concepts
+│                            together (Kit, Restorations, Workshop)
 ├── command/                 roles: one subcommand per class (StartCommand, JoinCommand)
 ├── listener/                       one listener per topic (RaceListener, EditorListener)
 ├── storage/                        the repositories, and what only the SQL needs
 ├── course/                  concepts: one part of the domain, its values and its logic together
-│                            (Course, Ring, RingBlocks, Workshop)
-└── editor/                  (Editors, Tool)
+│                            (Course, Courses, Ring, RingBlocks)
+├── editor/                  (Editors, Tool)
+└── race/                    (ElytraGame, Race, Racer, Records)
 ```
+
+A class that uses several concepts, such as `Workshop`, which edits courses but checks the race and
+the edit mode first, sits above them, in the feature's own package: in `course`, it would make
+`course` and `editor` use each other.
 
 - **Roles** are `command`, `listener` and `storage`, and only those. Every subcommand of the
   feature is in `command`, every listener in `listener`, every repository in `storage`, whichever
