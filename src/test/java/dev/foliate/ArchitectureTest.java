@@ -19,6 +19,7 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -61,11 +62,31 @@ class ArchitectureTest {
     private static final Set<String> GROUPS = Set.of("modules", "hooks");
 
     /**
-     * The only packages a feature may have below its own, one per role. Anything else (domain,
-     * settings, records) stays in the feature's package. A new role is added here on purpose, and
-     * to the layout described in CLAUDE.md, not by creating a folder.
+     * The roles of a feature: what the server and the database call, each in a package of its own
+     * whichever part of the feature it serves. A new role is added here on purpose, and to the
+     * layout described in CLAUDE.md, not by creating a folder.
      */
     private static final Set<String> ROLES = Set.of("command", "listener", "storage");
+
+    /**
+     * Names that say what kind of code a package holds, not which part of the domain: a feature's
+     * other packages are its concepts, named after what they are about ({@code course}, {@code race}).
+     */
+    private static final Set<String> NOT_CONCEPTS = Set.of(
+            "api", "base", "commands", "common", "config", "configuration", "constants", "core", "dao", "data",
+            "database", "db", "domain", "dto", "enums", "exceptions", "handler", "handlers", "helper", "helpers",
+            "impl", "interfaces", "internal", "listeners", "logic", "manager", "managers", "misc", "model",
+            "models", "other", "persistence", "records", "repositories", "repository", "service", "services",
+            "shared", "sql", "types", "util", "utilities", "utility", "utils");
+
+    /** The most classes a feature's own package holds: past it, a part of the feature becomes a concept. */
+    private static final int FEATURE_PACKAGE_LIMIT = 10;
+
+    /** The most classes a concept holds: past it, the concept is two. */
+    private static final int CONCEPT_LIMIT = 15;
+
+    /** A concept's name: one lowercase word, as a part of the domain is named. */
+    private static final Pattern CONCEPT_NAME = Pattern.compile("[a-z]+");
 
     /** What a feature's entry point is called after, in each group: {@code ProfileModule}, {@code ZMenuHook}. */
     private static final Map<String, String> ENTRY_SUFFIX = Map.of("modules", "Module", "hooks", "Hook");
@@ -149,21 +170,193 @@ class ArchitectureTest {
     }
 
     /**
-     * A feature's packages are its own and one per role, with nothing below a role, so that every
-     * feature reads the same way.
+     * Below a feature's own package come its roles and its concepts, one level deep: a concept is
+     * named after a part of the domain, never after a kind of code, so that every feature reads
+     * the same way however it grows.
      */
     @Test
-    void aFeatureHasNoPackageButItsRoles() {
-        Set<String> unknown = new TreeSet<>();
-        for (JavaClass type : plugin) {
-            String[] parts = type.getPackageName().split("\\.", -1);
-            int depth = BASE.split("\\.", -1).length;
-            boolean belowTheFeature = parts.length > depth + 2 && GROUPS.contains(parts[depth]);
-            if (belowTheFeature && (!ROLES.contains(parts[depth + 2]) || parts.length > depth + 3)) {
-                unknown.add(type.getPackageName());
+    void aFeaturesPackagesAreItsRolesAndItsConcepts() {
+        Set<String> wrong = new TreeSet<>();
+        for (String name : featurePackages().keySet()) {
+            String[] parts = name.split("\\.", -1);
+            if (parts.length == 2) {
+                continue; // the feature's own package
+            }
+            String below = parts[2];
+            if (parts.length > 3) {
+                wrong.add(name + ": nothing goes below a role or a concept");
+            } else if (!ROLES.contains(below) && (NOT_CONCEPTS.contains(below) || !CONCEPT_NAME.matcher(below).matches())) {
+                wrong.add(name + ": a concept is one lowercase word for a part of the domain, not " + new TreeSet<>(NOT_CONCEPTS));
             }
         }
-        assertEquals(Set.of(), unknown, "A feature's subpackages are " + ROLES + ", with nothing below them: the rest stays in its own package");
+        assertEquals(Set.of(), wrong, "See \"Laying out a feature\" in CLAUDE.md");
+    }
+
+    /**
+     * A package that keeps growing is a heap: the feature's own past {@value #FEATURE_PACKAGE_LIMIT}
+     * classes needs a concept, and a concept past {@value #CONCEPT_LIMIT} is two. Roles hold one
+     * class per subcommand, listener or repository, and are not limited.
+     */
+    @Test
+    void aFeatureKeepsEachOfItsPackagesSmall() {
+        Set<String> crowded = new TreeSet<>();
+        featurePackages().forEach((name, classes) -> {
+            String[] parts = name.split("\\.", -1);
+            if (parts.length > 2 && ROLES.contains(parts[2])) {
+                return;
+            }
+            int limit = parts.length == 2 ? FEATURE_PACKAGE_LIMIT : CONCEPT_LIMIT;
+            if (classes.size() > limit) {
+                crowded.add(name + " holds " + classes.size() + " classes, " + limit + " at most");
+            }
+        });
+        assertEquals(Set.of(), crowded, "Group a part of the feature into a concept, see CLAUDE.md");
+    }
+
+    /**
+     * The concepts of a feature are layered: when {@code race} uses {@code course}, {@code course}
+     * does not use {@code race}, directly or through another concept. The feature's own package and
+     * its roles may use any of them. Read from the bytecode and, for a constant javac copies into
+     * the class that uses it, from the imports.
+     */
+    @Test
+    void aFeaturesConceptsNeverDependOnEachOtherInACircle() throws IOException {
+        Map<String, Set<String>> uses = new TreeMap<>();
+        for (JavaClass type : plugin) {
+            String from = conceptOf(type);
+            if (from == null) {
+                continue;
+            }
+            uses.computeIfAbsent(from, f -> new TreeSet<>());
+            type.getDirectDependenciesFromSelf().forEach(dependency -> {
+                String to = conceptOf(dependency.getTargetClass());
+                if (to != null && !to.equals(from) && featureOf(to).equals(featureOf(from))) {
+                    uses.get(from).add(to);
+                }
+            });
+        }
+        try (Stream<Path> files = Files.walk(MAIN)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                String from = conceptOfFolder(MAIN.relativize(file).getParent());
+                if (from == null) {
+                    continue;
+                }
+                for (String line : Files.readAllLines(file)) {
+                    Matcher imported = IMPORT.matcher(line);
+                    if (imported.matches()) {
+                        String to = conceptOfImport(imported.group(1));
+                        if (to != null && !to.equals(from) && featureOf(to).equals(featureOf(from))) {
+                            uses.computeIfAbsent(from, f -> new TreeSet<>()).add(to);
+                        }
+                    }
+                }
+            }
+        }
+        assertEquals(List.of(), circles(uses), "Concepts of a feature that use each other in a circle are one concept, or need a third");
+    }
+
+    /** Each circle of the graph, once, from its smallest concept: {@code a -> b -> a}. */
+    static List<String> circles(Map<String, Set<String>> uses) {
+        List<String> circles = new ArrayList<>();
+        for (String start : new TreeSet<>(uses.keySet())) {
+            List<String> path = circleFrom(start, start, uses, new ArrayList<>(List.of(start)), new HashSet<>());
+            if (path != null && start.equals(path.stream().sorted().findFirst().orElseThrow())) {
+                circles.add(String.join(" -> ", path));
+            }
+        }
+        return circles;
+    }
+
+    @Test
+    void circlesAreFoundOnceEachAndOnlyWhenThereAreSome() {
+        assertEquals(List.of(), circles(Map.of("a", Set.of("b"), "b", Set.of("c"), "c", Set.of())));
+        assertEquals(List.of("a -> b -> a"), circles(Map.of("a", Set.of("b"), "b", Set.of("a"))));
+        assertEquals(List.of("a -> b -> c -> a"), circles(Map.of("a", Set.of("b"), "b", Set.of("c"), "c", Set.of("a"))));
+        assertEquals(
+                List.of("a -> b -> a", "x -> y -> x"),
+                circles(Map.of("a", Set.of("b"), "b", Set.of("a"), "x", Set.of("y"), "y", Set.of("x"), "z", Set.of("x"))));
+    }
+
+    /** The concept of a folder of the plugin ({@code modules/elytra/course}), or null. */
+    private static @Nullable String conceptOfFolder(@Nullable Path folder) {
+        if (folder == null || folder.getNameCount() != 3 || !GROUPS.contains(folder.getName(0).toString())) {
+            return null;
+        }
+        String role = folder.getName(2).toString();
+        return ROLES.contains(role) ? null : folder.getName(0) + "." + folder.getName(1) + "." + role;
+    }
+
+    /** The concept an imported name lies in ({@code modules.elytra.course.Course}), or null. */
+    private static @Nullable String conceptOfImport(String name) {
+        String[] parts = name.split("\\.", -1);
+        boolean inAConcept = parts.length > 3 && GROUPS.contains(parts[0]) && Character.isLowerCase(parts[2].charAt(0))
+                && !ROLES.contains(parts[2]);
+        return inAConcept ? parts[0] + "." + parts[1] + "." + parts[2] : null;
+    }
+
+    /** A path back to {@code start} through the concepts {@code at} uses, or null. */
+    private static @Nullable List<String> circleFrom(
+            String start, String at, Map<String, Set<String>> uses, List<String> path, Set<String> seen) {
+        for (String next : uses.getOrDefault(at, Set.of())) {
+            if (next.equals(start)) {
+                List<String> circle = new ArrayList<>(path);
+                circle.add(start);
+                return circle;
+            }
+            if (seen.add(next)) {
+                path.add(next);
+                List<String> found = circleFrom(start, next, uses, path, seen);
+                if (found != null) {
+                    return found;
+                }
+                path.removeLast();
+            }
+        }
+        return null;
+    }
+
+    /** The concept a class belongs to ({@code modules.elytra.course}), or null for a role, a feature's own package or the rest. */
+    private static @Nullable String conceptOf(JavaClass type) {
+        String name = relative(type.getPackageName());
+        if (name == null) {
+            return null;
+        }
+        String[] parts = name.split("\\.", -1);
+        return parts.length == 3 && GROUPS.contains(parts[0]) && !ROLES.contains(parts[2]) ? name : null;
+    }
+
+    /** {@code modules.elytra} for {@code modules.elytra.course}. */
+    private static String featureOf(String concept) {
+        return concept.substring(0, concept.lastIndexOf('.'));
+    }
+
+    /** A package of the plugin without the base package before it, or null when it is not one. */
+    private static @Nullable String relative(String packageName) {
+        return packageName.startsWith(BASE + ".") ? packageName.substring(BASE.length() + 1) : null;
+    }
+
+    /**
+     * Every package of every feature, from its own ({@code modules.elytra}) to its roles and
+     * concepts ({@code modules.elytra.course}), with the classes written in it: nested classes and
+     * {@code package-info} left out.
+     */
+    private static Map<String, List<String>> featurePackages() {
+        Map<String, List<String>> packages = new TreeMap<>();
+        for (JavaClass type : plugin) {
+            String name = relative(type.getPackageName());
+            if (name == null) {
+                continue;
+            }
+            String[] parts = name.split("\\.", -1);
+            if (parts.length < 2 || !GROUPS.contains(parts[0])) {
+                continue;
+            }
+            List<String> classes = packages.computeIfAbsent(name, n -> new ArrayList<>());
+            if (type.isTopLevelClass() && !type.getSimpleName().equals("package-info")) {
+                classes.add(type.getSimpleName());
+            }
+        }
+        return packages;
     }
 
     /**

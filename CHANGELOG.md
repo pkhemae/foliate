@@ -14,13 +14,14 @@ All notable changes to this project are listed here. The format follows
 - MiniMessage messages in one `messages.yml`, in English, which the administrator edits to translate them.
 - `/foliate` command with `info`, `profile`, `reload` and `menu`, one class per subcommand; a module may also give what the command does typed alone (`SubcommandProvider#bareCommand`). A subcommand typed without all its arguments answers with its usage (`command.usage`), read from its tree.
 - `PlayerTarget`, for a subcommand about yourself or another player (`/foliate profile [player]`): the target, the `others` permission checked when the command runs, suggestions limited to the players the sender can see, and the refusals. `OnlinePlayers`, the argument that suggests and finds the players online the sender can see. `PlayerTarget` can be given the name of its argument, for a plugin in another language.
+- `RefusedException`, for the domain to refuse what cannot be done with the message that says why; `MessageKeysTest` checks its keys.
 - Optional PlaceholderAPI and zMenu integrations.
 - Per-player scoreboard.
 - SQL storage (SQLite, MySQL, MariaDB) with schema migrations, and per-player profiles: read ahead of other players' saves at login, saved behind in order, retried while the database is unreachable, and flushed on shutdown; `updateCached` for a value that changes too often to be saved each time.
 - Unit tests and a Folia smoke test run by CI on two region threads, with two distant regions busy at the same time (the server test lives in its own source set and jar, never in the plugin jar), CI jobs that join the test server with a real Minecraft client (twice as the same player, once typing a command), and profile storage tests on MySQL and MariaDB.
 - `renameTemplate` task, GitHub release workflow (each jar published with its SHA-256 checksum), Renovate configuration.
 - The notices of the bundled libraries, in the plugin jar's `META-INF/THIRD-PARTY-NOTICES`.
-- Static checks: Error Prone and NullAway at compile time, and the layout of the code checked with ArchUnit.
+- Static checks: Error Prone and NullAway at compile time, and the layout of the code checked with ArchUnit: each feature in roles (`command`, `listener`, `storage`) and concepts named after its domain, one level deep, with no package over 10 classes (15 for a concept; roles have no limit) and no circle between concepts.
 - Upgrade tests: the database each version leaves is frozen as a SQL dump under `src/test/resources/upgrade/`, and the build checks that the current version starts on it and reads its data back: on SQLite, and on MySQL and MariaDB in CI.
 
 ### Upgrading from a development build

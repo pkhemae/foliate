@@ -2,6 +2,7 @@ package dev.foliate.core.message;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -23,13 +24,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.opentest4j.AssertionFailedError;
 
 /**
  * Every message the code sends by a literal key is written in messages.yml. A key that is not
  * would show as the key itself, and only to whoever happens to trigger it.
  *
  * <p>Read from the sources: the calls of {@link MessageService} whose key is a string literal,
- * such as {@code messages.send(player, "zmenu.unknown", ...)}, and the sections given to a
+ * such as {@code messages.send(player, "zmenu.unknown", ...)}, the keys a {@link RefusedException}
+ * is made with, and the sections given to a
  * {@link PlayerTarget}, which reads its refusals under them. A key held in a variable cannot be
  * checked here; a section must therefore be written inline, and anything else fails.
  */
@@ -52,6 +55,9 @@ class MessageKeysTest {
      * the audience methods of the same name, which take no text.
      */
     private static final Pattern CALL = Pattern.compile("\\.\\s*(\\w+)\\s*\\(");
+
+    /** A {@link RefusedException}, whose first argument is the key of the message that says why. */
+    private static final Pattern REFUSAL = Pattern.compile("new\\s+RefusedException\\s*\\(");
 
     /** A {@link PlayerTarget}, whose fourth argument is the section of its messages. */
     private static final Pattern PLAYER_TARGET = Pattern.compile("new\\s+PlayerTarget\\s*\\(");
@@ -122,6 +128,9 @@ class MessageKeysTest {
         try (Stream<Path> files = Files.walk(SOURCES)) {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
                 String source = read(file);
+                for (String key : refusalKeys(source, SOURCES.relativize(file).toString())) {
+                    used.putIfAbsent(key, SOURCES.relativize(file).toString());
+                }
                 Matcher call = CALL.matcher(source);
                 while (call.find()) {
                     List<Integer> positions = KEY_ARGUMENTS.get(call.group(1));
@@ -141,6 +150,36 @@ class MessageKeysTest {
             }
         }
         return used;
+    }
+
+    /**
+     * The keys {@code new RefusedException(...)} is made with in a source. A key held in a variable
+     * would escape the check, so it fails: the key is written inline.
+     */
+    static List<String> refusalKeys(String source, String file) {
+        List<String> keys = new ArrayList<>();
+        Matcher refusal = REFUSAL.matcher(source);
+        while (refusal.find()) {
+            String key = arguments(source, refusal.end()).getFirst();
+            Matcher literal = LITERAL.matcher(key);
+            if (!literal.matches()) {
+                fail(file + ": new RefusedException(...) is given '" + key
+                        + "'. Write the key of its message inline, as a string literal, so that it can be checked.");
+            }
+            keys.add(literal.group(1));
+        }
+        return keys;
+    }
+
+    @Test
+    void refusalsAreReadWithTheirKeyAndAKeyInAVariableFails() {
+        String source = """
+                throw new RefusedException("race.full", Placeholder.unparsed("n", "3"));
+                throw new  RefusedException ( "race.closed" );
+                """;
+
+        assertEquals(List.of("race.full", "race.closed"), refusalKeys(source, "Race.java"));
+        assertThrows(AssertionFailedError.class, () -> refusalKeys("throw new RefusedException(FULL);", "Race.java"));
     }
 
     /**
