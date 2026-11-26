@@ -57,40 +57,89 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
 
 ## Laying out a feature
 
-A feature is a module (`modules/<feature>`) or a hook (`hooks/<plugin>`). Every feature reads the
-same way, whatever its size:
+A feature is a module (`modules/<feature>`) or a hook (`hooks/<plugin>`). Every feature is laid out
+the same way, and grows the same way: by the parts of its domain, as well-kept plugins such as
+zMenu are, never by kinds of code.
 
 ```
-modules/fly/
-├── FlyModule.java      entry point: builds the feature, follows enable/reload/disable, offers its
-│                       subcommands, lists its MIGRATIONS. Wiring only, no logic
-├── FlySettings.java    its section of config.yml, when it has one
-├── FlySessions.java    the domain: what the feature holds and does (state, rules, records)
-├── command/            FlyCommand (the command typed alone), SpeedCommand: one subcommand each
-├── listener/           FlyListener: turns an event into a call on the domain, nothing more
-└── storage/            FlyRepository, and what only the SQL needs
+modules/elytra/
+├── ElytraModule.java        entry point: builds the feature, follows enable/reload/disable,
+│                            offers its subcommands, lists its MIGRATIONS. Wiring only, no logic
+├── ElytraSettings.java      its section of config.yml, when it has one
+├── ElytraPlaceholders.java  its placeholders, when it has some
+├── ElytraGame.java          what the whole feature shares: its main state, values, exceptions
+├── command/                 roles: one subcommand per class (StartCommand, JoinCommand)
+├── listener/                       one listener per topic (RaceListener, EditorListener)
+├── storage/                        the repositories, and what only the SQL needs
+├── course/                  concepts: one part of the domain, its values and its logic together
+│                            (Course, Ring, RingBlocks, Workshop)
+└── editor/                  (Editors, Tool)
 ```
 
-- A feature has no other package than `command`, `listener` and `storage`, each made when it gets a
-  class. The rest (domain, records, settings, exceptions) stays in the feature's own package; a
-  feature too large for one package is two features, talking through `contracts`.
-- Names: the package is the feature's name, one lowercase word (`fly`, `profile`), which `name()`
-  also returns. The entry point is `<Feature>Module`, or `<Plugin>Hook` for a hook; then
-  `<Feature>Settings`, `<Feature>Repository`, `<Reason>Exception`. A subcommand is `<Word>Command`
-  after the word typed after the plugin's command (`/foliate speed` → `SpeedCommand`), and what the
-  command does typed alone is `<Feature>Command`. Those words, and with them the `command.<word>.`
-  messages and the `<plugin>.command.<word>` nodes, are shared by every feature: pick them so.
-  A listener is `<Topic>Listener`. A domain class is a noun for what it holds (`FlySessions`,
-  `FlyLedger`), never a `Manager`, `Utils` or `Helper`.
-- A helper that knows nothing of the feature, such as finding a player by name or running work on
-  a player's thread, belongs in `core`: written once, for every feature.
-- What lies below a feature's package is public so that its own package can reach it, but only the
-  feature uses it: outside, only the feature's own package is known, and nothing but that package
-  depends on its commands and listeners. `ArchitectureTest` checks the subpackages, these
-  dependencies, and the names and places of entry points, commands and listeners.
-- Resources follow the feature's name: `migrations/<feature>/NNN_<what>.sql`; in `messages.yml`
-  its messages under `<feature>.` and those of its subcommands under `command.<word>.`; its section
-  `<feature>:` in `config.yml`; permission nodes `<plugin>.command.<word>` (`.others` to act on
-  another player) and `<plugin>.<feature>.<what>` for the rest.
-- Tests mirror the package of the class they test. A feature's check on a real server is
+- **Roles** are `command`, `listener` and `storage`, and only those. Every subcommand of the
+  feature is in `command`, every listener in `listener`, every repository in `storage`, whichever
+  concept it serves. A listener turns an event into a call on the domain, nothing more.
+- **Concepts** are the other subpackages. One is made when the feature's own package would pass
+  10 classes, or as soon as a few classes clearly make one part of the domain: the courses of a
+  race, its edit mode, the round of a game. Its name is one lowercase noun of the domain, singular:
+  `course`, `race`, `editor`, `round`, `session`, `button`. Never a kind of code: no `util`,
+  `helper`, `manager`, `model`, `data`, `service`, `impl`, `common`, `shared`, `misc`, `api`,
+  `base`. A value and the code that works on it sit side by side, not records in one package and
+  their logic in another.
+- **One level.** Nothing goes below a role or a concept. A concept past 15 classes is two concepts;
+  a feature that needs a deeper tree is two features, talking through `contracts`.
+- **Concepts are layered.** When `race` uses `course`, `course` does not use `race`, directly or
+  through a third. The feature's own package and its roles may use any concept, and be used by them.
+- **Names:**
+  - The package is the feature's name, one lowercase word (`fly`, `profile`), which `name()`
+    also returns.
+  - The entry point is `<Feature>Module`, or `<Plugin>Hook` for a hook. Then come
+    `<Feature>Settings`, `<Feature>Placeholders`, `<Feature>Repository` and `<Reason>Exception`.
+  - A subcommand is `<Word>Command`, after the word typed after the plugin's command
+    (`/foliate speed` → `SpeedCommand`). What the command does typed alone is `<Feature>Command`.
+    Those words, and with them the `command.<word>.` messages and the `<plugin>.command.<word>`
+    nodes, are shared by every feature: pick them so.
+  - A listener is `<Topic>Listener`.
+  - A domain class is a noun for what it holds (`Course`, `Racer`, `Workshop`), never a `Manager`,
+    `Utils` or `Helper`. The plural names the collection of a value (`Courses`, `Records`).
+- **What two features share:** if it knows nothing of either, it belongs in `core`, written once for
+  every feature: finding a player by name, running work on a player's thread, refusing with a
+  message. If one feature offers it to another, it goes in `contracts`. A class is never copied
+  from one feature to another.
+- **Visibility.** What lies below a feature's package is public so that its own package can reach
+  it, but only the feature uses it. From outside, only the feature's own package is known, and
+  nothing but that package depends on its commands and listeners.
+- **Resources follow the feature's name:**
+  - `migrations/<feature>/NNN_<what>.sql`;
+  - in `messages.yml`, its messages under `<feature>.` and those of its subcommands under
+    `command.<word>.`;
+  - its section `<feature>:` in `config.yml`;
+  - permission nodes `<plugin>.command.<word>` (`.others` to act on another player), and
+    `<plugin>.<feature>.<what>` for the rest.
+- **Tests** mirror the package of the class they test. A feature's check on a real server is
   `<Feature>Check`, in the same package of the `serverTest` source set.
+- **`ArchitectureTest` checks all of this:**
+  - the roles, and where commands and listeners live and how they are named;
+  - the names of concepts, the single level and the sizes;
+  - the circles between concepts;
+  - the entry points, and who depends on what.
+
+## Writing a feature
+
+- **One job per class**, which the first sentence of its Javadoc says. Split a class along its jobs
+  when it passes about 400 lines, or when that sentence needs two "and"s.
+- **Values are records, immutable.** A change makes a new value. State that several threads read is
+  an immutable value swapped atomically, or a concurrent collection, never a mutable field.
+- **Refusals.** The domain refuses what cannot be done with `core.message.RefusedException` (a
+  message key, written inline, and its arguments). The command that asked catches it and tells
+  the sender. Keep the rule and its reason together, and never let a command check a rule that the
+  domain also checks.
+- **Settings.** There is one class per section of `config.yml`, with nested classes for its
+  sub-sections. It is checked when loaded (`InvalidSettingException`) and read through the
+  supplier at each use, so that a reload takes effect. Something that must not change while it
+  runs (a game's rules) is read once when it starts, into a value of its own.
+- **Files the feature owns** sit under `<feature>/` in the data folder and are read and written off
+  the tick threads. Data several servers may share goes in the database.
+- **A family of similar features** (the events of an event plugin) shares its skeleton through
+  `core` when that skeleton knows nothing of any one of them. Each feature stays complete on its
+  own.
