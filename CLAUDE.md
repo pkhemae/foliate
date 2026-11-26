@@ -51,8 +51,9 @@ cannot tell you. The developer guide is the GitHub wiki (a separate git reposito
 modules/<feature>/          (or hooks/<plugin>/)
 ├── <Feature>Module.java    the entry point (<Plugin>Hook for a hook), alone here with its nested
 │                           types: builds the feature, follows enable/reload/disable, offers its
-│                           subcommands through SubcommandProvider. Wiring, no logic
-├── command/                <Word>Command, one class per subcommand
+│                           subcommands through SubcommandProvider, lists its MIGRATIONS. Wiring,
+│                           no logic
+├── command/                <Word>Command, one class per subcommand, and what they share
 ├── listener/               <Topic>Listener: turns an event into a call on the domain, nothing more
 ├── placeholder/            <Feature>Placeholders
 ├── config/                 <Feature>Settings, its section of config.yml
@@ -88,8 +89,8 @@ modules/<feature>/          (or hooks/<plugin>/)
   - its permission nodes: `<plugin>.command.<word>` (`.others` for another player) and
     `<plugin>.<feature>.<what>`.
 
-  A node is a `PERMISSION` constant next to the subcommand that checks it, declared in
-  `build.gradle.kts`. Subcommand words, with their messages and nodes, are shared by every
+  A node is a `PERMISSION` constant next to the class that checks it (a subcommand, most often),
+  declared in `build.gradle.kts`. Subcommand words, with their messages and nodes, are shared by every
   feature: pick them so.
 - **Tests** mirror the package of the class they test. A feature's check on a real server is
   `<Feature>Check`, in the feature's own package of the `serverTest` source set, so that it reaches

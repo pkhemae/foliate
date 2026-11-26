@@ -63,9 +63,10 @@ class ArchitectureTest {
     private static final Set<String> GROUPS = Set.of("modules", "hooks");
 
     /**
-     * The roles of a feature: what the server and the database call, each in a package of its own
-     * whichever part of the feature it serves. A new role is added here on purpose, and to the
-     * layout described in CLAUDE.md, not by creating a folder.
+     * The roles of a feature, each in a package of its own whichever part of the feature it serves:
+     * what the server calls (commands, listeners, placeholders), what the configuration is read
+     * into, and what talks to the database. A new role is added here on purpose, and to the layout
+     * described in CLAUDE.md, not by creating a folder.
      */
     private static final Set<String> ROLES = Set.of("command", "config", "listener", "placeholder", "storage");
 
@@ -172,7 +173,7 @@ class ArchitectureTest {
                     .should().dependOnClassesThat(JavaClass.Predicates.resideInAPackage(BASE + "." + group + ".*.*..")
                             .and(DescribedPredicate.not(JavaClass.Predicates.resideInAPackage(BASE + "." + group + ".*.config"))))
                     .allowEmptyShould(true)
-                    .because("a feature is reached through its own package, see the layout in CLAUDE.md")
+                    .because("outside a feature, only its entry point and its settings are known, see CLAUDE.md")
                     .check(plugin);
         }
     }
@@ -388,12 +389,12 @@ class ArchitectureTest {
     }
 
     /**
-     * Commands and listeners are what the server calls: nothing depends on them but the feature's
-     * own package, where the entry point creates them, and others of the same role. The imports
+     * Commands, listeners and placeholders are what the server calls: nothing depends on them but
+     * the feature's entry point, which creates them, and others of the same role. The imports
      * are held to the same rule, see {@link #theImportsFollowTheLayoutToo}.
      */
     @Test
-    void commandsAndListenersAreReachedFromTheFeaturesPackageOnly() {
+    void whatTheServerCallsIsReachedFromTheEntryPointOnly() {
         for (String group : GROUPS) {
             for (String role : CALLED_ROLES) {
                 classes().that().resideInAPackage(BASE + "." + group + ".*." + role)
@@ -408,7 +409,7 @@ class ArchitectureTest {
 
     /** Found by their name and their place, in every feature alike. */
     @Test
-    void commandsAndListenersAreNamedAndPlacedByTheirRole() {
+    void rolesAreNamedAndPlacedByWhatTheyHold() {
         classes().that().implement(Subcommand.class).and().areTopLevelClasses()
                 .should().haveSimpleNameEndingWith("Command")
                 .because("a subcommand is named after what it does: ProfileCommand, ReloadCommand")
