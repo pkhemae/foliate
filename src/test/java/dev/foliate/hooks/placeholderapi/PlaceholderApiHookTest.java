@@ -2,11 +2,7 @@ package dev.foliate.hooks.placeholderapi;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.foliate.FoliatePlugin;
-import dev.foliate.core.placeholder.PlaceholderRegistry;
-import dev.foliate.hooks.placeholderapi.expansion.FoliateExpansion;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -16,56 +12,22 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockbukkit.mockbukkit.MockBukkit;
-import org.slf4j.helpers.NOPLogger;
 
 /**
- * Covers what can run without a PlaceholderAPI server: the expansion's answers and the conversion
- * of values. The tag itself needs PlaceholderAPI running and is checked on a real server.
+ * Covers what can run without a PlaceholderAPI server: the conversion of values. The expansion is
+ * covered by {@code FoliateExpansionTest}. The tag itself needs PlaceholderAPI running and is
+ * checked on a real server.
  */
 class PlaceholderApiHookTest {
-
-    private FoliatePlugin plugin;
 
     @BeforeEach
     void setUp() {
         MockBukkit.mock();
-        plugin = MockBukkit.load(FoliatePlugin.class);
     }
 
     @AfterEach
     void tearDown() {
         MockBukkit.unmock();
-    }
-
-    @Test
-    void expansionAnswersFromTheRegistry() {
-        PlaceholderRegistry registry = new PlaceholderRegistry(NOPLogger.NOP_LOGGER);
-        registry.register("version", player -> "1.0");
-        FoliateExpansion expansion = new FoliateExpansion(plugin.getPluginMeta(), registry);
-
-        assertEquals("1.0", expansion.onRequest(null, "version"));
-        assertNull(expansion.onRequest(null, "unknown"));
-    }
-
-    @Test
-    void failingPlaceholderDoesNotReachPlaceholderApi() {
-        PlaceholderRegistry registry = new PlaceholderRegistry(NOPLogger.NOP_LOGGER);
-        registry.register("broken", player -> {
-            throw new IllegalStateException("boom");
-        });
-        FoliateExpansion expansion = new FoliateExpansion(plugin.getPluginMeta(), registry);
-
-        assertNull(expansion.onRequest(null, "broken"));
-    }
-
-    @Test
-    void expansionIsNamedAfterThePluginAndSurvivesReloads() {
-        FoliateExpansion expansion = new FoliateExpansion(plugin.getPluginMeta(), new PlaceholderRegistry(NOPLogger.NOP_LOGGER));
-
-        assertEquals("foliate", expansion.getIdentifier());
-        assertEquals(plugin.getPluginMeta().getVersion(), expansion.getVersion());
-        assertTrue(!expansion.getAuthor().isBlank());
-        assertTrue(expansion.persist());
     }
 
     @Test
